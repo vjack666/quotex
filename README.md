@@ -46,13 +46,14 @@ main.py                      ← Entrada CLI, configuración de runtime, lanzado
 src/
   consolidation_bot.py       ← Motor central (STRAT-A, B), place_order, GaleWatcher bridge
   entry_scorer.py            ← Scoring de candidatos STRAT-A
+  entry_decision_engine.py   ← Motor NEW en modo observador shadow (sin autoridad live)
   candle_patterns.py         ← Patrones de vela (rechazo, doji, envolvente…)
   strategy_spring_sweep.py   ← Detección STRAT-B
+  htf_scanner.py             ← Librería HTF 15m en background para contexto de tendencia
   martingale_calculator.py   ← Calculadora de martingala con contexto aislado
+  masaniello_engine.py       ← Motor de sizing y ciclo 5/2
   trade_journal.py           ← Registro de operaciones (SQLite trade_journal)
   black_box_recorder.py      ← Caja negra completa (SQLite black_box_strat)
-  hub_strategy_monitor.py    ← Monitores externos (consolas separadas)
-  smc_analysis.py            ← Análisis SMC auxiliar
 mg/
   mg_watcher.py              ← GaleWatcher (hilo dedicado)
 hub/
@@ -63,8 +64,11 @@ data/
   logs/bot/                  ← consolidation_bot-YYYY-MM-DD.log
   hub_runtime_state.json     ← Snapshot en vivo para los monitores A/B/C
 Documentos/                  ← Documentación técnica detallada y roadmap
-aprendizaje/                 ← Scripts de entrenamiento y archivo de sesión
+runtime/                     ← Artefactos runtime y bloqueos de proceso
+  logs/root_archive/         ← Históricos de auditorías manuales movidos desde raíz
+sessions/                    ← Configuración/sesión del sistema
 src/lab/                     ← Análisis offline y scripts de diagnóstico
+  ad_hoc/                    ← Scripts legacy de auditoría puntual (no críticos de runtime)
 ```
 
 ### Detalles críticos de implementación
@@ -108,17 +112,14 @@ QUOTEX_PASSWORD=tupassword
 | `python main.py --once` | Un solo ciclo y salir |
 | `python main.py --real` | Loop en cuenta REAL ⚠️ |
 | `python main.py --hub-readonly` | Solo monitoreo, sin órdenes |
-| `python main.py --no-hub-multi-monitor` | Sin consolas de monitor A/B/C |
+| `python main.py --hub-render fallback` | Fuerza render estable del HUB en terminal Windows |
 
 ## Parámetros CLI principales
 
 ```
 Gestión de capital
   --amount-initial 1.01          Monto mínimo de orden (broker: > $1.00)
-  --amount-martin 2.0            Incremento objetivo por ciclo
   --max-loss-session 0.20        Stop-loss de sesión (fracción del saldo)
-  --cycle-ops 5                  Máximo de operaciones por ciclo
-  --cycle-wins 2                 Objetivo de aciertos por ciclo
   --cycle-profit-pct 0.10        Take-profit por ciclo (fracción)
 
 Filtros operativos

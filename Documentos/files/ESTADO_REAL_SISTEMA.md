@@ -1,7 +1,7 @@
 # ESTADO REAL DEL SISTEMA
 *Fuente única de estado operativo validado contra código y runtime*
 
-Última actualización: 2026-05-12
+Última actualización: 2026-05-22
 
 ---
 
@@ -158,6 +158,17 @@ Estado actual: no hay evidencia suficiente para dictamen estadístico concluyent
 1. Asegurar cobertura de shadow_decision_audit en sesiones controladas.
 2. Ejecutar paquete SQL+scripts por sesión y preservar evidencia.
 3. Cerrar brechas de integridad del dataset antes de cualquier promoción del motor NEW.
+
+---
+
+## 7.1) Limpieza y orden de repositorio (2026-05-22)
+
+- Se mantiene el principio operativo: plan en curso, sin promoción de NEW y sin cambios de autoridad live.
+- Se depuró la raíz del proyecto quitando scripts ad-hoc de diagnóstico puntual y artefactos de logs históricos.
+- Se centralizó material de auditoría manual en carpetas dedicadas para evitar ruido en ejecución diaria.
+- Se sincronizó documentación de arquitectura/CLI con el estado real de `main.py`.
+
+Resultado: menor deuda operativa y menos riesgo de confundir scripts experimentales con runtime productivo.
 
 ---
 

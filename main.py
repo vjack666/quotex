@@ -482,17 +482,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Fallback porcentual del saldo si la fórmula Masaniello no puede evaluarse",
     )
-    p.add_argument(
-        "--amount-martin",
-        type=float,
-        default=2.0,
-        help="Incremento objetivo por ciclo para la calculadora de riesgo",
-    )
     p.add_argument("--max-loss-session", type=float, default=0.20, help="Stop-loss de sesión (fracción)")
 
     # Perfil estilo Excel / Masaniello (ejemplo: 5 operaciones, 2 ITM)
-    p.add_argument("--cycle-ops", type=int, default=5, help="Máximo de operaciones por ciclo")
-    p.add_argument("--cycle-wins", type=int, default=2, help="Objetivo de aciertos por ciclo")
     p.add_argument("--cycle-profit-pct", type=float, default=0.10, help="Take-profit por ciclo (fracción)")
     p.add_argument(
         "--masaniello-excel-mirror",
