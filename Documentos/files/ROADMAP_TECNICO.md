@@ -12,16 +12,17 @@ resultados reales.
 
 No saltarse fases. Cada fase crea la base de la siguiente.
 
-## Estado Operativo Consolidado (2026-05-11)
+## Estado Operativo Consolidado (2026-05-12)
 
 - Fase 1: completada.
 - Fase 2: completada y en operación.
+- Fase 3: completada y en operación.
 - Fase 2.5: implementada de forma parcial.
     - Existe `entry_decision_engine.py`.
     - NEW funciona como observador shadow, no como autoridad live.
     - Persistencia shadow existe, pero la validación estadística sigue no concluyente.
 - Prioridad actual: validación estadística formal e integridad de dataset.
-- Restricción vigente: no tocar lógica live, broker, timing ni arquitectura de ejecución.
+- Restricción vigente: no tocar lógica live, broker ni arquitectura de ejecución.
 
 ---
 
@@ -98,7 +99,10 @@ No saltarse fases. Cada fase crea la base de la siguiente.
 ## FASE 2 — Endurecer Filtros de Entrada
 **Objetivo:** Convertir las condiciones más importantes en vetos binarios.
 Reducir el número de operaciones y mejorar su calidad promedio.
-**Estado:** ✅ Completada (2026-05-11)
+**Estado:** ✅ Completada (2026-05-12)
+
+**Actualización 2026-05-12:**
+- Vetos `spike_1m` y `spike_5m` movidos a validación siempre activa (aplican también en `recovery/martin`, ya no dependen de `enforce_quality`).
 
 ### 2.1 Implementar Bloque de Pre-validación
 **Tarea:** Crear función `_pre_validate_entry(candidate, context)` en `consolidation_bot.py`
@@ -272,6 +276,12 @@ category, asset, pattern_strength, score, payout, mode
 
 ## FASE 3 — Mejorar Timing de Entrada
 **Objetivo:** Usar la VIP Library como capa de maduración antes de ejecutar.
+**Estado:** ✅ Completada (2026-05-12)
+
+**Actualización 2026-05-12:**
+- Gate VIP de maduración activo en `_pre_validate_entry`: rechaza candidatos con `_vip_cycle_count < 2` (etiqueta `vip_maturity`).
+- Gate de ventana de vela 5m activo en `_pre_validate_entry`: solo permite segundos `30..255` (etiqueta `candle_timing`).
+- Ambos gates respetan bypass por `PIPELINE_VALIDATOR` y `_force_execute`.
 
 ### 3.1 Activar VIP Library como Gate Formal
 **Tarea:** En lugar de ejecutar cuando un candidato pasa el score, moverlo a la VIP

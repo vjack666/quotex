@@ -540,6 +540,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pausa entre ciclos de escaneo live (segundos)",
     )
     p.add_argument(
+        "--scan-top-n",
+        type=int,
+        default=40,
+        help="Cantidad máxima de activos por ciclo para scan_all",
+    )
+    p.add_argument(
         "--adaptive-threshold-base",
         type=int,
         default=50,
@@ -647,6 +653,7 @@ def _apply_runtime_config(args: argparse.Namespace) -> None:
     cb.MIN_PAYOUT = int(args.min_payout)
     cb.SCAN_LEAD_SEC = float(args.scan_lead_sec)
     cb.LIVE_SCAN_SLEEP_SEC = max(0.2, float(args.scan_sleep_sec))
+    cb.SCAN_MAX_ASSETS_PER_CYCLE = max(0, int(args.scan_top_n))
     cb.DURATION_SEC = 300
     cb.ADAPTIVE_THRESHOLD_BASE = max(30, min(90, int(args.adaptive_threshold_base)))
     cb.ADAPTIVE_THRESHOLD_LOW = max(30, min(90, int(args.adaptive_threshold_low)))

@@ -1,7 +1,7 @@
 # ESTADO REAL DEL SISTEMA
 *Fuente única de estado operativo validado contra código y runtime*
 
-Última actualización: 2026-05-11
+Última actualización: 2026-05-12
 
 ---
 
@@ -22,6 +22,7 @@ No define arquitectura nueva y no modifica lógica live.
 | Módulo / Área | Documentado | Implementado | Validado runtime | Validado estadísticamente | Estado real |
 |---|---|---|---|---|---|
 | Fase 2 vetos OLD | Sí | Sí (`_pre_validate_entry`) | Sí (rechazos en journal) | Parcial (sin desglose robusto por filtro+resultado) | Completado operativo |
+| Fase 3 timing+maduración VIP | Sí | Sí (`_pre_validate_entry` + `_update_vip_library`) | Sí (gates de `vip_maturity` y `candle_timing`) | Pendiente (sin serie cerrada por filtro) | Completado operativo |
 | Autoridad OLD | Sí | Sí | Sí | No aplica | Autoridad única vigente |
 | Motor NEW (`entry_decision_engine`) | Sí | Sí | Parcial (solo vía shadow) | No | Experimental observador |
 | Shadow context/hash/persist | Sí | Sí | Parcial (tabla existe, cobertura insuficiente) | No | Experimental no validado |
@@ -157,3 +158,54 @@ Estado actual: no hay evidencia suficiente para dictamen estadístico concluyent
 1. Asegurar cobertura de shadow_decision_audit en sesiones controladas.
 2. Ejecutar paquete SQL+scripts por sesión y preservar evidencia.
 3. Cerrar brechas de integridad del dataset antes de cualquier promoción del motor NEW.
+
+---
+
+## 8) Logros verificados (corrida PV real 2026-05-12)
+
+Se registran logros concretos obtenidos en validación transaccional end-to-end usando
+`PIPELINE_VALIDATOR=true`, sin declarar mejora estadística de edge.
+
+### Logro L-01: ciclo completo de ejecución validado en real
+
+Evidencia en `pv_run_fix_20260512_165132.log`:
+
+- `[PV-ORDER-SENT]`
+- `[PV-BUY-CONNECTION-CHECK]` y `[PV-BUY-READY]`
+- `[PV-BUY-RAW-RESULT]` con respuesta broker tipo tuple `(True, {...})`
+- `[PV-ORDER-OPEN]`
+- `[PV-WATCHER-OPEN]` -> `[PV-WATCHER-POLL]` -> `[PV-WATCHER-RESULT]`
+- `[PV-WATCHER-CLOSED]`
+- `[PV-RESULT-WIN]` + `[PV-PIPELINE-COMPLETE]`
+- `[PV-CLEANUP-START]` + `[PV-CLEANUP-END]`
+
+Resultado: validación positiva del flujo completo
+`SCAN -> CANDIDATO -> ORDER OPEN -> RESULT -> CLEANUP`.
+
+### Logro L-02: mitigación del bloqueo en ruta `place_order()`
+
+Se confirmó en runtime la mitigación del cuello previo de `buy()` (conexión cerrada/intermitente)
+mediante endurecimiento de la ruta de orden:
+
+- pre-check de conexión y readiness antes de `buy()`
+- timeout duro local de compra
+- retry controlado (una vez) en errores de conexión/timeouts
+- trazabilidad raw de respuesta broker (`[PV-BUY-RAW-RESULT]`)
+
+Impacto observado: la orden abrió y cerró correctamente en la corrida PV validada.
+
+### Logro L-03: cleanup operativo post-resolución con estado explícito
+
+Evidencia de cleanup posterior a resultado con estado final explícito en log:
+
+- `active_trades=0`
+- `cooldown_assets=0`
+- `lock=False`
+
+Esto confirma cierre operativo del ciclo validado sin operación activa residual.
+
+### Alcance y límites
+
+- Este logro valida completitud operativa del pipeline transaccional en modo PV.
+- No sustituye la validación estadística formal NEW vs OLD ni la evaluación de edge.
+- El objetivo de esta evidencia es resiliencia/observabilidad de ejecución, no rentabilidad.

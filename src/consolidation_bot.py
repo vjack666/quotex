@@ -209,7 +209,9 @@ MIN_CONSOLIDATION_BARS = 12      # mínimo de velas DENTRO del rango
 MAX_RANGE_PCT          = 0.003   # 0.3% — amplitud máxima del rango
 TOUCH_TOLERANCE_PCT    = 0.00035 # 0.035% — tolerancia para "tocar" techo/piso
 MAX_CONSOLIDATION_MIN  = 0       # 0 = sin límite de tiempo para descartar zona
-MIN_PAYOUT             = 84      # payout mínimo base de riesgo
+EXECUTION_PROFILE      = os.environ.get("EXECUTION_PROFILE", "strict").strip().lower()
+FAST_EXECUTION_PROFILE = EXECUTION_PROFILE in {"fast", "fast_0913cc9", "0913cc9"}
+MIN_PAYOUT             = 80 if FAST_EXECUTION_PROFILE else 84
 DURATION_SEC           = 300     # duración fija de cada opción binaria (5 min)
 SCAN_INTERVAL_SEC      = 60      # segundos entre escaneos completos
 CONNECT_RETRIES        = 3       # reintentos de conexión con delay
@@ -256,6 +258,13 @@ REALTIME_PRICE_TIMEOUT_SEC = 3.0
 REALTIME_PRICE_STALE_SEC = 4.0
 REALTIME_PRICE_WARN_EVERY_SEC = 15.0
 FALLBACK_PRICE_TIMEOUT_SEC = 1.2
+BUY_ORDER_TIMEOUT_SEC = float(
+    os.environ.get(
+        "BUY_ORDER_TIMEOUT_SEC",
+        "30.0" if FAST_EXECUTION_PROFILE else "8.0",
+    )
+    or ("30.0" if FAST_EXECUTION_PROFILE else "8.0")
+)
 GALE_BRIDGE_PRICE_TIMEOUT_SEC = 2.2
 GALE_BRIDGE_BALANCE_TIMEOUT_SEC = 1.8
 GALE_BRIDGE_ORDER_TIMEOUT_SEC = 45.0   # >= max interno place_order (reconexión×3 + buy×30s)
@@ -284,6 +293,10 @@ SCAN_CANDLES_BUFFER_MAX = 20   # buffers 1m/precio para pending_reversals
 # Sensor matemático para filtrar entradas con mejor expectativa
 HEALTHCHECK_RECONNECT_RETRIES = 2  # intentos por ciclo si cae websocket
 CF_403_BACKOFF_SEC = 8.0          # espera extra ante challenge/bloqueo 403
+POST_CONNECT_WS_CHECK_RETRIES = 2
+POST_CONNECT_WS_CHECK_SLEEP_SEC = 0.35
+CONNECTION_ASSET_PROBE_TIMEOUT_SEC = 6.0
+CONNECTION_MIN_OPEN_ASSETS = 1
 
 # Filtro de volumen: cuerpo de ruptura debe ser >= este multiplicador
 # del cuerpo promedio de las últimas N velas
@@ -309,6 +322,7 @@ ZONE_MIN_AGE_MIN = ZONE_AGE_REBOUND_MIN
 # Si está activo, las rupturas fuertes validadas (BROKEN_ABOVE/BELOW)
 # se envían aunque no superen el umbral dinámico de score.
 FORCE_EXECUTE_STRONG_BREAKOUT = True
+FORCE_EXECUTE_ANY_CANDIDATE = os.environ.get("FORCE_EXECUTE_ANY_CANDIDATE", "false").strip().lower() in {"1", "true", "yes", "on"}
 GREYLIST_ASSETS = {"USDDZD_otc"}
 PATTERN_PUT_BLACKLIST = {"bearish_engulfing"}
 STRICT_PATTERN_CHECK = True
@@ -317,9 +331,9 @@ PATTERN_TIMING_IMMEDIATE = {"hammer", "shooting_star", "bullish_hammer", "bearis
 PATTERN_TIMING_NEXT_OPEN = {"bullish_engulfing", "bearish_engulfing"}
 PATTERN_TIMING_ANTICIPATORY = {"morning_star_simple", "evening_star_simple"}
 
-ADAPTIVE_THRESHOLD_BASE = 73
-ADAPTIVE_THRESHOLD_LOW = 73
-ADAPTIVE_THRESHOLD_HIGH = 75
+ADAPTIVE_THRESHOLD_BASE = 65 if FAST_EXECUTION_PROFILE else 73
+ADAPTIVE_THRESHOLD_LOW = 62 if FAST_EXECUTION_PROFILE else 73
+ADAPTIVE_THRESHOLD_HIGH = 68 if FAST_EXECUTION_PROFILE else 75
 ADAPTIVE_THRESHOLD_WINDOW_SCANS = 10
 
 ASSET_LOSS_STREAK_LIMIT = 3
@@ -346,6 +360,9 @@ MA_SLOW_PERIOD = 50
 # MA50 requiere 50 velas (250 min) — si el activo no tiene historia suficiente,
 # las lecturas de tendencia y zona serían parciales e imprecisas.
 MIN_CANDLES_FOR_FULL_SCAN = MA_SLOW_PERIOD
+# Cuando un activo devuelve muy pocas velas 5m, se lo enfria por N scans para
+# no desperdiciar ciclos en símbolos sin historial suficiente.
+SHORT_HISTORY_COOLDOWN_SCANS = int(os.environ.get("SHORT_HISTORY_COOLDOWN_SCANS", "12") or 12)
 # Distancia máxima que puede haber caído el precio bajo el piso (breakout_below)
 # o subido sobre el techo (breakout_above) al momento de entrar.
 # Si el precio ya se alejó más, el momentum está agotado y se descarta.
@@ -896,8 +913,10 @@ async def get_open_assets(client: Quotex, min_payout: int = MIN_PAYOUT) -> List[
             payout  = int(i[18]) if len(i) > 18 else 0
         except (IndexError, TypeError, ValueError):
             continue
-        # Escaneo conservador: solo activos con payout estrictamente mayor al mínimo.
-        if sym.lower().endswith("_otc") and is_open and payout > min_payout:
+        # En perfil estricto pedimos payout > mínimo; en perfil fast permitimos >=
+        # para ampliar universo elegible sin tocar el modo seguro por defecto.
+        payout_pass = payout >= min_payout if FAST_EXECUTION_PROFILE else payout > min_payout
+        if sym.lower().endswith("_otc") and is_open and payout_pass:
             result.append((sym, payout))
 
     result.sort(key=lambda x: -x[1])
@@ -1080,7 +1099,7 @@ async def place_order(
             "aunque aparezca como open.", asset,
         )
 
-    BUY_TIMEOUT_SEC = 8.0
+    BUY_TIMEOUT_SEC = BUY_ORDER_TIMEOUT_SEC
     BUY_RETRY_SLEEP_SEC = 1.2
 
     def _reset_ws_mutex_flags() -> None:
@@ -1597,6 +1616,7 @@ class ConsolidationBot:
             self._gale_watcher = None
         self.asset_loss_streaks: dict[str, int] = {}
         self.asset_blacklist_until: dict[str, float] = {}
+        self.short_history_assets: dict[str, int] = {}
         # Estado técnico por activo para filtros adicionales.
         self.order_blocks_by_asset: dict[str, dict[str, list[OrderBlock]]] = {}
         self.ma_state_by_asset: dict[str, MAState] = {}
@@ -2415,6 +2435,13 @@ class ConsolidationBot:
         Publica la ventana al HUB si el candidato queda a <=3 condiciones de entrar.
         """
         try:
+            asset_key = str(getattr(candidate, "asset", "") or "").upper()
+            windows_dict = getattr(self.vip_library, "_windows", {})
+            previous_window = windows_dict.get(asset_key) if isinstance(windows_dict, dict) else None
+            previous_cycles = int(getattr(previous_window, "_vip_cycle_count", 0) or 0)
+            vip_cycle_count = previous_cycles + 1 if previous_cycles > 0 else 1
+            setattr(candidate, "_vip_cycle_count", vip_cycle_count)
+
             htf_scanner = getattr(self, "htf_scanner", None)
             candles_15m: Sequence[Candle] = ()
             if htf_scanner is not None:
@@ -2428,17 +2455,21 @@ class ConsolidationBot:
                 candles_15m=candles_15m,
                 h1_candles=h1_candles,
             )
+            current_window = windows_dict.get(asset_key) if isinstance(windows_dict, dict) else None
+            if current_window is not None:
+                setattr(current_window, "_vip_cycle_count", vip_cycle_count)
             if hasattr(self, "hub"):
                 self.hub.update_vip_windows(self.vip_library.get_windows())
             if window is not None:
                 log.debug(
-                    "[VIP] %s %s score=%.1f missing=%d/%d ready=%s",
+                    "[VIP] %s %s score=%.1f missing=%d/%d ready=%s cycle_count=%d",
                     window.asset,
                     window.direction.upper(),
                     window.score,
                     window.missing_conditions,
                     window.total_conditions,
                     "yes" if window.ready_to_execute else "no",
+                    vip_cycle_count,
                 )
         except Exception:
             pass
@@ -4243,6 +4274,37 @@ class ConsolidationBot:
             if DEBUG_SCAN:
                 log.debug(message)
 
+        scan_diag: dict[str, int] = {}
+
+        def diag_bump(key: str, amount: int = 1) -> None:
+            new_count = scan_diag.get(key, 0) + amount
+            scan_diag[key] = new_count
+            if new_count == 1 or new_count % 10 == 0:
+                log.warning(
+                    "[SCAN-DIAG] scan=%d reason=%s count=%d",
+                    int(self.stats["scans"]),
+                    key,
+                    new_count,
+                )
+
+        def diag_emit(stage: str) -> None:
+            if not scan_diag:
+                log.warning(
+                    "[SCAN-DIAG] stage=%s scan=%d sin descartes registrados",
+                    stage,
+                    int(self.stats["scans"]),
+                )
+                return
+            ordered = sorted(scan_diag.items(), key=lambda item: (-item[1], item[0]))
+            top = ", ".join(f"{key}={value}" for key, value in ordered[:8])
+            log.warning(
+                "[SCAN-DIAG] stage=%s scan=%d assets=%d %s",
+                stage,
+                int(self.stats["scans"]),
+                len(assets),
+                top,
+            )
+
         debug_print("[DEBUG-SCAN] 1. Starting scan_all()")
         if await self.refresh_balance_and_risk():
             debug_print("[DEBUG-SCAN] 2a. Stop-loss triggered in REAL account, returning")
@@ -4296,6 +4358,7 @@ class ConsolidationBot:
 
         if not assets:
             debug_print("[DEBUG-SCAN] 7. No assets available, returning")
+            diag_bump("no_assets")
             if PIPELINE_VALIDATOR:
                 assets = [(sym, 80) for sym in PV_ASSETS]
                 log.warning(
@@ -4509,6 +4572,13 @@ class ConsolidationBot:
             for a in self.failed_assets:
                 self.failed_assets[a] -= 1
 
+            # Decrementar cooldown de activos con historial 5m insuficiente.
+            expired_short_history = [a for a, n in self.short_history_assets.items() if n <= 1]
+            for a in expired_short_history:
+                del self.short_history_assets[a]
+            for a in self.short_history_assets:
+                self.short_history_assets[a] -= 1
+
             debug_print("[DEBUG-SCAN] 21. Starting asset iteration loop for %d assets" % len(assets))
             for idx, (sym, payout) in enumerate(assets, start=1):
                 debug_print("[DEBUG-SCAN] 22. Processing asset %d/%d: %s (payout=%d)" % (idx, len(assets), sym, payout))
@@ -4526,11 +4596,13 @@ class ConsolidationBot:
 
                 if sym in self.trades:
                     debug_print("[DEBUG-SCAN] 23a. %s has open trade, skipping" % sym)
+                    diag_bump("active_trade_skip")
                     continue
 
                 if sym in self.greylist_assets:
                     debug_print("[DEBUG-SCAN] 23b. %s in greylist, skipping" % sym)
                     log.info("⏭ %s: en lista gris — skip", sym)
+                    diag_bump("greylist_skip")
                     self.stats["skipped"] += 1
                     continue
 
@@ -4539,6 +4611,7 @@ class ConsolidationBot:
                     until_ts = self.asset_blacklist_until.get(sym, time.time())
                     remain_min = max(0.0, (until_ts - time.time()) / 60.0)
                     log.warning("⏭ %s: blacklist temporal activa (%.1f min restantes)", sym, remain_min)
+                    diag_bump("asset_blacklist_skip")
                     self.stats["skipped"] += 1
                     continue
 
@@ -4547,6 +4620,14 @@ class ConsolidationBot:
                     debug_print("[DEBUG-SCAN] 25. %s failed recently, skipping" % sym)
                     log.info("⏭ %s skipped — falló en ciclo anterior (%d ciclos restantes)",
                              sym, self.failed_assets[sym])
+                    diag_bump("failed_asset_skip")
+                    continue
+
+                if sym in self.short_history_assets:
+                    debug_print("[DEBUG-SCAN] 25b. %s in short-history cooldown, skipping" % sym)
+                    log.info("⏭ %s skipped — historial 5m insuficiente reciente (%d scans restantes)",
+                             sym, self.short_history_assets[sym])
+                    diag_bump("short_history_cooldown_skip")
                     continue
 
                 debug_print("[DEBUG-SCAN] 26. About to pop candles for %s" % sym)
@@ -4555,6 +4636,8 @@ class ConsolidationBot:
                 # Cachear para el chart ASCII del HUB (últimas 20 velas).
                 if candles:
                     self._last_asset_candles[sym] = candles[-20:]
+                else:
+                    diag_bump("empty_5m")
 
                 # STRAT-B (Spring Sweep): fetch 1m SECUENCIAL para este activo.
                 # Un pequeño sleep antes del request 1m deja que el WebSocket
@@ -4599,8 +4682,10 @@ class ConsolidationBot:
                     debug_print("[DEBUG-SCAN] 34c. After detect_spring_or_upthrust, signal=%s" % strat_b_signal)
                 elif len(candles_1m) == 0:
                     strat_b_timeout += 1
+                    diag_bump("empty_1m")
                 else:
                     strat_b_insufficient += 1
+                    diag_bump("insufficient_1m")
 
                 # ── LEGACY-RJ (Rechazo M1 — 60s) ──────────────────────────────────────────
                 # Se evalúa siempre que LEGACY-RJ esté disponible y haya velas 1m suficientes.
@@ -4978,6 +5063,8 @@ class ConsolidationBot:
                         "⏭ %s: historia insuficiente (%d velas < %d requeridas) — skip",
                         sym, len(candles), MIN_CANDLES_FOR_FULL_SCAN,
                     )
+                    self.short_history_assets[sym] = max(1, SHORT_HISTORY_COOLDOWN_SCANS)
+                    diag_bump("insufficient_5m_history")
                     self.stats["skipped"] += 1
                     continue
                 elif PIPELINE_VALIDATOR and candles and len(candles) < MIN_CANDLES_FOR_FULL_SCAN:
@@ -5001,6 +5088,7 @@ class ConsolidationBot:
 
                 zone = detect_consolidation(candles, max_range_pct=dynamic_max_range)
                 if zone is None:
+                    diag_bump("no_consolidation_zone")
                     self.zones.pop(sym, None)
                     continue
 
@@ -5193,6 +5281,7 @@ class ConsolidationBot:
                         zone.age_minutes,
                         min_zone_age,
                     )
+                    diag_bump("young_zone")
                     self.stats["rejected_young_zone"] += 1
                     self.stats["skipped"] += 1
                     continue
@@ -5231,7 +5320,10 @@ class ConsolidationBot:
                 setattr(
                     candidate,
                     "_force_execute",
-                    bool(FORCE_EXECUTE_STRONG_BREAKOUT and stage == "breakout" and breakout_strength_ok),
+                    bool(
+                        FORCE_EXECUTE_ANY_CANDIDATE
+                        or (FORCE_EXECUTE_STRONG_BREAKOUT and stage == "breakout" and breakout_strength_ok)
+                    ),
                 )
                 self._populate_zone_memory(candidate)
                 score_candidate(candidate)
@@ -5409,6 +5501,7 @@ class ConsolidationBot:
                         direction == "call" and h1_trend == "bearish"
                     )):
                         self.stats["filtered_sensor"] += 1
+                        diag_bump("htf_filter")
                         continue
                     elif PIPELINE_VALIDATOR and H1_CONFIRM_ENABLED:
                         log.warning("[PV] %s: HTF filter bypass (h1_trend=%s dir=%s)", sym, h1_trend, direction)
@@ -5662,6 +5755,7 @@ class ConsolidationBot:
 
         # 3) Log de candidatos
         if not candidates:
+            diag_emit("no_candidates")
             log.info("  Sin señales este ciclo.")
             self._record_scan_acceptances(0)
             self._record_hub_scan_cycle(total_assets_available)
@@ -5719,6 +5813,17 @@ class ConsolidationBot:
 
         # 4) Seleccionar mejores
         selected, rejected = select_best(candidates, threshold=session_threshold)
+        if FORCE_EXECUTE_ANY_CANDIDATE:
+            # Modo temporal de diagnóstico: prioriza generar ejecuciones para validar pipeline end-to-end.
+            selected = list(candidates)
+            rejected = []
+            for c in selected:
+                setattr(c, "_force_execute", True)
+                setattr(c, "_pipeline_stage", "forced_any_candidate")
+            log.warning(
+                "[FORCE-ANY-CANDIDATE] activo: %d candidatos promovidos a ejecución (score/filtros finales relajados)",
+                len(selected),
+            )
         self.stats["audit_select_best"] += len(selected)
         if candidates:
             min_score = min(float(getattr(c, "score", 0.0) or 0.0) for c in candidates)
@@ -5894,6 +5999,8 @@ class ConsolidationBot:
                 self.stats["score_rejected_score"] += 1
 
         if not selected:
+            diag_bump("score_gate_all_rejected")
+            diag_emit("no_selected")
             best = max(candidates, key=lambda x: x.score)
             log.info(
                 "[STRAT-A] ⛔ Ningún candidato supera el umbral %d/100. "
@@ -6067,10 +6174,28 @@ class ConsolidationBot:
         )
         try:
             if await asyncio.wait_for(self.client.check_connect(), timeout=3.0):
+                try:
+                    assets_probe = await asyncio.wait_for(
+                        get_open_assets(self.client, min_payout=0),
+                        timeout=CONNECTION_ASSET_PROBE_TIMEOUT_SEC,
+                    )
+                except Exception:
+                    assets_probe = []
+
+                if len(assets_probe) < CONNECTION_MIN_OPEN_ASSETS:
+                    log.warning(
+                        "[CONN:health] task=%s client=%s check_connect=alive market_probe_assets=%d -> reconnect",
+                        _task_name(),
+                        _client_id(self.client),
+                        len(assets_probe),
+                    )
+                    return await self.reconnect_client(reason="healthcheck:market_probe_empty")
+
                 log.info(
-                    "[CONN:health] task=%s client=%s check_connect=alive",
+                    "[CONN:health] task=%s client=%s check_connect=alive market_probe_assets=%d",
                     _task_name(),
                     _client_id(self.client),
+                    len(assets_probe),
                 )
                 return True
         except Exception:
@@ -6202,6 +6327,36 @@ class ConsolidationBot:
                             HEALTHCHECK_RECONNECT_RETRIES,
                             exc,
                         )
+
+                    if ok:
+                        ws_alive_after_connect = False
+                        for ws_check in range(1, POST_CONNECT_WS_CHECK_RETRIES + 1):
+                            try:
+                                ws_alive_after_connect = bool(
+                                    await asyncio.wait_for(new_client.check_connect(), timeout=3.0)
+                                )
+                            except Exception:
+                                ws_alive_after_connect = False
+                            log.info(
+                                "[CONN:lifecycle] task=%s id(client)=%s state=reconnecting reason=%s reconnect_n=%d attempt=%d/%d phase=post_connect_ws_check ws_attempt=%d/%d ws_alive=%s",
+                                caller_task,
+                                _client_id(new_client),
+                                reason,
+                                reconnect_n,
+                                attempt,
+                                HEALTHCHECK_RECONNECT_RETRIES,
+                                ws_check,
+                                POST_CONNECT_WS_CHECK_RETRIES,
+                                ws_alive_after_connect,
+                            )
+                            if ws_alive_after_connect:
+                                break
+                            if ws_check < POST_CONNECT_WS_CHECK_RETRIES:
+                                await asyncio.sleep(POST_CONNECT_WS_CHECK_SLEEP_SEC)
+
+                        if not ws_alive_after_connect:
+                            ok = False
+                            reason_msg = "connect_ok_but_ws_dead"
 
                     if ok:
                         break
@@ -7523,6 +7678,106 @@ class ConsolidationBot:
             )
             return False
 
+        vip_cycle_count = int(getattr(candidate, "_vip_cycle_count", 0) or 0)
+        if not force_execute and vip_cycle_count < 2:
+            reason = f"REJECTED_VIP_NEW cycle_count={vip_cycle_count} < 2"
+            log.warning(
+                "[VIP_MATURITY_GATE] asset=%s score=%.1f stage=%s force_execute=OFF reason=%s",
+                candidate.asset,
+                float(getattr(candidate, "score", 0.0) or 0.0),
+                stage,
+                reason,
+            )
+            self._journal_phase2_rejection(
+                candidate,
+                filter_name="vip_maturity",
+                reason=reason,
+                context=context,
+            )
+            return False
+
+        secs_in_candle = float(time.time() % 300)
+        if not force_execute and (secs_in_candle < 30.0 or secs_in_candle > 255.0):
+            reason = f"CANDLE_TIMING_GATE secs_in_candle={secs_in_candle:.2f} fuera de ventana [30,255]"
+            log.warning(
+                "[CANDLE_TIMING_GATE] asset=%s stage=%s force_execute=OFF secs_in_candle=%.2f",
+                candidate.asset,
+                stage,
+                secs_in_candle,
+            )
+            self._journal_phase2_rejection(
+                candidate,
+                filter_name="candle_timing",
+                reason=reason,
+                context=context,
+            )
+            return False
+
+        if not candles_1m:
+            if spike_1m_audit_bypass:
+                self.stats["audit_phase2_spike_1m_bypass"] = self.stats.get("audit_phase2_spike_1m_bypass", 0) + 1
+                log.warning(
+                    "[AUDIT-BYPASS] asset=%s gate=spike_1m reason=no_1m_candles force_execute=ON stage=%s profile=%s",
+                    candidate.asset,
+                    stage,
+                    phase2_profile,
+                )
+            else:
+                self._log_phase2_gate(
+                    candidate,
+                    gate_name="spike_1m",
+                    reason="velas 1m no disponibles para validar spike",
+                    context=context,
+                )
+                self._journal_phase2_rejection(
+                    candidate,
+                    filter_name="spike_1m",
+                    reason="velas 1m no disponibles para validar spike",
+                    context=context,
+                )
+                return False
+
+        if candles_1m:
+            spike_1m = detect_spike_anomaly(candles_1m or candidate.candles)
+            if spike_1m.is_anomalous and spike_1m.event is not None:
+                spike_reason = (
+                    f"gap={spike_1m.event.gap_pct*100:.2f}% body_mult={spike_1m.event.body_mult:.2f} "
+                    f"ts={spike_1m.event.ts}"
+                )
+                self._log_phase2_gate(
+                    candidate,
+                    gate_name="spike_1m",
+                    reason=spike_reason,
+                    context=context,
+                )
+                self._journal_phase2_rejection(
+                    candidate,
+                    filter_name="spike_1m",
+                    reason=spike_reason,
+                    context=context,
+                )
+                return False
+
+        spike_5m = detect_spike_anomaly(candles_5m)
+        if spike_5m.is_anomalous and spike_5m.event is not None:
+            spike_reason = (
+                f"gap={spike_5m.event.gap_pct*100:.2f}% body_mult={spike_5m.event.body_mult:.2f} "
+                f"ts={spike_5m.event.ts}"
+            )
+            self._log_phase2_gate(
+                candidate,
+                gate_name="spike_5m",
+                reason=spike_reason,
+                context=context,
+            )
+            self._journal_phase2_rejection(
+                candidate,
+                filter_name="spike_5m",
+                reason=spike_reason,
+                context=context,
+            )
+            return False
+
         if enforce_quality:
             score_threshold = max(int(self.current_score_threshold), int(ADAPTIVE_THRESHOLD_BASE), int(context.get("score_threshold", 0) or 0))
             if float(getattr(candidate, "score", 0.0) or 0.0) < float(score_threshold):
@@ -7536,71 +7791,6 @@ class ConsolidationBot:
                     candidate,
                     filter_name="score",
                     reason=f"score={getattr(candidate, 'score', 0.0):.1f} < umbral {score_threshold}",
-                    context=context,
-                )
-                return False
-
-            if not candles_1m:
-                if spike_1m_audit_bypass:
-                    self.stats["audit_phase2_spike_1m_bypass"] = self.stats.get("audit_phase2_spike_1m_bypass", 0) + 1
-                    log.warning(
-                        "[AUDIT-BYPASS] asset=%s gate=spike_1m reason=no_1m_candles force_execute=ON stage=%s profile=%s",
-                        candidate.asset,
-                        stage,
-                        phase2_profile,
-                    )
-                else:
-                    self._log_phase2_gate(
-                        candidate,
-                        gate_name="spike_1m",
-                        reason="velas 1m no disponibles para validar spike",
-                        context=context,
-                    )
-                    self._journal_phase2_rejection(
-                        candidate,
-                        filter_name="spike_1m",
-                        reason="velas 1m no disponibles para validar spike",
-                        context=context,
-                    )
-                    return False
-
-            if candles_1m:
-                spike_1m = detect_spike_anomaly(candles_1m or candidate.candles)
-                if spike_1m.is_anomalous and spike_1m.event is not None:
-                    spike_reason = (
-                        f"gap={spike_1m.event.gap_pct*100:.2f}% body_mult={spike_1m.event.body_mult:.2f} "
-                        f"ts={spike_1m.event.ts}"
-                    )
-                    self._log_phase2_gate(
-                        candidate,
-                        gate_name="spike_1m",
-                        reason=spike_reason,
-                        context=context,
-                    )
-                    self._journal_phase2_rejection(
-                        candidate,
-                        filter_name="spike_1m",
-                        reason=spike_reason,
-                        context=context,
-                    )
-                    return False
-
-            spike_5m = detect_spike_anomaly(candles_5m)
-            if spike_5m.is_anomalous and spike_5m.event is not None:
-                spike_reason = (
-                    f"gap={spike_5m.event.gap_pct*100:.2f}% body_mult={spike_5m.event.body_mult:.2f} "
-                    f"ts={spike_5m.event.ts}"
-                )
-                self._log_phase2_gate(
-                    candidate,
-                    gate_name="spike_5m",
-                    reason=spike_reason,
-                    context=context,
-                )
-                self._journal_phase2_rejection(
-                    candidate,
-                    filter_name="spike_5m",
-                    reason=spike_reason,
                     context=context,
                 )
                 return False
@@ -8495,16 +8685,17 @@ async def main(
 
             try:
                 runtime_debug("[DEBUG-MAIN] Start of try block, cycles_without_scan=%d", cycles_without_scan)
-                # Validar conexión, pero no frenar el PRIMER ciclo de escaneo.
-                if loop_forever and cycles_without_scan > 0:
-                    runtime_debug("[DEBUG-CONN] Validando conexión (ciclo #%d)...", cycles_without_scan)
-                    log.debug("⏳ Validando conexión (ciclo #%d)...", cycles_without_scan)
-                    connection_ok = await bot.ensure_connection()
-                    if not connection_ok:
-                        runtime_debug("[DEBUG-CONN] Conexión fallida, durmiendo...")
-                        log.warning("⚠ Sin conexión estable, reintentando en 5s...")
-                        await asyncio.sleep(5.0)
-                        continue
+                # Preflight duro: no ejecutar escaneo si el socket no está estable.
+                runtime_debug("[DEBUG-CONN] Validando conexión (ciclo #%d)...", cycles_without_scan)
+                log.debug("⏳ Validando conexión (ciclo #%d)...", cycles_without_scan)
+                connection_ok = await bot.ensure_connection()
+                if not connection_ok:
+                    runtime_debug("[DEBUG-CONN] Conexión fallida, durmiendo...")
+                    if not loop_forever:
+                        raise RuntimeError("Sin conexión estable (preflight fallido en modo --once)")
+                    log.warning("⚠ Sin conexión estable, reintentando en 5s...")
+                    await asyncio.sleep(5.0)
+                    continue
                 
                 runtime_debug("[DEBUG-SCAN] Iniciando scan_all()...")
                 log.debug("🔍 Iniciando scan_all()...")
@@ -8547,6 +8738,21 @@ async def main(
                     log.debug("HUB callback error: %s", exc)
 
             if not loop_forever:
+                if bot.trades:
+                    wait_max_sec = float(os.environ.get("ONCE_WAIT_FOR_TRADES_MAX_SEC", "380") or 380.0)
+                    deadline = time.time() + max(10.0, wait_max_sec)
+                    log.info(
+                        "Modo --once: esperando cierre de %d trade(s) activos hasta %.0fs para preservar outcome/journal.",
+                        len(bot.trades),
+                        max(10.0, wait_max_sec),
+                    )
+                    while bot.trades and time.time() < deadline:
+                        await asyncio.sleep(1.0)
+                    if bot.trades:
+                        log.warning(
+                            "Modo --once: timeout esperando cierre de trades (%d pendiente[s]); se continúa con shutdown.",
+                            len(bot.trades),
+                        )
                 log.info("Ciclo único completado. Agrega --loop para modo 24/7.")
                 break
 

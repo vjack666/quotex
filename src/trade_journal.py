@@ -218,59 +218,67 @@ class Journal:
 
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection
+        self._closed = False
         self._open()
 
     # ── Conexión ──────────────────────────────────────────────────────────────
     def _open(self) -> None:
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_DDL)
+        self._closed = False
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(_DDL)
         self._ensure_schema_upgrades()
-        self._conn.commit()
+        self.conn.commit()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._closed:
+            raise RuntimeError("Journal DB connection is closed")
+        return self._conn
 
     def _ensure_schema_upgrades(self) -> None:
         """Aplica migraciones suaves para bases existentes."""
-        rows = self._conn.execute("PRAGMA table_info(candidates)").fetchall()
+        rows = self.conn.execute("PRAGMA table_info(candidates)").fetchall()
         cols = {r[1] for r in rows}
         if "strategy_json" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN strategy_json TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN strategy_json TEXT")
         if "reversal_pattern" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN reversal_pattern TEXT DEFAULT 'none'")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN reversal_pattern TEXT DEFAULT 'none'")
         if "reversal_strength" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN reversal_strength REAL DEFAULT 0.0")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN reversal_strength REAL DEFAULT 0.0")
         if "entry_time_since_open" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN entry_time_since_open REAL")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN entry_time_since_open REAL")
         if "entry_secs_to_close" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN entry_secs_to_close REAL")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN entry_secs_to_close REAL")
         if "entry_duration_sec" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN entry_duration_sec INTEGER")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN entry_duration_sec INTEGER")
         if "entry_timing_decision" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN entry_timing_decision TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN entry_timing_decision TEXT")
         if "order_ref" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN order_ref INTEGER DEFAULT 0")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN order_ref INTEGER DEFAULT 0")
         if "strategy_origin" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN strategy_origin TEXT DEFAULT 'STRAT-A'")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN strategy_origin TEXT DEFAULT 'STRAT-A'")
         if "ticket_open_price" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_open_price REAL")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_open_price REAL")
         if "ticket_close_price" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_close_price REAL")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_close_price REAL")
         if "ticket_opened_at" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_opened_at TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_opened_at TEXT")
         if "ticket_closed_at" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_closed_at TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_closed_at TEXT")
         if "ticket_duration_sec" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_duration_sec INTEGER")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_duration_sec INTEGER")
         if "ticket_price_diff" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN ticket_price_diff REAL")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN ticket_price_diff REAL")
         if "pre_objectives_json" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_json TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_json TEXT")
         if "pre_objectives_ok" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_ok INTEGER")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_ok INTEGER")
         if "pre_objectives_note" not in cols:
-            self._conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_note TEXT")
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_note TEXT")
         # Migración: tabla expired_zones (bases anteriores sin ella)
-        self._conn.executescript(
+        self.conn.executescript(
             "CREATE TABLE IF NOT EXISTS expired_zones ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "    expired_at TEXT NOT NULL,"
@@ -288,7 +296,7 @@ class Journal:
             "CREATE INDEX IF NOT EXISTS idx_expired_zones_asset  ON expired_zones(asset);"
             "CREATE INDEX IF NOT EXISTS idx_expired_zones_reason ON expired_zones(expiry_reason);"
         )
-        self._conn.executescript(
+        self.conn.executescript(
             "CREATE TABLE IF NOT EXISTS shadow_decision_audit ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "    created_at TEXT NOT NULL,"
@@ -334,20 +342,20 @@ class Journal:
         )
 
     def close(self) -> None:
-        if self._conn:
+        if not self._closed:
             self._conn.close()
-            self._conn = None
+            self._closed = True
 
     # ── Sesión de escaneo ─────────────────────────────────────────────────────
     def start_session(self, dry_run: bool = False) -> int:
         """Crea un registro de sesión y devuelve su id."""
         now = _now()
-        cur = self._conn.execute(
+        cur = self.conn.execute(
             "INSERT INTO scan_sessions (started_at, dry_run) VALUES (?, ?)",
             (now, int(dry_run)),
         )
-        self._conn.commit()
-        return cur.lastrowid
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
 
     def log_entry_timing(
         self,
@@ -358,7 +366,7 @@ class Journal:
         timing_decision: str,
     ) -> None:
         """Actualiza auditoría de timing para un candidato ya registrado."""
-        self._conn.execute(
+        self.conn.execute(
             """UPDATE candidates
                SET entry_time_since_open=?,
                    entry_secs_to_close=?,
@@ -373,17 +381,17 @@ class Journal:
                 int(candidate_id),
             ),
         )
-        self._conn.commit()
+        self.conn.commit()
 
     def end_session(self, session_id: int, total_assets: int,
                     total_candidates: int, total_accepted: int) -> None:
-        self._conn.execute(
+        self.conn.execute(
             """UPDATE scan_sessions
                SET ended_at=?, total_assets=?, total_candidates=?, total_accepted=?
                WHERE id=?""",
             (_now(), total_assets, total_candidates, total_accepted, session_id),
         )
-        self._conn.commit()
+        self.conn.commit()
 
     # ── Registro de candidatos ────────────────────────────────────────────────
     def log_candidate(
@@ -433,7 +441,7 @@ class Journal:
                 "close": c.close,
             })
 
-        cur = self._conn.execute(
+        cur = self.conn.execute(
             """INSERT INTO candidates (
                 scanned_at, asset, direction, payout, amount, stage,
                 score, score_compression, score_bounce, score_trend, score_payout,
@@ -465,8 +473,8 @@ class Journal:
                 json.dumps(strategy_payload, ensure_ascii=False),
             ),
         )
-        self._conn.commit()
-        return cur.lastrowid
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
 
     # ── Actualizar resultado ──────────────────────────────────────────────────
     # ── Registro de zonas expiradas ──────────────────────────────────────────
@@ -488,7 +496,7 @@ class Journal:
 
         expiry_reason: TIME_LIMIT | BROKEN_ABOVE | BROKEN_BELOW
         """
-        cur = self._conn.execute(
+        cur = self.conn.execute(
             """INSERT INTO expired_zones (
                 expired_at, asset, expiry_reason,
                 ceiling, floor, range_pct, bars_inside,
@@ -501,13 +509,13 @@ class Journal:
                 age_min, last_close, break_body, payout,
             ),
         )
-        self._conn.commit()
-        return cur.lastrowid
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
 
     # ── Reporte de zonas expiradas ────────────────────────────────────────────
     def print_expired_zones(self, n: int = 40) -> None:
         """Muestra las últimas N zonas expiradas con diagnóstico."""
-        rows = self._conn.execute(
+        rows = self.conn.execute(
             """SELECT expired_at, asset, expiry_reason,
                       ceiling, floor, range_pct, bars_inside,
                       age_min, last_close, break_body, payout
@@ -548,7 +556,7 @@ class Journal:
             )
 
         # Resumen por razón
-        summary = self._conn.execute(
+        summary = self.conn.execute(
             "SELECT expiry_reason, COUNT(*) AS n "
             "FROM expired_zones GROUP BY expiry_reason ORDER BY n DESC"
         ).fetchall()
@@ -565,13 +573,13 @@ class Journal:
         outcome: "WIN" | "LOSS" | "DRAW" | "EXPIRED"
         profit:  ganancia neta (positivo = ganó, negativo = perdió)
         """
-        self._conn.execute(
+        self.conn.execute(
             """UPDATE candidates
                SET outcome=?, profit=?, closed_at=?
                WHERE order_id=? AND outcome='PENDING'""",
             (outcome, profit, _now(), order_id),
         )
-        self._conn.commit()
+        self.conn.commit()
 
     def log_shadow_decision(
         self,
@@ -605,7 +613,7 @@ class Journal:
         compare_status: str,
         error_text: str = "",
     ) -> int:
-        cur = self._conn.execute(
+        cur = self.conn.execute(
             """INSERT INTO shadow_decision_audit (
                    created_at, candidate_id, asset, direction, strategy_origin, stage,
                    cycle_id, cycle_ops, cycle_wins, cycle_losses,
@@ -655,7 +663,7 @@ class Journal:
                 error_text,
             ),
         )
-        self._conn.commit()
+        self.conn.commit()
         return int(cur.lastrowid or 0)
 
     def update_shadow_outcome_by_candidate(
@@ -681,7 +689,7 @@ class Journal:
 
         updated = 0
         if cid > 0:
-            cur = self._conn.execute(
+            cur = self.conn.execute(
                 """UPDATE shadow_decision_audit
                    SET trade_outcome=?,
                        trade_profit=?,
@@ -694,7 +702,7 @@ class Journal:
             )
             updated = int(cur.rowcount or 0)
             if updated == 0:
-                cur = self._conn.execute(
+                cur = self.conn.execute(
                     """UPDATE shadow_decision_audit
                        SET trade_outcome=?,
                            trade_profit=?,
@@ -707,7 +715,7 @@ class Journal:
                 updated = int(cur.rowcount or 0)
 
         if updated == 0 and (oid or oref > 0):
-            cur = self._conn.execute(
+            cur = self.conn.execute(
                 """UPDATE shadow_decision_audit
                    SET trade_outcome=?,
                        trade_profit=?,
@@ -723,7 +731,7 @@ class Journal:
             )
             updated = int(cur.rowcount or 0)
             if updated == 0:
-                cur = self._conn.execute(
+                cur = self.conn.execute(
                     """UPDATE shadow_decision_audit
                        SET trade_outcome=?,
                            trade_profit=?,
@@ -744,20 +752,20 @@ class Journal:
                 oid or "none",
                 oref,
             )
-        self._conn.commit()
+        self.conn.commit()
 
     def update_outcome_by_id(self, row_id: int, outcome: str, profit: float = 0.0) -> None:
         """
         Igual que update_outcome pero usando la clave primaria (id) de la fila.
         Útil cuando el broker devuelve order_id vacío pero tenemos el id interno.
         """
-        self._conn.execute(
+        self.conn.execute(
             """UPDATE candidates
                SET outcome=?, profit=?, closed_at=?
                WHERE id=? AND outcome='PENDING'""",
             (outcome, profit, _now(), row_id),
         )
-        self._conn.commit()
+        self.conn.commit()
 
     def update_ticket_details(
         self,
@@ -784,7 +792,7 @@ class Journal:
         ok_val = None if pre_objectives_ok is None else int(bool(pre_objectives_ok))
 
         if row_id is not None:
-            self._conn.execute(
+            self.conn.execute(
                 """UPDATE candidates
                    SET order_ref=COALESCE(NULLIF(?, 0), order_ref),
                        strategy_origin=COALESCE(NULLIF(?, ''), strategy_origin),
@@ -814,7 +822,7 @@ class Journal:
                 ),
             )
         else:
-            self._conn.execute(
+            self.conn.execute(
                 """UPDATE candidates
                    SET order_ref=COALESCE(NULLIF(?, 0), order_ref),
                        strategy_origin=COALESCE(NULLIF(?, ''), strategy_origin),
@@ -843,7 +851,7 @@ class Journal:
                     order_id,
                 ),
             )
-        self._conn.commit()
+        self.conn.commit()
 
     def print_ticket_audit(self, ticket_id: str) -> None:
         """Muestra detalle de ticket y comparación pre-ejecución."""
@@ -861,7 +869,7 @@ class Journal:
                 (ticket_id, int(ticket_id) if ticket_id.isdigit() else -1),
             ).fetchone()
 
-        row = _fetch_row(self._conn)
+        row = _fetch_row(self.conn)
         db_used = str(self.db_path)
 
         if not row:
@@ -917,7 +925,7 @@ class Journal:
         print(f"{'═'*65}")
 
         # ── Resumen general ─────────────────────────────────────────────────
-        row = self._conn.execute(
+        row = self.conn.execute(
             """SELECT
                 COUNT(*) AS total,
                 SUM(decision='ACCEPTED') AS accepted,
@@ -953,7 +961,7 @@ class Journal:
 
         # ── Win rate por bucket de score ────────────────────────────────────
         print(f"\n  {'WIN RATE POR BUCKET DE SCORE':─<45}")
-        buckets = self._conn.execute(
+        buckets = self.conn.execute(
             """SELECT
                 CASE
                   WHEN score < 60 THEN '< 60'
@@ -984,7 +992,7 @@ class Journal:
 
         # ── Top activos por win rate ─────────────────────────────────────────
         print(f"\n  {'TOP ACTIVOS (mín. 3 trades)':─<45}")
-        top_assets = self._conn.execute(
+        top_assets = self.conn.execute(
             """SELECT asset,
                 COUNT(*) AS trades,
                 SUM(outcome='WIN') AS wins,
@@ -1014,7 +1022,7 @@ class Journal:
 
         # ── Razones de rechazo más frecuentes ───────────────────────────────
         print(f"\n  {'RAZONES DE RECHAZO':─<45}")
-        reasons = self._conn.execute(
+        reasons = self.conn.execute(
             """SELECT decision, COUNT(*) AS n
                FROM candidates
                WHERE scanned_at >= ? AND decision LIKE 'REJECTED%'
@@ -1028,7 +1036,7 @@ class Journal:
 
         # ── Componente de score que más penaliza ────────────────────────────
         print(f"\n  {'PROMEDIO DE SCORES POR COMPONENTE (todos los candidatos)':─<45}")
-        avgs = self._conn.execute(
+        avgs = self.conn.execute(
             """SELECT
                 ROUND(AVG(score_compression),2) AS compression,
                 ROUND(AVG(score_bounce),2) AS bounce,
@@ -1049,7 +1057,7 @@ class Journal:
     # ── Último N candidatos rechazados con detalle ────────────────────────────
     def print_rejected(self, n: int = 20) -> None:
         """Muestra los últimos N candidatos rechazados con detalle."""
-        rows = self._conn.execute(
+        rows = self.conn.execute(
             """SELECT scanned_at, asset, direction, score, decision, reject_reason
                FROM candidates
                WHERE decision LIKE 'REJECTED%'
@@ -1074,7 +1082,7 @@ class Journal:
         if path is None:
             path = _ROOT / "trade_journal_export.csv"
         since = (datetime.now(tz=BROKER_TZ) - timedelta(days=days)).isoformat()
-        rows = self._conn.execute(
+        rows = self.conn.execute(
             "SELECT * FROM candidates WHERE scanned_at >= ? ORDER BY id",
             (since,),
         ).fetchall()
@@ -1083,7 +1091,7 @@ class Journal:
             return path
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([d[0] for d in self._conn.execute(
+            writer.writerow([d[0] for d in self.conn.execute(
                 "SELECT * FROM candidates LIMIT 0"
             ).description])
             for r in rows:
