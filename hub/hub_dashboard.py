@@ -304,38 +304,9 @@ def _waiting_first_order(state: HubState) -> bool:
 
 def _build_strat_a_table(candidates: List[CandidateData]) -> "Table":
     table_cls = _require_table_class()
-    t = table_cls(show_header=True, header_style="bold cyan", box=None, padding=(0, 1), expand=True)
-    t.add_column("#",      width=2,  justify="right")
-    t.add_column("Activo", width=14, no_wrap=True)
-    t.add_column("Dir",    width=6)
-    t.add_column("Score",  width=6,  justify="right")
-    t.add_column("P%",     width=4,  justify="right")
-    t.add_column("Dist",   width=7,  justify="right")
-    t.add_column("Sup",    width=10, justify="right")
-    t.add_column("Res",    width=10, justify="right")
-    t.add_column("Modo",   width=11, no_wrap=True)
-    t.add_column("Patron", min_width=12)
-
-    if not candidates:
-        t.add_row("[dim]—[/dim]", "[dim]Sin candidatos en este escaneo[/dim]",
-              "", "", "", "", "", "", "", "")
-        return t
-
-    for i, c in enumerate(candidates[:5], 1):
-        s_col = "green" if c.score >= 65 else "yellow" if c.score >= 50 else "red"
-        p_col = "green" if c.payout >= 80 else "yellow" if c.payout >= 70 else "red"
-        t.add_row(
-            str(i),
-            f"[bold]{c.asset}[/bold]",
-            _direction_markup(c.direction),
-            f"[{s_col}]{c.score:.1f}[/{s_col}]",
-            f"[{p_col}]{c.payout}[/{p_col}]",
-            _dist_markup(c.dist_pct),
-            f"[dim]{c.zone_floor:.5f}[/dim]",
-            f"[dim]{c.zone_ceiling:.5f}[/dim]",
-            f"[dim]{_abbrev(c.entry_mode)}[/dim]",
-            f"[dim]{c.pattern[:18]}[/dim]",
-        )
+    t = table_cls.grid(expand=True)
+    t.add_column()
+    t.add_row("[bold cyan]STRAT-A | CONSOLIDACION[/bold cyan]")
     return t
 
 
@@ -491,12 +462,20 @@ def _build_logs_panel(state: HubState) -> "Panel":
     table_cls = _require_table_class()
     text_cls = _require_text_class()
 
+    pinned = [str(x) for x in list(getattr(state, "system_messages", []) or []) if str(x).strip()]
+    lines: List[str] = []
+    if pinned:
+        lines.extend(pinned[:6])
+
     # Antes de la primera orden, mantener panel limpio para no confundir
-    # con errores historicos de sesiones anteriores.
+    # con errores historicos de sesiones anteriores, pero conservar mensajes fijados.
     if _waiting_first_order(state):
-        lines = ["(en espera de primera operacion)"]
+        lines.append("(en espera de primera operacion)")
     else:
-        lines = _live_log_lines()
+        lines.extend(_live_log_lines())
+
+    if not lines:
+        lines = ["(sin eventos recientes)"]
     inner = table_cls.grid(expand=True)
     inner.add_column()
 
@@ -635,14 +614,10 @@ def _build_layout(state: HubState, balance: float) -> "Layout":
     )
 
     a_count = len(state.strat_a_watching)
-    a_inner = table_cls.grid(expand=True)
-    a_inner.add_column()
-    a_inner.add_row(text_cls.from_markup("[dim]Score · Dir · Dist-trigger · Soporte/Resistencia · Modo · Patron[/dim]"))
-    a_inner.add_row(_build_strat_a_table(state.strat_a_watching))
     layout["strat_a"].update(
         panel_cls(
-            a_inner,
-            title=f"[bold cyan]STRAT-A | CONSOLIDACION[/bold cyan]  [dim]({a_count})[/dim]",
+            _build_strat_a_table(state.strat_a_watching),
+            title=f"[bold cyan]STRAT-A | CONSOLIDACION[/bold cyan]",
             border_style="cyan",
             padding=(0, 1),
         )
@@ -804,19 +779,6 @@ class HubDashboard:
         ]
         for _key, label, candidates in strat_defs:
             lines.append(f"{_BOLD}  [{label}]{_RESET}")
-            if not candidates:
-                lines.append(f"  {_DIM}  Sin candidatos en este escaneo{_RESET}")
-            else:
-                for i, c in enumerate(candidates[:5], 1):
-                    dist = f"{c.dist_pct * 100:.2f}%" if c.dist_pct is not None else "  -- "
-                    dir_color = _GREEN if c.direction.lower() == "call" else _RED
-                    score_color = _GREEN if c.score >= 60 else (_YELLOW if c.score >= 45 else _RED)
-                    lines.append(
-                        f"  {i}. {c.asset:<13} {dir_color}{c.direction.upper():<4}{_RESET}"
-                        f"  {score_color}S:{c.score:<5.1f}{_RESET} P:{c.payout}%"
-                        f"  Dist:{dist:<7}"
-                        f"  {c.zone_floor:.5f} ── {c.zone_ceiling:.5f}"
-                    )
             lines.append(sep2)
 
         lines.append(sep)
@@ -900,6 +862,18 @@ class HubDashboard:
                 f"Age:{age:>5.0f}s/{ttl:>4.0f}s  "
                 f"{status_color}{status_label}{_RESET}"
             )
+            bob_phase = str(getattr(state, "htf_bob_phase", "") or "").upper()
+            bob_tf = str(getattr(state, "htf_bob_timeframe", "1m") or "1m")
+            bob_missing = [str(x) for x in list(getattr(state, "htf_bob_missing_labels", []) or []) if str(x).strip()]
+            if bob_phase:
+                if bob_missing:
+                    lines.append(
+                        f"  {_DIM}BoB {bob_tf}: fase={bob_phase} | faltan: {', '.join(bob_missing)}{_RESET}"
+                    )
+                else:
+                    lines.append(
+                        f"  {_DIM}BoB {bob_tf}: fase={bob_phase} | checklist completo{_RESET}"
+                    )
         else:
             lines.append(f"  {_DIM}  Sin cache HTF inicializado aún{_RESET}")
         lines.append(sep2)
@@ -928,6 +902,10 @@ class HubDashboard:
 
         # ── Mini log ─────────────────────────────────────────────────────
         lines.append(f"{_BOLD}  [LOGS]{_RESET}")
+        pinned = [str(x) for x in list(getattr(state, "system_messages", []) or []) if str(x).strip()]
+        if pinned:
+            for ln in pinned[:6]:
+                lines.append(f"  {ln}")
         if _waiting_first_order(state):
             lines.append(f"  {_DIM}  En espera de primera operacion...{_RESET}")
         else:

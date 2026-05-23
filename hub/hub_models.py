@@ -299,7 +299,12 @@ class HubState:
     htf_cache_age_sec: float = 0.0
     htf_cache_ttl_sec: float = 0.0
     htf_last_refresh_ts: float = 0.0
+    htf_bob_phase: str = ""
+    htf_bob_missing_labels: List[str] = field(default_factory=list)
+    htf_bob_timeframe: str = "1m"
+    htf_bob_updated_ts: float = 0.0
     vip_windows: List[VipWindowData] = field(default_factory=list)
+    system_messages: List[str] = field(default_factory=list)
 
 
 __all__ = [

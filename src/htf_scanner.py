@@ -114,6 +114,19 @@ class HTFScanner:
         """
         return self._library.get_assets_if_fresh(max_age_sec=max_age_sec)
 
+    def get_assets_with_freshness(self, max_age_sec: float = 180.0) -> List[Tuple[str, int, float, bool]]:
+        """
+        Devuelve activos de biblioteca con frescura por activo.
+
+        Retorna: [(asset, payout, age_sec, is_fresh), ...]
+        """
+        out: List[Tuple[str, int, float, bool]] = []
+        max_age = max(1.0, float(max_age_sec))
+        for sym, payout in self._library.get_assets():
+            age = self.cache_age_sec(sym)
+            out.append((sym, int(payout), float(age), bool(age <= max_age)))
+        return out
+
     # ── Loop background ────────────────────────────────────────────────────
 
     async def run_forever(self) -> None:

@@ -24,6 +24,16 @@ No saltarse fases. Cada fase crea la base de la siguiente.
 - Prioridad actual: validación estadística formal e integridad de dataset.
 - Restricción vigente: no tocar lógica live, broker ni arquitectura de ejecución.
 
+### Estado de Cierre Administrativo Fase 2 (2026-05-22)
+
+- Estado técnico en código: cerrado.
+- Estado administrativo/documental: en cierre.
+- Evidencia técnica consolidada:
+    - `py_compile` de archivos críticos OK (`consolidation_bot.py`, `entry_scorer.py`, `candle_patterns.py`, `trade_journal.py`).
+    - corrida segura `main.py --hub-readonly --once` con saldo visible en HUB (`$55.87`).
+    - artefactos: `data/exports/phase2_readonly_run_20260522_152043.log` y `data/exports/session_20260522_152044_fae324f4/`.
+- Pendiente único para cierre administrativo total: corrida controlada 2h con evidencia cuantitativa de métricas objetivo de Fase 2.
+
 ---
 
 ## FASE 1 — Eliminar Ruido Técnico

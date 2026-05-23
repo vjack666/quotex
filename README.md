@@ -138,7 +138,7 @@ STRAT-A
 
 - OLD es autoridad única de ejecución.
 - NEW está integrado como observador shadow (sin autoridad live).
-- Existe instrumentación de shadow runtime y pack de observación en `src/lab/`.
+- La instrumentación shadow permanece en runtime, pero los scripts auxiliares de postproceso en `src/lab/` fueron retirados en la limpieza actual.
 - La validación estadística formal NEW vs OLD todavía no es concluyente.
 - Antes de cualquier promoción de NEW, revisar `Documentos/files/ESTADO_REAL_SISTEMA.md`.
 
@@ -146,13 +146,5 @@ STRAT-A
 
 ## Análisis y flujo de aprendizaje
 
-```powershell
-# Parser de métricas runtime shadow
-.venv\Scripts\python.exe src\lab\shadow_log_parser.py --log bot_stdout.txt --json-out data\exports\shadow_runtime_summary.json --csv-out data\exports\shadow_runtime_summary.csv
-
-# Reconciliación de integridad shadow
-.venv\Scripts\python.exe src\lab\shadow_reconcile.py --db data\db\trade_journal-YYYY-MM-DD.db --json-out data\exports\shadow_reconcile_report.json
-
-# Auditoría de overhead runtime
-.venv\Scripts\python.exe src\lab\shadow_overhead_audit.py --parser-json data\exports\shadow_runtime_summary.json --db data\db\trade_journal-YYYY-MM-DD.db --json-out data\exports\shadow_overhead_report.json
-```
+Actualmente el flujo de aprendizaje se basa en logs del runtime y consultas directas al journal.
+Los comandos de postproceso shadow de `src/lab` fueron retirados en esta limpieza.

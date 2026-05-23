@@ -15,12 +15,12 @@ para tomar decisiones informadas sobre qué funciona y qué no.
 ## Estado de Implementación (2026-05-11)
 
 - Existe instrumentación shadow runtime en `consolidation_bot.py`.
-- Existe paquete SQL de integridad y comparación en `src/lab/shadow_runtime_queries.sql`.
-- Existen scripts operativos:
-  - `src/lab/shadow_log_parser.py`
-  - `src/lab/shadow_reconcile.py`
-  - `src/lab/shadow_overhead_audit.py`
 - La validación estadística formal NEW vs OLD sigue pendiente por cobertura insuficiente de `shadow_decision_audit`.
+
+## Estado de Limpieza (2026-05-23)
+
+- Se retiraron del workspace los scripts y SQL de auditoría shadow en `src/lab` como parte de la limpieza de simulaciones/backtest.
+- La operación live no depende de esos scripts; si se requiere auditoría estadística futura, se deberá reintroducir un paquete de análisis dedicado.
 
 ---
 
@@ -212,9 +212,4 @@ ejecuta una operación real.
 ### Script de análisis semanal (planificado):
 
 El script `src/lab/weekly_report.py` está definido como objetivo documental.
-Mientras no exista ese script, la medición operativa se realiza con:
-
-- `src/lab/shadow_runtime_queries.sql` (SQL consolidado)
-- `src/lab/shadow_log_parser.py` (runtime log metrics)
-- `src/lab/shadow_reconcile.py` (integridad/linkage)
-- `src/lab/shadow_overhead_audit.py` (sobrecarga runtime)
+Actualmente no hay paquete local de postproceso shadow en `src/lab` tras la limpieza de simulaciones.

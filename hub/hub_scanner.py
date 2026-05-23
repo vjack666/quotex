@@ -289,6 +289,10 @@ class HubScanner:
         cache_age_sec: float,
         cache_ttl_sec: float,
         refreshed_at_ts: float,
+        bob_phase: str = "",
+        bob_missing_labels: Optional[Sequence[str]] = None,
+        bob_timeframe: str = "1m",
+        bob_updated_ts: float = 0.0,
     ) -> None:
         """Actualiza telemetría del cache HTF (15m) para mostrar en el HUB."""
         self.state.htf_asset = str(asset).upper()
@@ -298,6 +302,10 @@ class HubScanner:
         self.state.htf_cache_age_sec = max(0.0, float(cache_age_sec))
         self.state.htf_cache_ttl_sec = max(0.0, float(cache_ttl_sec))
         self.state.htf_last_refresh_ts = max(0.0, float(refreshed_at_ts))
+        self.state.htf_bob_phase = str(bob_phase or "").upper()
+        self.state.htf_bob_missing_labels = [str(x) for x in list(bob_missing_labels or []) if str(x).strip()]
+        self.state.htf_bob_timeframe = str(bob_timeframe or "1m")
+        self.state.htf_bob_updated_ts = max(0.0, float(bob_updated_ts or 0.0))
 
     def update_vip_windows(self, windows: Sequence[VipWindowData]) -> None:
         """Publica la lista VIP actual en el HUB."""

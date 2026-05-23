@@ -15,7 +15,7 @@ SIN modificar lógica de scoring/HTF/spike.
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable, Awaitable
 from dataclasses import dataclass, field
 from collections import defaultdict
 
@@ -95,10 +95,17 @@ class ObservableCandleFetcher:
         fetch_candles_with_retry_fn,  # Función original
         max_retries_on_empty: int = 3,
         backoff_sec: Tuple[float, float, float] = (0.5, 1.0, 1.5),
+        ensure_connection_fn: Optional[Callable[[], Awaitable[bool]]] = None,
+        now_ts_fn: Optional[Callable[[], float]] = None,
+        min_conn_recheck_sec: float = 2.0,
     ):
         self.fetch_original = fetch_candles_with_retry_fn
         self.max_retries_on_empty = max_retries_on_empty
         self.backoff_sec = backoff_sec
+        self.ensure_connection_fn = ensure_connection_fn
+        self.now_ts_fn = now_ts_fn
+        self.min_conn_recheck_sec = max(0.5, float(min_conn_recheck_sec))
+        self._last_conn_guard_ts: float = 0.0
         
         # Acumuladores de estadísticas
         self.stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
@@ -117,12 +124,18 @@ class ObservableCandleFetcher:
         state = ConnectionState()
         
         try:
-            # Verificar si cliente está "conectado" (atributo básico)
-            state.is_connected = bool(client and hasattr(client, 'websocket'))
-            
-            # Validar WebSocket específicamente
-            if hasattr(client, 'websocket') and client.websocket:
+            # Estado real del socket si la API lo expone.
+            if client is not None and hasattr(client, "check_connect"):
+                try:
+                    state.websocket_alive = bool(
+                        await asyncio.wait_for(client.check_connect(), timeout=1.5)
+                    )
+                except Exception:
+                    state.websocket_alive = False
+            elif hasattr(client, "websocket") and client.websocket:
                 state.websocket_alive = not client.websocket.closed
+
+            state.is_connected = state.websocket_alive
             
             # Edad de sesión (si disponible)
             if hasattr(client, '_session_start_time'):
@@ -141,6 +154,53 @@ class ObservableCandleFetcher:
         
         self.last_connection_state = state
         return state
+
+    def _now_ref_ts(self) -> float:
+        if self.now_ts_fn is not None:
+            try:
+                return float(self.now_ts_fn())
+            except Exception:
+                pass
+        return float(time.time())
+
+    @staticmethod
+    def _last_candle_ts(candles: List[Any]) -> float:
+        if not candles:
+            return 0.0
+        last = candles[-1]
+        try:
+            return float(getattr(last, "ts", 0.0) or 0.0)
+        except Exception:
+            return 0.0
+
+    def _is_stale_payload(self, candles: List[Any], timeframe_sec: int) -> bool:
+        last_ts = self._last_candle_ts(candles)
+        if last_ts <= 0:
+            return False
+        age_sec = self._now_ref_ts() - last_ts
+        max_age = max(2.5 * float(timeframe_sec), 20.0)
+        return age_sec > max_age
+
+    async def _ensure_conn_guard(self, *, asset: str, timeframe_sec: int) -> bool:
+        if self.ensure_connection_fn is None:
+            return True
+        now = time.time()
+        if (now - self._last_conn_guard_ts) < self.min_conn_recheck_sec:
+            return True
+        self._last_conn_guard_ts = now
+        try:
+            ok = bool(await self.ensure_connection_fn())
+        except Exception as exc:
+            log.warning(
+                "[CANDLE-CONN-GUARD] %s tf=%ds ensure_connection exception=%s",
+                asset,
+                timeframe_sec,
+                type(exc).__name__,
+            )
+            return False
+        if not ok:
+            log.warning("[CANDLE-CONN-GUARD] %s tf=%ds connection_not_ready", asset, timeframe_sec)
+        return ok
     
     async def fetch_with_observability(
         self,
@@ -178,6 +238,15 @@ class ObservableCandleFetcher:
         # Verificar conexión antes de empezar
         conn_state = await self._get_connection_state(client)
         result.connection_state = conn_state
+
+        if not conn_state.websocket_alive:
+            if not await self._ensure_conn_guard(asset=asset, timeframe_sec=timeframe_sec):
+                log.error(
+                    "[CANDLE-SKIP] %s tf=%ds ws=OFF reason=connection_guard_failed",
+                    asset,
+                    timeframe_sec,
+                )
+                return result
         
         if not conn_state.is_connected:
             # Señal preventiva: no bloquea el fetch porque algunos clientes no exponen
@@ -194,6 +263,7 @@ class ObservableCandleFetcher:
         
         attempt_num = 0
         total_fetch_time = 0.0
+        stale_retry_used = False
         
         # Retry loop: máximo 3 intentos si devuelve []
         for retry_attempt in range(self.max_retries_on_empty):
@@ -242,6 +312,22 @@ class ObservableCandleFetcher:
             
             # Logging estructurado
             if candles:
+                if self._is_stale_payload(candles, timeframe_sec):
+                    last_ts = self._last_candle_ts(candles)
+                    age_sec = self._now_ref_ts() - last_ts if last_ts > 0 else -1.0
+                    log.warning(
+                        "[CANDLE-STALE] %s tf=%ds attempt=%d candles=%d age=%.1fs",
+                        asset,
+                        timeframe_sec,
+                        attempt_num,
+                        len(candles),
+                        age_sec,
+                    )
+                    if not stale_retry_used:
+                        stale_retry_used = True
+                        await self._ensure_conn_guard(asset=asset, timeframe_sec=timeframe_sec)
+                        await asyncio.sleep(0.2)
+                        continue
                 if retry_attempt > 0:
                     log.info(
                         "[CANDLE-RECOVERED] %s tf=%ds attempt=%d duration=%.0fms candles=%d ws=%s session_age=%.1fs pending=%d",
@@ -287,6 +373,8 @@ class ObservableCandleFetcher:
             else:
                 # Array vacío: loguear y decidir si retentamos
                 if retry_attempt < self.max_retries_on_empty - 1:
+                    if not conn_state.websocket_alive:
+                        await self._ensure_conn_guard(asset=asset, timeframe_sec=timeframe_sec)
                     backoff = self.backoff_sec[retry_attempt]
                     log.warning(
                         "[CANDLE-RETRY] %s tf=%ds next_attempt=%d backoff=%.1fs ws=%s session_age=%.1fs pending=%d",

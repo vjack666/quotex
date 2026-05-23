@@ -44,12 +44,12 @@ en este orden exacto:
 ### TAREA 2.0 — Auditoría Previa Obligatoria
 *Copilot debe completar esto ANTES de escribir una sola línea de código*
 
-- [ ] Leer `consolidation_bot.py` función `_pre_validate_entry()` completa
-- [ ] Identificar línea exacta donde se verifica el patrón 1m (`confirms_direction`)
-- [ ] Confirmar que `strength` del patrón está disponible en ese punto del código
-- [ ] Verificar que `detect_reversal_pattern()` de `candle_patterns.py` retorna objeto con atributo `strength`
-- [ ] Rastrear cómo llega el objeto `signal` / `pattern` a `_pre_validate_entry()`
-- [ ] Entregar tabla de auditoría: archivo | línea | función | caller | riesgo | motivo
+- [x] Leer `consolidation_bot.py` función `_pre_validate_entry()` completa
+- [x] Identificar línea exacta donde se verifica el patrón 1m (`confirms_direction`)
+- [x] Confirmar que `strength` del patrón está disponible en ese punto del código
+- [x] Verificar que `detect_reversal_pattern()` de `candle_patterns.py` retorna objeto con atributo `strength`
+- [x] Rastrear cómo llega el objeto `signal` / `pattern` a `_pre_validate_entry()`
+- [x] Entregar tabla de auditoría: archivo | línea | función | caller | riesgo | motivo
 
 ---
 
@@ -249,7 +249,19 @@ Para cada veto, confirmar con línea de código real:
 - ✅ Journal: **Íntacto**
 - ✅ Reconexión: **Íntacto**
 - ✅ Asyncio flow: **Íntacto**
-- [ ] Registrar en el archivo de memoria: qué archivos se modificaron y en qué líneas
+- [x] Registrar en el archivo de memoria: qué archivos se modificaron y en qué líneas
+
+### Pendientes Reales para Cierre Completo de Fase 2 (administrativo)
+
+- [ ] Anexar evidencia cuantitativa de validación mínima de Fase 2 en una corrida controlada de 2h:
+  operaciones por sesión (1-5), score promedio de entradas (>=75), rechazos por HTF y por patrón.
+- [x] Consolidar en un único reporte el output de validación técnica (`py_compile` + corrida `main.py --hub-readonly --once`) con fecha/hora y referencia a logs.
+  - Evidencia técnica (2026-05-22):
+    - `py_compile` OK con timestamp `2026-05-22 15:19:23`.
+    - Corrida segura `main.py --hub-readonly --once` con saldo visible `$55.87`.
+    - Log de corrida: `data/exports/phase2_readonly_run_20260522_152043.log`.
+    - Export de sesión: `data/exports/session_20260522_152044_fae324f4/`.
+- [x] Dejar trazabilidad explícita de cierre: acta final de Fase 2 en `ROADMAP_TECNICO.md` y `ESTADO_REAL_SISTEMA.md` con estado "cerrada técnicamente / cerrada administrativamente".
 
 ---
 

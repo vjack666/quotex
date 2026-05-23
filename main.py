@@ -5,11 +5,7 @@ import json
 import argparse
 import asyncio
 import logging
-import shutil
-import subprocess
 from pathlib import Path
-from datetime import datetime
-from uuid import uuid4
 
 # Forzar UTF-8 en stdout/stderr para evitar UnicodeEncodeError en Windows (CP1252).
 if hasattr(sys.stdout, "reconfigure"):
@@ -33,6 +29,7 @@ _DATA_SUBDIRS = ("logs/bot", "logs/broker", "db")
 _RETENTION_DAYS = 31
 _HUB_RUNTIME_STATE_FILE = ROOT / "data" / "hub_runtime_state.json"
 _LAST_KNOWN_HUB_BALANCE = 0.0
+_BOOT_HEALTH_LINES: list[str] = []
 
 
 def _write_hub_runtime_snapshot(bot=None) -> None:
@@ -111,343 +108,152 @@ def _cleanup_old_data_files() -> None:
                     pass
 
 
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = str(os.environ.get(name, "")).strip().lower()
-    if not raw:
-        return bool(default)
-    return raw in {"1", "true", "yes", "on"}
+def _build_boot_box(rows: list[tuple[str, str]], status_text: str) -> str:
+    top = "╔══════════════════════════════════════╗"
+    mid = "╠══════════════════════════════════════╣"
+    bot = "╚══════════════════════════════════════╝"
+    title = "║        QUANT ENGINE BOOT LOG         ║"
+    body = [f"║ {label:<14} : {value:<19}║" for label, value in rows]
+    status_line = f"║ SYSTEM STATUS  : {status_text:<19}║"
+    return "\n".join([top, title, mid, *body, mid, status_line, bot])
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = str(os.environ.get(name, "")).strip()
-    if not raw:
-        return int(default)
-    try:
-        return int(raw)
-    except Exception:
-        return int(default)
+def _bob_smoke_test() -> tuple[bool, str]:
+    from breaker_order_block import BoBPhase, BreakerOrderBlockDetector
+    from models import Candle
 
+    detector = BreakerOrderBlockDetector(base_lookback=12)
+    symbol = "EURUSD_otc"
+    timeframe = "1m"
 
-def _env_float(name: str, default: float) -> float:
-    raw = str(os.environ.get(name, "")).strip()
-    if not raw:
-        return float(default)
-    try:
-        return float(raw)
-    except Exception:
-        return float(default)
+    candles: list[Candle] = []
+    ts = 1_700_000_000
 
+    # Base de consolidación estrecha.
+    for i in range(14):
+        c = 100.0 + (0.00015 if i % 2 == 0 else -0.00015)
+        candles.append(Candle(ts=ts + i * 60, open=c - 0.0001, high=c + 0.0002, low=c - 0.0002, close=c))
 
-def _apply_shadow_relaxed_validation(cb) -> dict:
-    """Aplica relajación temporal para validar pipeline, no edge."""
-    ultra_enabled = _env_flag("SHADOW_ULTRA_RELAXED_VALIDATION", False)
-    enabled = _env_flag("SHADOW_RELAXED_VALIDATION", False) or ultra_enabled
-    mode = "ultra" if ultra_enabled else "relaxed"
-    profile = {
-        "enabled": bool(enabled),
-        "mode": mode,
-        "min_payout": None,
-        "adaptive_base": None,
-        "adaptive_low": None,
-        "adaptive_high": None,
-        "rebound_min_strength_call": None,
-        "rebound_min_strength_put": None,
-        "pattern_direct_trigger_min_payout": None,
-        "cooldown_between_entries": None,
-        "same_asset_reentry_cooldown_sec": None,
-        "rejection_entry_window_enabled": None,
-        "near_entry_tolerance_pct": None,
-        "breakout_chase_max_pct": None,
-    }
-    if not enabled:
-        return profile
+    # Breakout alcista fuerte (evaluado en [-2]).
+    candles.append(Candle(ts=ts + 14 * 60, open=100.0000, high=100.0045, low=99.9998, close=100.0040))
+    candles.append(Candle(ts=ts + 15 * 60, open=100.0040, high=100.0046, low=100.0032, close=100.0038))
+    r1 = detector.evaluate(symbol=symbol, timeframe=timeframe, candles=candles)
 
-    min_payout = max(60, min(95, _env_int("SHADOW_RELAXED_MIN_PAYOUT", 75)))
-    default_base = 25 if ultra_enabled else 45
-    default_low = 20 if ultra_enabled else 43
-    default_high = 30 if ultra_enabled else 48
-    adaptive_base = max(10, min(90, _env_int("SHADOW_RELAXED_ADAPTIVE_BASE", default_base)))
-    adaptive_low = max(10, min(90, _env_int("SHADOW_RELAXED_ADAPTIVE_LOW", default_low)))
-    adaptive_high = max(10, min(90, _env_int("SHADOW_RELAXED_ADAPTIVE_HIGH", default_high)))
-    strength_call = max(0.0, min(1.0, _env_float("SHADOW_RELAXED_REBOUND_MIN_STRENGTH_CALL", 0.35)))
-    strength_put = max(0.0, min(1.0, _env_float("SHADOW_RELAXED_REBOUND_MIN_STRENGTH_PUT", 0.40)))
-    pattern_min_payout = max(60, min(95, _env_int("SHADOW_RELAXED_PATTERN_MIN_PAYOUT", 70)))
-    cooldown_entries = max(0.0, min(60.0, _env_float("SHADOW_RELAXED_COOLDOWN_BETWEEN_ENTRIES", 3.0)))
-    same_asset_cd = max(0.0, min(300.0, _env_float("SHADOW_RELAXED_SAME_ASSET_CD_SEC", 5.0)))
-    rejection_window_enabled = _env_flag("SHADOW_RELAXED_REJECTION_WINDOW_ENABLED", False)
-    near_default = 0.0030 if ultra_enabled else 0.0025
-    breakout_default = 0.0025 if ultra_enabled else 0.0012
-    near_entry_tolerance = max(0.0001, min(0.02, _env_float("SHADOW_RELAXED_HUB_NEAR_ENTRY_TOLERANCE_PCT", near_default)))
-    breakout_chase_max = max(0.0001, min(0.02, _env_float("SHADOW_RELAXED_HUB_BREAKOUT_CHASE_MAX_PCT", breakout_default)))
+    # Retest de zona rota.
+    candles.append(Candle(ts=ts + 16 * 60, open=100.0038, high=100.0040, low=100.0000, close=100.0010))
+    r2 = detector.evaluate(symbol=symbol, timeframe=timeframe, candles=candles)
 
-    cb.MIN_PAYOUT = int(min_payout)
-    cb.ADAPTIVE_THRESHOLD_BASE = int(adaptive_base)
-    cb.ADAPTIVE_THRESHOLD_LOW = int(adaptive_low)
-    cb.ADAPTIVE_THRESHOLD_HIGH = int(adaptive_high)
-    cb.current_score_threshold = int(adaptive_base)
-    cb.REBOUND_MIN_STRENGTH_CALL = float(strength_call)
-    cb.REBOUND_MIN_STRENGTH_PUT = float(strength_put)
-    cb.PATTERN_DIRECT_TRIGGER_MIN_PAYOUT = int(pattern_min_payout)
-    cb.COOLDOWN_BETWEEN_ENTRIES = float(cooldown_entries)
-    cb.SAME_ASSET_REENTRY_COOLDOWN_SEC = float(same_asset_cd)
-    cb.REJECTION_ENTRY_WINDOW_ENABLED = bool(rejection_window_enabled)
-    cb.HUB_NEAR_ENTRY_TOLERANCE_PCT = float(near_entry_tolerance)
-    cb.HUB_BREAKOUT_CHASE_MAX_PCT = float(breakout_chase_max)
+    # Confirmación bullish posterior al retest.
+    candles.append(Candle(ts=ts + 17 * 60, open=100.0010, high=100.0048, low=100.0008, close=100.0044))
+    candles.append(Candle(ts=ts + 18 * 60, open=100.0044, high=100.0049, low=100.0040, close=100.0046))
+    r3 = detector.evaluate(symbol=symbol, timeframe=timeframe, candles=candles)
 
-    profile.update(
-        {
-            "mode": mode,
-            "min_payout": int(min_payout),
-            "adaptive_base": int(adaptive_base),
-            "adaptive_low": int(adaptive_low),
-            "adaptive_high": int(adaptive_high),
-            "rebound_min_strength_call": float(strength_call),
-            "rebound_min_strength_put": float(strength_put),
-            "pattern_direct_trigger_min_payout": int(pattern_min_payout),
-            "cooldown_between_entries": float(cooldown_entries),
-            "same_asset_reentry_cooldown_sec": float(same_asset_cd),
-            "rejection_entry_window_enabled": bool(rejection_window_enabled),
-            "near_entry_tolerance_pct": float(near_entry_tolerance),
-            "breakout_chase_max_pct": float(breakout_chase_max),
-        }
+    ok = (
+        r1.state == BoBPhase.SETUP
+        and r2.state == BoBPhase.RETEST
+        and r3.state == BoBPhase.CONFIRMED
     )
-    return profile
+    if not ok:
+        return False, f"fases={r1.state.value}/{r2.state.value}/{r3.state.value}"
+    return True, "SETUP->RETEST->CONFIRMED"
 
 
-def _make_shadow_session_id() -> str:
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{ts}_{uuid4().hex[:8]}"
+def run_system_health_check() -> dict:
+    """Verifica la salud de QUANT ENGINE sin alterar lógica de trading."""
+    checks: dict[str, tuple[bool, str]] = {}
 
-
-def _safe_write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _run_cmd(args: list[str], cwd: Path) -> dict:
     try:
-        proc = subprocess.run(
-            args,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+        import pandas as pd  # type: ignore
+        from strategy_spring_sweep import detect_spring_or_upthrust
+        from src.quant_engine import SignalPhase, SignalRouter, StrategyName, StrategySignal, render_control_center
+
+        router = SignalRouter()
+        checks["quant_engine"] = (True, "initialized")
+
+        # STRAT-B smoke: detector ejecuta sin excepción sobre datos sintéticos.
+        df = pd.DataFrame(
+            {
+                "open": [1.0, 1.01, 1.02, 1.01, 1.00, 0.99, 1.00, 1.01, 1.00, 0.995, 1.005, 1.01, 1.015, 1.01, 1.005, 1.000, 0.998, 1.002, 1.006, 1.010, 1.012, 1.015, 1.013, 1.011],
+                "high": [1.01, 1.02, 1.03, 1.02, 1.01, 1.00, 1.01, 1.02, 1.01, 1.005, 1.015, 1.02, 1.025, 1.02, 1.015, 1.010, 1.008, 1.012, 1.016, 1.020, 1.022, 1.025, 1.023, 1.021],
+                "low": [0.99, 1.00, 1.01, 1.00, 0.99, 0.98, 0.99, 1.00, 0.99, 0.985, 0.995, 1.00, 1.005, 1.00, 0.995, 0.990, 0.988, 0.992, 0.996, 1.000, 1.002, 1.005, 1.003, 1.001],
+                "close": [1.005, 1.015, 1.025, 1.015, 1.005, 0.995, 1.005, 1.015, 1.005, 1.000, 1.010, 1.015, 1.020, 1.015, 1.010, 1.005, 1.000, 1.006, 1.010, 1.015, 1.018, 1.020, 1.018, 1.015],
+            }
         )
-        return {
-            "cmd": args,
-            "exit_code": int(proc.returncode),
-            "stdout": str(proc.stdout or ""),
-            "stderr": str(proc.stderr or ""),
-        }
+        _ = detect_spring_or_upthrust(df)
+        checks["strat_b"] = (True, "signal function callable")
+
+        bob_ok, bob_msg = _bob_smoke_test()
+        checks["bob"] = (bob_ok, bob_msg)
+
+        signals = [
+            StrategySignal(
+                strategy=StrategyName.STRAT_B,
+                symbol="EURUSD_otc",
+                timeframe="1m",
+                direction="call",
+                phase=SignalPhase.CONFIRMED,
+                confidence=0.74,
+                payout=84,
+                reason="smoke strat-b",
+            ),
+            StrategySignal(
+                strategy=StrategyName.BOB,
+                symbol="GBPUSD_otc",
+                timeframe="1m",
+                direction="put",
+                phase=SignalPhase.RETEST,
+                confidence=0.66,
+                payout=85,
+                reason="smoke bob",
+            ),
+        ]
+        routed = router.route(signals)
+        snap = router.snapshot(signals, routed)
+        checks["router"] = (len(routed) > 0 and snap.total_signals == len(signals), f"routed={len(routed)}")
+
+        text = render_control_center(snap)
+        checks["monitoring"] = ("CONTROL-CENTER" in text, "render ok")
+
     except Exception as exc:
-        return {
-            "cmd": args,
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": f"{type(exc).__name__}: {exc}",
-        }
+        checks.setdefault("quant_engine", (False, f"{type(exc).__name__}: {exc}"))
 
+    try:
+        import consolidation_bot as cb
+        risk_ok = callable(getattr(cb.ConsolidationBot, "_pre_validate_entry", None)) and callable(getattr(cb.ConsolidationBot, "_enter", None))
+        checks["risk"] = (risk_ok, "_pre_validate_entry + _enter")
 
-def _count_markers_in_file(path: Path) -> dict[str, int]:
-    markers = {
-        "SHADOW-FLAGS": 0,
-        "SHADOW-RUNTIME": 0,
-        "SHADOW-DATA": 0,
-        "ENTRY_LOCK": 0,
-        "SHADOW-LINK": 0,
-        "SHADOW-LINK-FAIL": 0,
-    }
-    if not path.exists():
-        return markers
-    text = path.read_text(encoding="utf-8", errors="replace")
-    for k in markers.keys():
-        markers[k] = int(text.count(k))
-    return markers
+        source = Path(cb.__file__).read_text(encoding="utf-8", errors="replace")
+        no_legacy_parallel = ("and not QUANT_ROUTER_ENABLED" in source)
+        checks["router_guard"] = (no_legacy_parallel, "legacy guard present")
+    except Exception as exc:
+        checks["risk"] = (False, f"{type(exc).__name__}: {exc}")
+        checks["router_guard"] = (False, "unverified")
 
+    rows = [
+        ("STRAT-B", "ACTIVE" if checks.get("strat_b", (False, ""))[0] else "FAIL"),
+        ("BOB DETECTOR", "ACTIVE" if checks.get("bob", (False, ""))[0] else "FAIL"),
+        ("SIGNAL ROUTER", "ACTIVE" if checks.get("router", (False, ""))[0] else "FAIL"),
+        ("RISK ENGINE", "ACTIVE" if checks.get("risk", (False, ""))[0] else "FAIL"),
+        ("MONITORING", "ACTIVE" if checks.get("monitoring", (False, ""))[0] else "FAIL"),
+    ]
 
-def _build_runtime_config_snapshot(args: argparse.Namespace, cb, session_id: str) -> dict:
+    operational = all(v[0] for k, v in checks.items() if k in {"strat_b", "bob", "router", "risk", "monitoring", "router_guard"})
+
+    print("[OK] STRAT-B ACTIVE" if checks.get("strat_b", (False, ""))[0] else "[FAIL] STRAT-B ACTIVE")
+    print("[OK] BOB DETECTOR ACTIVE" if checks.get("bob", (False, ""))[0] else "[FAIL] BOB DETECTOR ACTIVE")
+    print("[OK] SIGNAL ROUTER ACTIVE" if checks.get("router", (False, ""))[0] else "[FAIL] SIGNAL ROUTER ACTIVE")
+    print("[OK] RISK ENGINE ACTIVE" if checks.get("risk", (False, ""))[0] else "[FAIL] RISK ENGINE ACTIVE")
+    print("[OK] MONITORING ACTIVE" if checks.get("monitoring", (False, ""))[0] else "[FAIL] MONITORING ACTIVE")
+
+    status_text = "OPERATIONAL" if operational else "DEGRADED"
+    print(_build_boot_box(rows, status_text))
+
     return {
-        "session_id": session_id,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "account_real": bool(args.real),
-        "hub_readonly": bool(args.hub_readonly),
-        "once": bool(args.once),
-        "scan": {
-            "scan_lead_sec": float(getattr(cb, "SCAN_LEAD_SEC", args.scan_lead_sec)),
-            "scan_sleep_sec": float(getattr(cb, "LIVE_SCAN_SLEEP_SEC", args.scan_sleep_sec)),
-            "align_scan_to_candle": bool(getattr(cb, "ALIGN_SCAN_TO_CANDLE", False)),
-        },
-        "thresholds": {
-            "min_payout": int(getattr(cb, "MIN_PAYOUT", args.min_payout)),
-            "adaptive_base": int(getattr(cb, "ADAPTIVE_THRESHOLD_BASE", args.adaptive_threshold_base)),
-            "adaptive_low": int(getattr(cb, "ADAPTIVE_THRESHOLD_LOW", args.adaptive_threshold_low)),
-            "adaptive_high": int(getattr(cb, "ADAPTIVE_THRESHOLD_HIGH", args.adaptive_threshold_high)),
-        },
-        "strategy_flags": {
-            "strat_b_can_trade": bool(getattr(cb, "STRAT_B_CAN_TRADE", False)),
-        },
-        "shadow_flags": {
-            "mode": bool(getattr(cb, "SHADOW_MODE_ENABLED", False)),
-            "new_engine": bool(getattr(cb, "SHADOW_NEW_ENGINE_ENABLED", False)),
-            "persist": bool(getattr(cb, "SHADOW_PERSIST_ENABLED", False)),
-            "runtime_metrics": bool(getattr(cb, "SHADOW_RUNTIME_METRICS_ENABLED", False)),
-            "explain": bool(getattr(cb, "SHADOW_EXPLAIN_ENABLED", False)),
-            "audit_mode": bool(getattr(cb, "SHADOW_AUDIT_MODE", False)),
-            "audit_assert": bool(getattr(cb, "SHADOW_AUDIT_ASSERT_ENABLED", False)),
-            "watchdog_enabled": bool(getattr(cb, "SHADOW_DEAD_WATCHDOG_ENABLED", False)),
-            "watchdog_minutes": float(getattr(cb, "SHADOW_DEAD_WATCHDOG_MINUTES", 5.0)),
-        },
-        "shadow_relaxed_validation": dict(getattr(cb, "SHADOW_RELAXED_PROFILE", {"enabled": False})),
-    }
-
-
-def _run_shadow_postrun_exports(session_id: str, args: argparse.Namespace, cb) -> None:
-    if not _env_flag("SHADOW_POSTRUN_EXPORT_ENABLED", True):
-        return
-
-    exports_dir = ROOT / "data" / "exports" / f"session_{session_id}"
-    exports_dir.mkdir(parents=True, exist_ok=True)
-
-    bot_logs = sorted((ROOT / "data" / "logs" / "bot").glob("consolidation_bot-*.log"), key=lambda p: p.stat().st_mtime)
-    latest_log = bot_logs[-1] if bot_logs else None
-    if latest_log is not None and latest_log.exists():
-        shutil.copy2(latest_log, exports_dir / latest_log.name)
-
-    stdout_file = ROOT / "bot_stdout.txt"
-    if stdout_file.exists():
-        shutil.copy2(stdout_file, exports_dir / "bot_stdout.txt")
-
-    db_files = sorted((ROOT / "data" / "db").glob("trade_journal-*.db"), key=lambda p: p.stat().st_mtime)
-    latest_db = db_files[-1] if db_files else None
-    if latest_db is not None and latest_db.exists():
-        shutil.copy2(latest_db, exports_dir / latest_db.name)
-
-    snapshot = _build_runtime_config_snapshot(args, cb, session_id)
-    _safe_write_json(exports_dir / "runtime_config_snapshot.json", snapshot)
-
-    parser_json = exports_dir / "shadow_runtime_summary.json"
-    parser_csv = exports_dir / "shadow_runtime_summary.csv"
-    reconcile_json = exports_dir / "shadow_reconcile_report.json"
-    overhead_json = exports_dir / "shadow_overhead_report.json"
-
-    tool_runs = []
-    if latest_log is not None and latest_log.exists():
-        tool_runs.append(
-            _run_cmd(
-                [
-                    sys.executable,
-                    "src/lab/shadow_log_parser.py",
-                    "--log",
-                    str(latest_log),
-                    "--json-out",
-                    str(parser_json),
-                    "--csv-out",
-                    str(parser_csv),
-                ],
-                cwd=ROOT,
-            )
-        )
-
-    if latest_db is not None and latest_db.exists():
-        tool_runs.append(
-            _run_cmd(
-                [
-                    sys.executable,
-                    "src/lab/shadow_reconcile.py",
-                    "--db",
-                    str(latest_db),
-                    "--json-out",
-                    str(reconcile_json),
-                ],
-                cwd=ROOT,
-            )
-        )
-
-    if parser_json.exists() and latest_db is not None and latest_db.exists():
-        tool_runs.append(
-            _run_cmd(
-                [
-                    sys.executable,
-                    "src/lab/shadow_overhead_audit.py",
-                    "--parser-json",
-                    str(parser_json),
-                    "--db",
-                    str(latest_db),
-                    "--json-out",
-                    str(overhead_json),
-                ],
-                cwd=ROOT,
-            )
-        )
-
-    _safe_write_json(exports_dir / "tool_runs.json", {"runs": tool_runs})
-
-    parser_data = {}
-    reconcile_data = {}
-    overhead_data = {}
-    try:
-        if parser_json.exists():
-            parser_data = json.loads(parser_json.read_text(encoding="utf-8"))
-    except Exception:
-        parser_data = {}
-    try:
-        if reconcile_json.exists():
-            reconcile_data = json.loads(reconcile_json.read_text(encoding="utf-8"))
-    except Exception:
-        reconcile_data = {}
-    try:
-        if overhead_json.exists():
-            overhead_data = json.loads(overhead_json.read_text(encoding="utf-8"))
-    except Exception:
-        overhead_data = {}
-
-    marker_counts = _count_markers_in_file(latest_log) if latest_log is not None else _count_markers_in_file(Path("__missing__"))
-    counts = reconcile_data.get("counts", {}) if isinstance(reconcile_data, dict) else {}
-    parser_summary = parser_data.get("summary", {}) if isinstance(parser_data, dict) else {}
-
-    shadow_rows = int(counts.get("shadow_total_rows", overhead_data.get("shadow_rows", 0)) or 0)
-    with_candidate = int(counts.get("with_candidate", 0) or 0)
-    linked_outcome = int(counts.get("linked_outcome", 0) or 0)
-    linkage_pct = float(counts.get("linkage_pct", 0.0) or 0.0)
-    parser_cand_count = int((((parser_summary.get("cand", {}) or {}).get("count", 0)) or 0))
-
-    checks = {
-        "has_shadow_flags_marker": marker_counts.get("SHADOW-FLAGS", 0) > 0,
-        "has_shadow_runtime_marker": marker_counts.get("SHADOW-RUNTIME", 0) > 0,
-        "has_shadow_data_marker": marker_counts.get("SHADOW-DATA", 0) > 0,
-        "shadow_rows_gt_0": shadow_rows > 0,
-        "with_candidate_gt_0": with_candidate > 0,
-        "linked_outcome_gt_0": linked_outcome > 0,
-        "parser_cand_count_gt_0": parser_cand_count > 0,
-    }
-
-    failed_checks = [k for k, v in checks.items() if not bool(v)]
-    score = 100
-    score -= min(60, len(failed_checks) * 10)
-    if with_candidate > 0 and linkage_pct < 99.0:
-        score -= 20
-    score = max(0, score)
-
-    session_valid = len(failed_checks) == 0 and (with_candidate == 0 or linkage_pct >= 99.0)
-    validation = {
-        "session_id": session_id,
-        "session_valid": bool(session_valid),
-        "shadow_integrity_score": int(score),
-        "marker_counts": marker_counts,
-        "shadow_rows": shadow_rows,
-        "with_candidate": with_candidate,
-        "linked_outcome": linked_outcome,
-        "linkage_pct": linkage_pct,
-        "parser_cand_count": parser_cand_count,
+        "operational": bool(operational),
         "checks": checks,
-        "failed_checks": failed_checks,
+        "rows": rows,
+        "status_text": status_text,
     }
-    _safe_write_json(exports_dir / "session_validation.json", validation)
-
-    status_txt = "SESSION VALID" if session_valid else "SESSION INVALID"
-    print(f"[SHADOW-SESSION] {status_txt} | sid={session_id} | score={score}/100 | exports={exports_dir}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -521,7 +327,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--min-payout",
         type=int,
-        default=85,
+        default=84,
         help="Payout mínimo base de riesgo (el escaneo usa payout estrictamente mayor)",
     )
     p.add_argument("--scan-lead-sec", type=float, default=35.0, help="Anticipación del scan antes del open")
@@ -540,19 +346,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--adaptive-threshold-base",
         type=int,
-        default=50,
+        default=73,
         help="Umbral base de score para STRAT-A",
     )
     p.add_argument(
         "--adaptive-threshold-low",
         type=int,
-        default=48,
+        default=71,
         help="Umbral bajo dinámico de score para STRAT-A",
     )
     p.add_argument(
         "--adaptive-threshold-high",
         type=int,
-        default=54,
+        default=76,
         help="Umbral alto dinámico de score para STRAT-A",
     )
 
@@ -679,6 +485,7 @@ async def _render_hub_once(bot=None) -> None:
         if bot is not None and hasattr(bot, 'hub'):
             state = bot.hub.get_state()
             balance = float(getattr(state, "known_balance", 0.0) or 0.0)
+            state.system_messages = list(_BOOT_HEALTH_LINES)
             if balance > 0.0:
                 _LAST_KNOWN_HUB_BALANCE = balance
             else:
@@ -689,6 +496,7 @@ async def _render_hub_once(bot=None) -> None:
             state = HubState()
             balance = float(_LAST_KNOWN_HUB_BALANCE)
             state.known_balance = balance
+            state.system_messages = list(_BOOT_HEALTH_LINES)
         HubDashboard.display(state, balance=balance)
         _write_hub_runtime_snapshot(bot)
     except Exception:
@@ -946,6 +754,13 @@ async def _run_forever_with_initial_loading(cb, *, dry_run: bool, real_account: 
             return
         try:
             lib_size = int(htf_scanner.library_size())
+            bob_snapshot = None
+            if hasattr(bot, "get_bob_snapshot"):
+                bob_snapshot = bot.get_bob_snapshot(asset)
+            bob_phase = str((bob_snapshot or {}).get("phase", "") or "")
+            bob_missing_labels = list((bob_snapshot or {}).get("missing_labels", []) or [])
+            bob_timeframe = str((bob_snapshot or {}).get("timeframe", "1m") or "1m")
+            bob_updated_ts = float((bob_snapshot or {}).get("updated_at", 0.0) or 0.0)
             bot.hub.update_htf_status(
                 asset=asset,
                 payout=payout,
@@ -954,6 +769,10 @@ async def _run_forever_with_initial_loading(cb, *, dry_run: bool, real_account: 
                 cache_age_sec=age_sec,
                 cache_ttl_sec=ttl_sec,
                 refreshed_at_ts=ts,
+                bob_phase=bob_phase,
+                bob_missing_labels=bob_missing_labels,
+                bob_timeframe=bob_timeframe,
+                bob_updated_ts=bob_updated_ts,
             )
         except Exception:
             return
@@ -1014,14 +833,6 @@ async def _run(args: argparse.Namespace) -> None:
     # Limpiar archivos de data/ anteriores a 31 días
     _cleanup_old_data_files()
 
-    # Sesión forense: ID único para trazabilidad end-to-end.
-    shadow_session_id = str(os.environ.get("SHADOW_SESSION_ID", "")).strip() or _make_shadow_session_id()
-    os.environ["SHADOW_SESSION_ID"] = shadow_session_id
-    os.environ.setdefault("SHADOW_AUDIT_MODE", "true")
-    os.environ.setdefault("SHADOW_DEAD_WATCHDOG_ENABLED", "true")
-    os.environ.setdefault("SHADOW_DEAD_WATCHDOG_MINUTES", "5")
-    os.environ.setdefault("SHADOW_POSTRUN_EXPORT_ENABLED", "true")
-
     # Crear directorio de logs del broker y cambiar CWD ANTES de importar
     # consolidation_bot (que a su vez importa pyquotex/api_quotex, la cual
     # registra el sink de loguru con ruta relativa al CWD actual).
@@ -1033,48 +844,16 @@ async def _run(args: argparse.Namespace) -> None:
     os.chdir(_orig_cwd)
 
     _apply_runtime_config(args)
-    setattr(cb, "SHADOW_RELAXED_PROFILE", _apply_shadow_relaxed_validation(cb))
 
-    # Hard assert de shadow para sesiones de auditoría (opcional por env).
-    if bool(getattr(cb, "SHADOW_AUDIT_ASSERT_ENABLED", False)):
-        if not bool(getattr(cb, "SHADOW_MODE_ENABLED", False)):
-            raise RuntimeError("[SHADOW-ASSERT] SHADOW_MODE_ENABLED=False en sesión auditada")
-        if not bool(getattr(cb, "SHADOW_PERSIST_ENABLED", False)):
-            raise RuntimeError("[SHADOW-ASSERT] SHADOW_PERSIST_ENABLED=False en sesión auditada")
-        if not bool(getattr(cb, "SHADOW_RUNTIME_METRICS_ENABLED", False)):
-            raise RuntimeError("[SHADOW-ASSERT] SHADOW_RUNTIME_METRICS_ENABLED=False en sesión auditada")
-
-    if bool(getattr(cb, "SHADOW_MODE_ENABLED", False)):
-        cb.log.warning(
-            "[SHADOW-FLAGS] sid=%s mode=ON persist=%s runtime=%s explain=%s audit=%s assert=%s",
-            shadow_session_id,
-            "ON" if bool(getattr(cb, "SHADOW_PERSIST_ENABLED", False)) else "OFF",
-            "ON" if bool(getattr(cb, "SHADOW_RUNTIME_METRICS_ENABLED", False)) else "OFF",
-            "ON" if bool(getattr(cb, "SHADOW_EXPLAIN_ENABLED", False)) else "OFF",
-            "ON" if bool(getattr(cb, "SHADOW_AUDIT_MODE", False)) else "OFF",
-            "ON" if bool(getattr(cb, "SHADOW_AUDIT_ASSERT_ENABLED", False)) else "OFF",
-        )
-        if bool(getattr(cb, "SHADOW_RELAXED_PROFILE", {}).get("enabled", False)):
-            rp = dict(getattr(cb, "SHADOW_RELAXED_PROFILE", {}))
-            cb.log.warning(
-                "[SHADOW-RELAXED] sid=%s mode=%s min_payout=%s thr=%s/%s/%s strength_call=%.2f strength_put=%.2f pattern_min_payout=%s cooldown=%.1fs same_asset_cd=%.1fs near=%.4f%% breakout_chase=%.4f%% rejection_window=%s",
-                shadow_session_id,
-                rp.get("mode", "relaxed"),
-                rp.get("min_payout"),
-                rp.get("adaptive_base"),
-                rp.get("adaptive_low"),
-                rp.get("adaptive_high"),
-                float(rp.get("rebound_min_strength_call") or 0.0),
-                float(rp.get("rebound_min_strength_put") or 0.0),
-                rp.get("pattern_direct_trigger_min_payout"),
-                float(rp.get("cooldown_between_entries") or 0.0),
-                float(rp.get("same_asset_reentry_cooldown_sec") or 0.0),
-                100.0 * float(rp.get("near_entry_tolerance_pct") or 0.0),
-                100.0 * float(rp.get("breakout_chase_max_pct") or 0.0),
-                "ON" if bool(rp.get("rejection_entry_window_enabled", False)) else "OFF",
-            )
-    else:
-        cb.log.error("[SHADOW DISABLED] sid=%s mode=OFF", shadow_session_id)
+    global _BOOT_HEALTH_LINES
+    print("[BOOT] Inicializando QUANT ENGINE...")
+    health = run_system_health_check()
+    _BOOT_HEALTH_LINES = [
+        f"QUANT ENGINE: {str(health.get('status_text', 'DEGRADED')).upper()}",
+    ] + [f"{label}: {value}" for label, value in list(health.get("rows", []))]
+    if not bool(health.get("operational", False)):
+        print("[BOOT] Health check reporta estado DEGRADED. Se continúa en modo seguro para diagnóstico.")
+    print("[BOOT] Ejecutando ciclo de scan_all() y monitoreo en tiempo real...")
 
     hub_readonly = bool(args.hub_readonly)
     run_once = bool(args.once)
@@ -1120,6 +899,8 @@ async def _run(args: argparse.Namespace) -> None:
                         raise SystemExit(2)
                     continue
                 if run_once:
+                    print("[BOOT] Resumen final de salud del sistema:")
+                    print(_build_boot_box(list(health.get("rows", [])), str(health.get("status_text", "DEGRADED"))))
                     return
                 try:
                     await asyncio.sleep(cb.SCAN_INTERVAL_SEC)
@@ -1132,6 +913,8 @@ async def _run(args: argparse.Namespace) -> None:
                     dry_run=dry_run,
                     real_account=bool(args.real),
                 )
+                print("[BOOT] Resumen final de salud del sistema:")
+                print(_build_boot_box(list(health.get("rows", [])), str(health.get("status_text", "DEGRADED"))))
             else:
                 bot = await _run_forever_with_initial_loading(
                     cb,
@@ -1139,10 +922,6 @@ async def _run(args: argparse.Namespace) -> None:
                     real_account=bool(args.real),
                 )
     finally:
-        try:
-            _run_shadow_postrun_exports(shadow_session_id, args, cb)
-        except Exception as exc:
-            print(f"[SHADOW-POSTRUN] sid={shadow_session_id} error={type(exc).__name__}: {exc}")
         try:
             if _HUB_RUNTIME_STATE_FILE.exists():
                 _HUB_RUNTIME_STATE_FILE.unlink()

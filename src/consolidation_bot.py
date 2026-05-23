@@ -77,6 +77,7 @@ from candle_patterns import (
 )
 from spike_filter import detect_spike_anomaly, sanitize_spike_candles
 from strategy_spring_sweep import detect_spring_or_upthrust
+from breaker_order_block import BoBPhase, BreakerOrderBlockDetector
 from entry_decision_engine import EntryContext, evaluate_entry, explain_decision
 from trade_journal import get_journal
 from black_box_recorder import get_black_box
@@ -84,6 +85,7 @@ from martingale_calculator import MartingaleCalculator
 from src.masaniello_engine import MasanielloEngine, MasanielloConfig
 from src.vip_library import VipLibraryManager
 from src.candle_fetcher_observable import ObservableCandleFetcher
+from src.quant_engine import SignalPhase, SignalRouter, StrategyName, StrategySignal, render_control_center
 from hub.hub_scanner import HubScanner
 from hub.hub_models import CandidateData
 
@@ -434,6 +436,21 @@ STRAT_B_MIN_CONFIDENCE_EARLY = 0.62
 STRAT_B_ALLOW_WYCKOFF_EARLY = True
 STRAT_B_LOG_TOP_N      = 3
 STRAT_B_PREVIEW_MIN_CONF = 0.45
+
+# Detector independiente de Breaker Order Block (BoB)
+BOB_ENABLED = True
+BOB_TIMEFRAME_LABEL = "1m"
+BOB_BASE_LOOKBACK = 12
+BOB_MAX_BASE_RANGE_PCT = 0.0025
+BOB_DISPLACEMENT_BODY_MULT = 1.40
+BOB_RETEST_TOLERANCE_PCT = 0.0006
+BOB_CONFIRMATION_BODY_MULT = 1.15
+BOB_SETUP_TTL_CANDLES = 20
+BOB_CAN_TRADE = False
+
+# Quant engine router: estrategia -> señal -> riesgo -> ejecución.
+QUANT_ROUTER_ENABLED = True
+QUANT_ROUTER_MAX_EXEC_PER_SCAN = 1
 
 # LEGACY-RJ (Rechazo M1 en ventana de 30s)
 LEGACY_RJ_ENABLED        = False
@@ -897,29 +914,60 @@ def find_strong_support_2m(
     return round(best_price, 5), int(best_touches)
 
 
-async def get_open_assets(client: Quotex, min_payout: int = MIN_PAYOUT) -> List[Tuple[str, int]]:
+async def get_open_assets_detailed(
+    client: Quotex,
+    min_payout: int = MIN_PAYOUT,
+) -> Tuple[List[Tuple[str, int]], dict[str, int]]:
+    diag: dict[str, int] = {
+        "total": 0,
+        "accepted": 0,
+        "rejected_not_otc": 0,
+        "rejected_closed": 0,
+        "rejected_low_payout": 0,
+        "rejected_parse_error": 0,
+    }
     try:
         instruments = await client.get_instruments()
     except Exception:
-        return []
+        return [], diag
     if not instruments:
-        return []
+        return [], diag
 
-    result = []
+    result: List[Tuple[str, int]] = []
     for i in instruments:
+        diag["total"] += 1
         try:
             sym     = str(i[1])
             is_open = bool(i[14])
             payout  = int(i[18]) if len(i) > 18 else 0
         except (IndexError, TypeError, ValueError):
+            diag["rejected_parse_error"] += 1
             continue
+
+        if not sym.lower().endswith("_otc"):
+            diag["rejected_not_otc"] += 1
+            continue
+
+        if not is_open:
+            diag["rejected_closed"] += 1
+            continue
+
         # En perfil estricto pedimos payout > mínimo; en perfil fast permitimos >=
         # para ampliar universo elegible sin tocar el modo seguro por defecto.
         payout_pass = payout >= min_payout if FAST_EXECUTION_PROFILE else payout > min_payout
-        if sym.lower().endswith("_otc") and is_open and payout_pass:
-            result.append((sym, payout))
+        if not payout_pass:
+            diag["rejected_low_payout"] += 1
+            continue
+
+        result.append((sym, payout))
+        diag["accepted"] += 1
 
     result.sort(key=lambda x: -x[1])
+    return result, diag
+
+
+async def get_open_assets(client: Quotex, min_payout: int = MIN_PAYOUT) -> List[Tuple[str, int]]:
+    result, _diag = await get_open_assets_detailed(client, min_payout=min_payout)
     return result
 
 
@@ -1404,6 +1452,9 @@ class ConsolidationBot:
             "LEGACY_RJ_signals": 0,
             "strat_a_wins": 0, "strat_a_losses": 0,
             "strat_b_wins": 0, "strat_b_losses": 0,
+            "bob_signals": 0,
+            "quant_routed": 0,
+            "quant_executed": 0,
             "LEGACY_RJ_wins": 0, "LEGACY_RJ_losses": 0,
             "score_rejected_age": 0,   # candidatos rechazados por penaliz. antigüedad
             "score_rejected_score": 0, # candidatos rechazados por score < umbral
@@ -1578,6 +1629,16 @@ class ConsolidationBot:
         )
         self.black_box = get_black_box()
         self.vip_library = VipLibraryManager(min_payout=MIN_PAYOUT, min_score=ADAPTIVE_THRESHOLD_BASE)
+        self.bob_detector = BreakerOrderBlockDetector(
+            base_lookback=BOB_BASE_LOOKBACK,
+            max_base_range_pct=BOB_MAX_BASE_RANGE_PCT,
+            displacement_body_mult=BOB_DISPLACEMENT_BODY_MULT,
+            retest_tolerance_pct=BOB_RETEST_TOLERANCE_PCT,
+            confirmation_body_mult=BOB_CONFIRMATION_BODY_MULT,
+            setup_ttl_candles=BOB_SETUP_TTL_CANDLES,
+        )
+        self._bob_latest_by_asset: dict[str, dict[str, Any]] = {}
+        self.signal_router = SignalRouter()
         self.last_scan_strat_a: List[CandidateEntry] = []
         self.last_scan_strat_b: List[CandidateEntry] = []
         self.last_scan_LEGACY_RJ: List[CandidateEntry] = []
@@ -1636,6 +1697,9 @@ class ConsolidationBot:
             fetch_candles_with_retry_fn=fetch_candles_with_retry,
             max_retries_on_empty=3,
             backoff_sec=(0.5, 1.0, 1.5),
+            ensure_connection_fn=self.ensure_connection,
+            now_ts_fn=self._broker_now_ts,
+            min_conn_recheck_sec=2.0,
         )
 
     @staticmethod
@@ -1652,6 +1716,38 @@ class ConsolidationBot:
             }
             for c in candles
         ]
+
+    @staticmethod
+    def _bob_missing_labels(checklist: Optional[dict[str, Optional[bool]]]) -> list[str]:
+        cl = checklist or {}
+        labels: list[tuple[str, str]] = [
+            ("consolidation", "Consolidation"),
+            ("breakout", "Breakout"),
+            ("retest", "Retest"),
+            ("momentum", "Momentum"),
+        ]
+        return [label for key, label in labels if cl.get(key) is False]
+
+    def _record_bob_snapshot(self, symbol: str, timeframe: str, bob_result: Any) -> None:
+        sym = str(symbol or "").upper()
+        if not sym:
+            return
+        checklist = dict(getattr(bob_result, "checklist", {}) or {})
+        self._bob_latest_by_asset[sym] = {
+            "symbol": sym,
+            "timeframe": str(timeframe or "1m"),
+            "phase": str(getattr(getattr(bob_result, "state", "WAITING"), "value", "WAITING")),
+            "direction": str(getattr(bob_result, "direction", "") or ""),
+            "transition": bool(getattr(bob_result, "transition", False)),
+            "confidence": float(getattr(bob_result, "confidence", 0.0) or 0.0),
+            "checklist": checklist,
+            "missing_labels": self._bob_missing_labels(checklist),
+            "message": str(getattr(bob_result, "message", "") or ""),
+            "updated_at": float(time.time()),
+        }
+
+    def get_bob_snapshot(self, asset: str) -> Optional[dict[str, Any]]:
+        return self._bob_latest_by_asset.get(str(asset or "").upper())
 
     def _broken_capture_file(self, asset: str, reason: str, expired_zone_id: int) -> Path:
         ts = datetime.now(tz=BROKER_TZ).strftime("%Y%m%d_%H%M%S")
@@ -4316,6 +4412,12 @@ class ConsolidationBot:
 
         debug_print("[DEBUG-SCAN] 2b. After refresh_balance_and_risk")
 
+        # Guard de conexión ANTES de pedir velas: evita consumir ciclo con ws muerto.
+        conn_ready = await self.ensure_connection()
+        if not conn_ready:
+            log.warning("[SCAN] Conexión no lista; se omite ciclo para evitar velas vacías/stale")
+            return
+
         # Safety watchdog: liberar flag de gale si expiró el tiempo máximo posible
         _MAX_GALE_LIFETIME_SEC = float(DURATION_SEC) + float(GALE_BRIDGE_ORDER_TIMEOUT_SEC) + 30.0
         if self._gale_order_active and self._gale_order_active_since > 0:
@@ -4330,15 +4432,31 @@ class ConsolidationBot:
                 self._gale_order_active_since = 0.0
 
         assets: List[Tuple[str, int]] = []
+        fallback_diag: dict[str, int] = {}
         htf_scanner = getattr(self, "htf_scanner", None)
         htf_ready = False
+        htf_assets_count = 0
+        htf_stale_count = 0
+        htf_fresh_count = 0
+        fallback_added = 0
+        source_label = "none"
         debug_print("[DEBUG-SCAN] 3. Getting assets, htf_scanner=%s" % (htf_scanner is not None))
         if htf_scanner is not None:
             try:
-                assets = list(htf_scanner.get_eligible_assets(max_age_sec=240.0))
-                htf_ready = bool(assets)
-                if assets:
-                    log.debug("📌 Fuente activos scan: HTF biblioteca (%d)", len(assets))
+                htf_rows = list(htf_scanner.get_assets_with_freshness(max_age_sec=240.0))
+                htf_assets_count = len(htf_rows)
+                fresh_assets = [(sym, payout) for sym, payout, _age, is_fresh in htf_rows if is_fresh]
+                htf_fresh_count = len(fresh_assets)
+                htf_stale_count = max(0, htf_assets_count - htf_fresh_count)
+                assets = fresh_assets
+                htf_ready = bool(fresh_assets)
+                if fresh_assets:
+                    log.debug(
+                        "📌 Fuente activos scan: HTF parcial (%d frescos / %d total, stale=%d)",
+                        htf_fresh_count,
+                        htf_assets_count,
+                        htf_stale_count,
+                    )
                 else:
                     log.debug("📚 Biblioteca HTF vacía/no fresca: usando fallback clásico por ahora")
             except Exception:
@@ -4348,13 +4466,81 @@ class ConsolidationBot:
         debug_print("[DEBUG-SCAN] 4. Checking fallback, assets=%d" % len(assets))
         if not assets:
             debug_print("[DEBUG-SCAN] 5. Calling get_open_assets()...")
-            assets = await get_open_assets(self.client, MIN_PAYOUT)
+            assets, fallback_diag = await get_open_assets_detailed(self.client, MIN_PAYOUT)
+            source_label = "fallback"
             debug_print("[DEBUG-SCAN] 6. get_open_assets() returned %d assets" % len(assets))
             if assets:
                 if htf_scanner is None:
                     log.debug("📌 Fuente activos scan: get_open_assets fallback (%d)", len(assets))
                 elif not htf_ready:
                     log.debug("📌 Fuente activos scan: fallback temporal a get_open_assets (%d)", len(assets))
+        elif htf_scanner is not None and htf_stale_count > 0:
+            # Fallback parcial: solo completa los símbolos HTF no frescos con snapshot clásico.
+            fallback_assets, fallback_diag = await get_open_assets_detailed(self.client, MIN_PAYOUT)
+            existing = {sym for sym, _payout in assets}
+            for sym, payout in fallback_assets:
+                if sym not in existing:
+                    assets.append((sym, payout))
+                    existing.add(sym)
+                    fallback_added += 1
+            source_label = "hybrid"
+        elif assets:
+            source_label = "htf"
+
+        if assets:
+            # Priorización operativa: payout + estado BoB + penalización por racha de pérdidas.
+            bob_rank = {
+                "CONFIRMED": 40,
+                "RETEST": 25,
+                "SETUP": 10,
+                "WAITING": 0,
+            }
+
+            def _pair_priority(row: Tuple[str, int]) -> Tuple[float, int]:
+                sym, payout = row
+                streak = int(self.asset_loss_streaks.get(str(sym).upper(), 0) or 0)
+                bob_state = str((self._bob_latest_by_asset.get(str(sym).upper(), {}) or {}).get("phase", "WAITING") or "WAITING").upper()
+                score = float(payout) + float(bob_rank.get(bob_state, 0)) - float(streak * 2)
+                return score, int(payout)
+
+            assets.sort(key=lambda row: _pair_priority(row), reverse=True)
+            top_preview = ", ".join(f"{sym}:{payout}%" for sym, payout in assets[:5])
+            log.info("[PAIR-PRIORITY] top5=%s", top_preview or "none")
+
+        if assets:
+            if fallback_diag:
+                if source_label == "hybrid":
+                    log.info(
+                        "[PAIR-SELECT] source=hybrid htf(fresh=%d stale=%d total=%d) fallback_added=%d final=%d rejected(not_otc=%d closed=%d payout=%d parse=%d) min_payout=%d",
+                        htf_fresh_count,
+                        htf_stale_count,
+                        htf_assets_count,
+                        fallback_added,
+                        len(assets),
+                        int(fallback_diag.get("rejected_not_otc", 0)),
+                        int(fallback_diag.get("rejected_closed", 0)),
+                        int(fallback_diag.get("rejected_low_payout", 0)),
+                        int(fallback_diag.get("rejected_parse_error", 0)),
+                        int(MIN_PAYOUT),
+                    )
+                else:
+                    log.info(
+                        "[PAIR-SELECT] source=fallback htf=%d final=%d accepted=%d rejected(not_otc=%d closed=%d payout=%d parse=%d) min_payout=%d",
+                        htf_assets_count,
+                        len(assets),
+                        int(fallback_diag.get("accepted", 0)),
+                        int(fallback_diag.get("rejected_not_otc", 0)),
+                        int(fallback_diag.get("rejected_closed", 0)),
+                        int(fallback_diag.get("rejected_low_payout", 0)),
+                        int(fallback_diag.get("rejected_parse_error", 0)),
+                        int(MIN_PAYOUT),
+                    )
+            else:
+                log.info(
+                    "[PAIR-SELECT] source=htf final=%d library_size=%d",
+                    len(assets),
+                    htf_assets_count,
+                )
 
         if not assets:
             debug_print("[DEBUG-SCAN] 7. No assets available, returning")
@@ -4456,6 +4642,29 @@ class ConsolidationBot:
         LEGACY_RJ_black_box_scan_id = 0
         LEGACY_RJ_black_box_found = 0
         LEGACY_RJ_black_box_accepted = 0
+        strategy_signals: list[StrategySignal] = []
+        bob_phase_counts: dict[str, int] = {
+            BoBPhase.WAITING.value: 0,
+            BoBPhase.SETUP.value: 0,
+            BoBPhase.RETEST.value: 0,
+            BoBPhase.CONFIRMED.value: 0,
+        }
+
+        def _log_bob_transition(sym: str, timeframe_label: str, bob_result) -> None:
+            direction = bob_result.direction.upper() if bob_result.direction else "-"
+            log.info("[BOB %s] %s %s dir=%s", bob_result.state.value, sym, timeframe_label, direction)
+            checklist = bob_result.checklist or {}
+            checks = [
+                ("Consolidation", checklist.get("consolidation")),
+                ("Breakout", checklist.get("breakout")),
+                ("Retest", checklist.get("retest")),
+                ("Momentum", checklist.get("momentum")),
+            ]
+            for label, value in checks:
+                status = "OK" if value is True else "FALTA" if value is False else "N/A"
+                log.info("  - %s: %s", label, status)
+            if bob_result.message:
+                log.info("  - Detail: %s", bob_result.message)
         
         # Limpiar registro de candidatos para este ciclo
         self.last_scan_strat_a = []
@@ -4656,6 +4865,47 @@ class ConsolidationBot:
                 if len(candles_1m_collected) > SCAN_CANDLES_BUFFER_MAX:
                     candles_1m_collected.pop(next(iter(candles_1m_collected)), None)
                 debug_print("[DEBUG-SCAN] 32. After buffer cleanup, candles_1m len=%d" % len(candles_1m))
+
+                # BoB: detector independiente por simbolo/timeframe.
+                if BOB_ENABLED:
+                    bob_result = self.bob_detector.evaluate(
+                        symbol=sym,
+                        timeframe=BOB_TIMEFRAME_LABEL,
+                        candles=candles_1m,
+                    )
+                    self._record_bob_snapshot(sym, BOB_TIMEFRAME_LABEL, bob_result)
+                    bob_phase_counts[bob_result.state.value] = bob_phase_counts.get(bob_result.state.value, 0) + 1
+                    if bob_result.transition:
+                        _log_bob_transition(sym, BOB_TIMEFRAME_LABEL, bob_result)
+                        _bob_phase = {
+                            BoBPhase.SETUP: SignalPhase.SETUP,
+                            BoBPhase.RETEST: SignalPhase.RETEST,
+                            BoBPhase.CONFIRMED: SignalPhase.CONFIRMED,
+                        }.get(bob_result.state)
+                        if _bob_phase is not None and bob_result.direction:
+                            strategy_signals.append(
+                                StrategySignal(
+                                    strategy=StrategyName.BOB,
+                                    symbol=sym,
+                                    timeframe=BOB_TIMEFRAME_LABEL,
+                                    direction="call" if bob_result.direction == "buy" else "put",
+                                    phase=_bob_phase,
+                                    confidence=float(bob_result.confidence),
+                                    payout=int(payout),
+                                    reason=str(bob_result.message or "BoB transition"),
+                                    metadata={"state": bob_result.state.value},
+                                )
+                            )
+                    if bob_result.signal:
+                        self.stats["bob_signals"] += 1
+                        log.info(
+                            "BOB SIGNAL %s | %s %s | state=%s",
+                            bob_result.signal,
+                            sym,
+                            BOB_TIMEFRAME_LABEL,
+                            bob_result.state.value,
+                        )
+
                 strat_b_signal = False
                 strat_b_info = {
                     "confidence": 0.0,
@@ -4874,6 +5124,22 @@ class ConsolidationBot:
                 if strat_b_signal:
                     self.stats["strat_b_signals"] += 1
                     strat_b_hits.append((sym, payout, strat_b_conf, strat_b_direction, strat_b_signal_type))
+                    strategy_signals.append(
+                        StrategySignal(
+                            strategy=StrategyName.STRAT_B,
+                            symbol=sym,
+                            timeframe="1m",
+                            direction="call" if str(strat_b_direction).lower() == "call" else "put",
+                            phase=SignalPhase.CONFIRMED if strat_b_conf >= strat_b_required_conf else SignalPhase.SETUP,
+                            confidence=float(strat_b_conf),
+                            payout=int(payout),
+                            reason=str(strat_b_reason),
+                            metadata={
+                                "signal_type": strat_b_signal_type,
+                                "required_conf": float(strat_b_required_conf),
+                            },
+                        )
+                    )
                 else:
                     if strat_b_conf >= STRAT_B_PREVIEW_MIN_CONF:
                         strat_b_nearmiss.append((sym, payout, strat_b_conf, strat_b_reason))
@@ -4965,6 +5231,7 @@ class ConsolidationBot:
                 # Modo opcional: STRAT-B puede abrir operación por sí sola.
                 if (
                     STRAT_B_CAN_TRADE
+                    and not QUANT_ROUTER_ENABLED
                     and strat_b_signal
                     and strat_b_conf >= strat_b_required_conf
                     and len(self.trades) < MAX_CONCURRENT_TRADES
@@ -5615,6 +5882,14 @@ class ConsolidationBot:
             strat_b_insufficient,
             strat_b_total - len(strat_b_hits) - strat_b_timeout - strat_b_insufficient,
         )
+        if BOB_ENABLED:
+            log.info(
+                "[BOB] STATUS ciclo: WAITING=%d | SETUP=%d | RETEST=%d | CONFIRMED=%d",
+                bob_phase_counts.get(BoBPhase.WAITING.value, 0),
+                bob_phase_counts.get(BoBPhase.SETUP.value, 0),
+                bob_phase_counts.get(BoBPhase.RETEST.value, 0),
+                bob_phase_counts.get(BoBPhase.CONFIRMED.value, 0),
+            )
         if strat_b_hits:
             for sym, payout, conf, b_dir, b_type in sorted(strat_b_hits, key=lambda x: -x[2])[:STRAT_B_LOG_TOP_N]:
                 if b_type == "upthrust":
@@ -5661,6 +5936,135 @@ class ConsolidationBot:
                     conf * 100,
                     reason,
                 )
+
+        if QUANT_ROUTER_ENABLED:
+            routed_signals = self.signal_router.route(strategy_signals)
+            router_snapshot = self.signal_router.snapshot(strategy_signals, routed_signals)
+            log.info(render_control_center(router_snapshot))
+            self.stats["quant_routed"] += len(routed_signals)
+
+            routed_executed = 0
+            for routed in routed_signals:
+                if routed_executed >= QUANT_ROUTER_MAX_EXEC_PER_SCAN:
+                    break
+
+                signal = routed.signal
+                if signal.phase != SignalPhase.CONFIRMED:
+                    continue
+
+                can_trade = (
+                    (signal.strategy == StrategyName.STRAT_B and STRAT_B_CAN_TRADE)
+                    or (signal.strategy == StrategyName.BOB and BOB_CAN_TRADE)
+                )
+                if not can_trade:
+                    continue
+
+                if len(self.trades) >= MAX_CONCURRENT_TRADES or self._gale_order_active:
+                    break
+
+                sig_sym = str(signal.symbol).upper()
+                sig_candles_1m = list(candles_1m_collected.get(sig_sym, []) or [])
+                if len(sig_candles_1m) < 3:
+                    continue
+
+                sig_payout = int(signal.payout)
+                sig_direction = "call" if str(signal.direction).lower() == "call" else "put"
+                sig_amount, _ = self._compute_initial_amount(sig_payout)
+
+                sig_last = sig_candles_1m[-1]
+                sig_zone = ConsolidationZone(
+                    asset=sig_sym,
+                    ceiling=float(sig_last.high),
+                    floor=float(sig_last.low),
+                    bars_inside=0,
+                    detected_at=time.time(),
+                    range_pct=0.0,
+                )
+                sig_candidate = CandidateEntry(
+                    asset=sig_sym,
+                    payout=sig_payout,
+                    zone=sig_zone,
+                    direction=sig_direction,
+                    candles=sig_candles_1m,
+                    score=round(float(signal.confidence) * 100.0, 1),
+                    score_breakdown={
+                        "compression": 0.0,
+                        "bounce": round(float(signal.confidence) * 35.0, 2),
+                        "trend": round(float(signal.confidence) * 25.0, 2),
+                        "payout": round(min(20.0, (sig_payout / 95.0) * 20.0), 2),
+                    },
+                )
+
+                _sig_origin = signal.strategy.value
+                _sig_pattern = (
+                    "bob_breaker_confirmed"
+                    if signal.strategy == StrategyName.BOB
+                    else str(signal.metadata.get("signal_type") or "strat_b")
+                )
+                setattr(sig_candidate, "_reversal_pattern", _sig_pattern)
+                setattr(sig_candidate, "_reversal_strength", float(signal.confidence))
+                setattr(sig_candidate, "_entry_mode", _sig_pattern)
+                setattr(sig_candidate, "_pipeline_stage", "quant_router")
+                setattr(sig_candidate, "_pipeline_note", str(signal.reason))
+
+                sig_ctx = {
+                    "stage": "initial",
+                    "amount": float(sig_amount),
+                    "payout": int(sig_payout),
+                    "score_threshold": int(self.current_score_threshold),
+                    "phase2_profile": "strict",
+                    "candles_1m": sig_candles_1m,
+                    "candles_1m_source": "scan_buffer",
+                    "candles_1m_retry_count": 1,
+                    "candles_5m": list(self._last_asset_candles.get(sig_sym, []) or []),
+                    "strategy_origin": _sig_origin,
+                }
+                sig_ctx = self._build_shadow_context(sig_candidate, sig_ctx)
+
+                if not await self._pre_validate_entry(sig_candidate, sig_ctx):
+                    continue
+
+                sig_strategy = self._strategy_snapshot()
+                sig_strategy.update(
+                    {
+                        "strategy_origin": _sig_origin,
+                        "signal_phase": signal.phase.value,
+                        "router_reason": routed.route_reason,
+                        "router_priority_score": float(routed.priority_score),
+                        "signal_confidence": float(signal.confidence),
+                    }
+                )
+                sig_outcome = "DRY_RUN" if self.dry_run else "PENDING"
+                sig_cid = get_journal().log_candidate(
+                    sig_candidate,
+                    decision="ACCEPTED",
+                    amount=float(sig_amount),
+                    stage="initial",
+                    outcome=sig_outcome,
+                    strategy=sig_strategy,
+                )
+
+                sig_duration = STRAT_B_DURATION_SEC if signal.strategy == StrategyName.STRAT_B else DURATION_SEC
+                sig_entered = await self._enter(
+                    sig_sym,
+                    sig_direction,
+                    float(sig_amount),
+                    sig_zone,
+                    f"{_sig_origin} {signal.phase.value} conf={signal.confidence * 100:.1f}%",
+                    "initial",
+                    journal_cid=sig_cid,
+                    signal_ts=sig_candles_1m[-1].ts if sig_candles_1m else None,
+                    strategy_origin=_sig_origin,
+                    duration_sec=sig_duration,
+                    payout=int(sig_payout),
+                    score_original=round(float(signal.confidence) * 100.0, 1),
+                    candidate=sig_candidate,
+                    phase2_prevalidated=True,
+                )
+                if sig_entered:
+                    routed_executed += 1
+                    self.stats["quant_executed"] += 1
+                    await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
 
         # 3) Procesar reversiones pendientes (espera activa post-conflicto).
         if self.pending_reversals:

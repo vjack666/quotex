@@ -64,6 +64,7 @@ Flujo principal:
 
 ### Paths alternos
 - STRAT-B live path existe, pero `main.py` fuerza `STRAT_B_CAN_TRADE = False` por diseño operativo actual.
+- BoB (Breaker Order Block) agregado como detector independiente por símbolo/timeframe en `scan_all`: fases `WAITING -> SETUP -> RETEST -> CONFIRMED`, sin mezcla con STRAT-B y sin ejecución directa de órdenes.
 - Martin/gale usan `_enter(..., stage="martin")` y pasan por lock/timing.
 - Reconnect path: `ensure_connection()` -> `reconnect_client(...)` con lock de conexión.
 - Legacy path: código LEGACY-RJ sigue presente, flags operativos deshabilitados.
@@ -158,6 +159,28 @@ Estado actual: no hay evidencia suficiente para dictamen estadístico concluyent
 1. Asegurar cobertura de shadow_decision_audit en sesiones controladas.
 2. Ejecutar paquete SQL+scripts por sesión y preservar evidencia.
 3. Cerrar brechas de integridad del dataset antes de cualquier promoción del motor NEW.
+
+### 7.2) Fase 2 — faltantes para cierre completo
+
+Estado: Fase 2 está cerrada técnicamente en código, pero el cierre completo documental/operativo requiere completar estos puntos:
+
+1. Generar evidencia cuantitativa mínima de validación de Fase 2 en ventana controlada de 2h:
+   - operaciones por sesión en rango objetivo (1..5),
+   - score promedio de entradas >= 75,
+   - proporción de rechazos por HTF y por patrón con salida de journal.
+2. Consolidar en un único paquete de evidencia el output técnico de validación: ✅ completado (2026-05-22)
+   - `py_compile` archivos críticos,
+   - corrida `main.py --hub-readonly --once`,
+   - referencias a logs/export asociados.
+   Evidencia registrada:
+   - `data/exports/phase2_readonly_run_20260522_152043.log`
+   - `data/exports/session_20260522_152044_fae324f4/`
+3. Actualizar estado de cierre en documentos maestros con etiqueta explícita: ✅ completado (2026-05-22)
+   - `FASE 2 — CHECKLIST OPERATIVO PARA COPILOT.md`,
+   - `ROADMAP_TECNICO.md`,
+   - `ESTADO_REAL_SISTEMA.md`.
+
+Regla de control actualizada: con puntos 2 y 3 completados, Fase 2 queda en estado "completada técnicamente, cierre administrativo casi cerrado" y mantiene un único bloqueante: evidencia cuantitativa de corrida controlada 2h.
 
 ---
 
