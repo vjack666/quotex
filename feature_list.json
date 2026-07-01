@@ -1,0 +1,300 @@
+{
+  "project": "quotex-hft-bot",
+  "description": "Bot de trading de alta frecuencia para opciones binarias en Quotex. Estrategias: consolidación, Wyckoff Spring/Sweep, momentum, reversión, order blocks. Gestión de riesgo: Massaniello.",
+  "roadmap": {
+    "version": "2026-06-29",
+    "progress": { "done": 4, "total": 16 },
+    "next_recommended": "candle_cache",
+    "doc": "docs/ROADMAP.md",
+    "blockers": [
+      "Credenciales Quotex demo inválidas en .env — login rechazado por el broker"
+    ]
+  },
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_tests_to_close": true,
+    "require_approved_spec_to_implement": true,
+    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked", "superseded"],
+    "sdd_required_when": "feature has \"sdd\": true"
+  },
+  "features": [
+    {
+      "id": 1,
+      "name": "refactor_monolith",
+      "title": "Refactor: extraer módulos del monolito",
+      "phase": "foundation",
+      "priority": 1,
+      "description": "Dividir consolidation_bot.py en módulos: connection.py, scanner.py, executor.py, strat_a.py, strat_b.py. Facade ≤500 líneas.",
+      "acceptance": [
+        "consolidation_bot.py no supera las 500 líneas",
+        "Existen src/connection.py, src/scanner.py, src/executor.py, src/strat_a.py, src/strat_b.py",
+        "main.py importa los nuevos módulos y el flujo completo funciona",
+        "tests/test_connection.py, tests/test_scanner.py, tests/test_executor.py existen y pasan",
+        "init.ps1 termina en verde"
+      ],
+      "sdd": true,
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "name": "implement_missing_modules",
+      "title": "Implementar módulos SMC y filter_sell",
+      "phase": "foundation",
+      "priority": 2,
+      "description": "Crear módulos referenciados en imports pero ausentes en disco: smc_auto_trader.py, smc_decision_engine.py, smc_analysis.py, filter_and_sell_otc.py. Nota: config.py ya existe desde #1.",
+      "acceptance": [
+        "Existen src/smc_auto_trader.py, src/smc_decision_engine.py, src/smc_analysis.py",
+        "Existe src/filter_and_sell_otc.py",
+        "Cada módulo nuevo tiene tests unitarios",
+        "init.ps1 termina en verde"
+      ],
+      "sdd": true,
+      "status": "done"
+    },
+    {
+      "id": 3,
+      "name": "parallel_asset_scan",
+      "title": "Escaneo paralelo de activos OTC",
+      "phase": "performance",
+      "priority": 1,
+      "description": "Reemplazar escaneo secuencial por asyncio.gather sobre todos los OTC abiertos simultáneamente, con semáforo de concurrencia configurable.",
+      "acceptance": [
+        "El scanner obtiene todos los activos OTC abiertos en una sola llamada",
+        "Las velas se descargan en paralelo con un semáforo (CANDLE_FETCH_CONCURRENCY)",
+        "El tiempo total de escaneo se reduce significativamente vs secuencial",
+        "Los tests cubren el nuevo flujo paralelo"
+      ],
+      "sdd": true,
+      "status": "done",
+      "depends_on": [2]
+    },
+    {
+      "id": 4,
+      "name": "candle_cache",
+      "title": "Caché local de velas con actualización incremental",
+      "phase": "performance",
+      "priority": 2,
+      "description": "Implementar caché en memoria que solo pide las velas nuevas al broker (diferencial), en lugar de descargar 55 velas en cada ciclo de escaneo.",
+      "acceptance": [
+        "El caché almacena velas por activo y timeframe",
+        "En cada ciclo solo se piden las velas nuevas desde el último timestamp conocido",
+        "El caché es thread-safe (asyncio)",
+        "Los tests cubren el caso de primera carga, actualización y expiración"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [3]
+    },
+    {
+      "id": 5,
+      "name": "entry_sync_precision",
+      "title": "Sincronización precisa con apertura de vela",
+      "phase": "performance",
+      "priority": 3,
+      "description": "Mejorar la precisión del envío de órdenes para alinearse con la apertura de vela en <300ms (hoy 1.5s de tolerancia).",
+      "acceptance": [
+        "El tiempo de lag entre detección y envío es <300ms en promedio",
+        "El sistema rechaza órdenes que llegarían tarde (timing guard)",
+        "Existe logging de timing por cada orden (time_since_open, secs_to_close)",
+        "Tests cubren el nuevo sincronizador"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [4]
+    },
+    {
+      "id": 6,
+      "name": "strategy_momentum_1m",
+      "title": "Estrategia: Momentum 1m",
+      "phase": "strategies",
+      "priority": 1,
+      "description": "Implementar estrategia de momentum en timeframe de 1 minuto: CALL/PUT en dirección de velas con cuerpo grande + cierre en tercio superior/inferior.",
+      "acceptance": [
+        "Existe src/strat_momentum.py con la lógica de detección",
+        "Se integra con el sistema de scoring existente",
+        "Se respeta la gestión Massaniello (massaniello_risk.py)",
+        "Los tests cubren casos de momentum alcista, bajista y falso"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [5]
+    },
+    {
+      "id": 7,
+      "name": "strategy_reversal_swing",
+      "title": "Estrategia: Reversión en soporte/resistencia dinámica",
+      "phase": "strategies",
+      "priority": 2,
+      "description": "Implementar estrategia que opera reversiones en niveles swing calculados en tiempo real (soportes y resistencias dinámicas).",
+      "acceptance": [
+        "Existe src/strat_swing_reversal.py",
+        "Detecta niveles swing en velas de 5m y 15m",
+        "Entra CALL en toque de soporte con mecha + PUT en toque de resistencia",
+        "Tests cubren detección de niveles y señales válidas/inválidas"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [5]
+    },
+    {
+      "id": 8,
+      "name": "strategy_order_block",
+      "title": "Estrategia: Order Block institucional",
+      "phase": "strategies",
+      "priority": 3,
+      "description": "Completar y activar la detección de Order Blocks. Extraer lógica parcial legacy a src/strat_order_block.py. Operar en dirección del OB.",
+      "acceptance": [
+        "Existe src/strat_order_block.py con lógica de detección",
+        "Detecta OB alcistas y bajistas con los criterios definidos",
+        "Entra CALL en OB alcista, PUT en OB bajista",
+        "OB se invalida si precio cruza completamente del lado opuesto",
+        "Tests cubren detección, mitigación e invalidación"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [5]
+    },
+    {
+      "id": 9,
+      "name": "backtesting_engine",
+      "title": "Motor de backtesting offline",
+      "phase": "intelligence",
+      "priority": 1,
+      "description": "Construir motor que reproduce trades históricos usando datos de trade_journal.db + velas guardadas para validar estrategias sin conexión al broker.",
+      "acceptance": [
+        "Existe src/backtester.py que carga datos históricos desde la BD",
+        "Simula señales de todas las estrategias activas sobre datos pasados",
+        "Genera reporte de rendimiento (win rate, profit, drawdown, sharpe)",
+        "Tests con datos sintéticos verifican resultados conocidos"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [6, 7, 8]
+    },
+    {
+      "id": 10,
+      "name": "dynamic_weight_calibration",
+      "title": "Calibración dinámica de pesos del scorer",
+      "phase": "intelligence",
+      "priority": 2,
+      "description": "Implementar sistema que ajusta automáticamente los pesos del entry_scorer según condiciones de mercado (volatilidad, hora, sesión, rendimiento reciente).",
+      "acceptance": [
+        "Existe src/weight_calibrator.py",
+        "Lee historial de trades de la BD para calcular pesos óptimos",
+        "Exporta pesos calibrados a un archivo JSON",
+        "El bot carga pesos calibrados al inicio",
+        "Tests con datos sintéticos verifican la calibración"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [9]
+    },
+    {
+      "id": 11,
+      "name": "massaniello_persistence",
+      "title": "Persistencia de estado Massaniello en SQLite",
+      "phase": "operations",
+      "priority": 1,
+      "description": "Guardar y recuperar el estado de la sesión Massaniello (wins, losses, ops, capital, session_start) en trade_journal.db para sobrevivir a reinicios del bot.",
+      "acceptance": [
+        "El estado Massaniello se guarda en trade_journal.db tras cada operación",
+        "Al iniciar, el bot recupera el último estado guardado",
+        "Si no hay estado previo, arranca con valores por defecto (5 ops / 3 ITM)",
+        "Tests cubren guardado, recuperación y corrupción de datos"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [16],
+      "supersedes": "martingale_persistence"
+    },
+    {
+      "id": 12,
+      "name": "hub_live_websocket",
+      "title": "Hub en vivo vía WebSocket",
+      "phase": "operations",
+      "priority": 2,
+      "description": "Reemplazar el hub basado en log-parser por un sistema en vivo: el bot emite eventos por WebSocket interno y el hub los consume en tiempo real.",
+      "acceptance": [
+        "El bot inicia un servidor WebSocket interno",
+        "Emite eventos: señal_detectada, orden_enviada, orden_cerrada, balance, error",
+        "El hub se conecta al WebSocket y muestra datos en vivo",
+        "El hub funciona sin necesidad de leer el archivo de log"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [11]
+    },
+    {
+      "id": 13,
+      "name": "kelly_criterion_sizing",
+      "title": "Kelly Criterion como complemento de sizing",
+      "phase": "operations",
+      "priority": 3,
+      "description": "Complementar Massaniello con Kelly Criterion: ajustar el capital base de la sesión según win rate y payout históricos por activo/estrategia.",
+      "acceptance": [
+        "Existe src/kelly_sizer.py que calcula el porcentaje óptimo de Kelly",
+        "Usa datos históricos de la BD para estimar win rate por activo/estrategia",
+        "Aplica fracción de Kelly (por defecto 25%) para sizing conservador",
+        "No reemplaza Massaniello; actúa sobre el capital inicial de sesión",
+        "Tests cubren cálculo, límites y casos extremos"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [10]
+    },
+    {
+      "id": 14,
+      "name": "diversification_enforcer",
+      "title": "Diversificación forzada de activos",
+      "phase": "operations",
+      "priority": 4,
+      "description": "Implementar lógica que evite sobre-exposición a un solo activo: máximo N operaciones simultáneas, mínimo spread, rotación forzada.",
+      "acceptance": [
+        "Configurable: max_simultaneous_trades, min_asset_spread, max_entries_per_asset",
+        "El sistema rechaza entradas si exceden los límites",
+        "Logging claro de cada rechazo por diversificación",
+        "Tests cubren todos los límites"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [10]
+    },
+    {
+      "id": 15,
+      "name": "telegram_alerts",
+      "title": "Alertas por Telegram",
+      "phase": "operations",
+      "priority": 5,
+      "description": "Enviar notificaciones a Telegram para eventos críticos: sesión Massaniello cumplida, racha de pérdidas, conexión caída, stop-loss activado.",
+      "acceptance": [
+        "Existe src/alerter.py que envía mensajes vía Bot API de Telegram",
+        "Se configura con variables de entorno (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)",
+        "Eventos: sesion_cumplida, racha_perdidas, conexion_caida, stop_loss",
+        "Los tests usan mocks para no depender de Telegram real"
+      ],
+      "sdd": true,
+      "status": "pending",
+      "depends_on": [10]
+    },
+    {
+      "id": 16,
+      "name": "massaniello_risk",
+      "title": "Gestión de riesgo Massaniello (reemplaza martingala)",
+      "phase": "foundation",
+      "priority": 3,
+      "description": "Reemplazar MartingaleCalculator por motor Massaniello: 5 operaciones por sesión de 1h, objetivo 3 ITM, solo demo PRACTICE.",
+      "acceptance": [
+        "Existen src/massaniello_engine.py y src/massaniello_risk.py",
+        "executor.py usa MassanielloRiskManager en lugar de MartingaleCalculator",
+        "Config: MASSANIELLO_OPERATIONS=5, MASSANIELLO_EXPECTED_WINS=3, SESSION_MAX_MIN=60",
+        "Sesión demo forzada a PRACTICE",
+        "Log de sesión cumplida cuando 3W en 5 ops",
+        "tests/test_massaniello_engine.py y tests/test_massaniello_risk.py pasan",
+        "init.ps1 termina en verde"
+      ],
+      "sdd": true,
+      "status": "done",
+      "supersedes": "martingale_calculator (runtime)"
+    }
+  ]
+}

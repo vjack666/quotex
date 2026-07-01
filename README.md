@@ -1,150 +1,64 @@
 # QUOTEX Trading System
 
-Bot asyncio 24/7 para operar activos OTC en Quotex con estrategias independientes,
-martingala por contexto aislado, GaleWatcher en hilo dedicado y caja negra SQLite por día.
+Sistema unificado para bots de trading con pyquotex.
 
----
+## Agentes de IA — arranque autónomo
 
-## Estrategias activas
+Para reanudar el proyecto en cualquier máquina después de `git pull`:
 
-| ID | Nombre | Duración | Estado |
-|----|--------|----------|--------|
-| STRAT-A | Consolidación (techo/piso en 5 min) | 300 s | **Opera** |
-| STRAT-B | Spring / Upthrust (sweep de liquidez) | 300 s | Implementada, deshabilitada por configuración runtime de `main.py` |
+1. Escribe **`start`** al agente.
+2. El agente ejecuta el workflow en [`agent/START.md`](agent/START.md).
+3. Lee el handoff: [`agent/HANDOFF.md`](agent/HANDOFF.md).
 
-### STRAT-A — Consolidación
-- Escanea activos OTC y aplica filtros operativos del runtime.
-- Detecta consolidación en M5: mínimo 15 velas dentro del rango, ancho máximo 0.3 %.
-- Entra en techo (PUT) o piso (CALL) cuando el precio llega a la zona.
-- Usa pre-validación OLD (`_pre_validate_entry`) con vetos binarios antes de `_enter()`.
-- Bloqueo de re-entrada en la misma estructura: 180 min (configurable).
+Documentación de sesión: carpeta [`agent/`](agent/). Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md). Harness SDD: [`AGENTS.md`](AGENTS.md).
 
-### STRAT-B — Spring / Upthrust
-- Detecta barridos de liquidez en zonas de estructura.
-- Tiene path de ejecución implementado en `consolidation_bot.py`.
-- En estado actual, `main.py` fuerza `STRAT_B_CAN_TRADE = False` en `_apply_runtime_config()`.
+## Flujo esencial
 
----
-
-## Martingala y gestión de capital
-
-- `MartingaleCalculator` (src/martingale_calculator.py): calcula la inversión siguiente
-  en base al saldo actual, objetivo de incremento y máximo de entradas consecutivas (4).
-- **Contexto aislado por estrategia+activo**: cada par (estrategia, activo) tiene su
-  propia instancia de calculadora para que una pérdida en EURUSD no contamine la secuencia
-  de GBPUSD. El martin anticipado usa siempre el calculador del contexto correcto.
-- Monto mínimo: `$1.01` (broker exige estrictamente > $1.00).
-- GaleWatcher (`mg/mg_watcher.py`): hilo independiente que monitorea la operación abierta,
-  consulta precio cada 1 s y dispara el gale exactamente 3 s antes del cierre si va perdiendo.
-
----
-
-## Arquitectura
-
-```
-main.py                      ← Entrada CLI, configuración de runtime, lanzador de monitores
-src/
-  consolidation_bot.py       ← Motor central (STRAT-A, B), place_order, GaleWatcher bridge
-  entry_scorer.py            ← Scoring de candidatos STRAT-A
-  entry_decision_engine.py   ← Motor NEW en modo observador shadow (sin autoridad live)
-  candle_patterns.py         ← Patrones de vela (rechazo, doji, envolvente…)
-  strategy_spring_sweep.py   ← Detección STRAT-B
-  htf_scanner.py             ← Librería HTF 15m en background para contexto de tendencia
-  martingale_calculator.py   ← Calculadora de martingala con contexto aislado
-  masaniello_engine.py       ← Motor de sizing y ciclo 5/2
-  trade_journal.py           ← Registro de operaciones (SQLite trade_journal)
-  black_box_recorder.py      ← Caja negra completa (SQLite black_box_strat)
-mg/
-  mg_watcher.py              ← GaleWatcher (hilo dedicado)
-hub/
-  hub_dashboard.py           ← Panel HUB (render live/static)
-  hub_models.py              ← HubState, modelos de datos del panel
-data/
-  db/                        ← trade_journal-YYYY-MM-DD.db, black_box_strat-YYYY-MM-DD.db
-  logs/bot/                  ← consolidation_bot-YYYY-MM-DD.log
-  hub_runtime_state.json     ← Snapshot en vivo para los monitores A/B/C
-Documentos/                  ← Documentación técnica detallada y roadmap
-runtime/                     ← Artefactos runtime y bloqueos de proceso
-  logs/root_archive/         ← Históricos de auditorías manuales movidos desde raíz
-sessions/                    ← Configuración/sesión del sistema
-src/lab/                     ← Análisis offline y scripts de diagnóstico
-  ad_hoc/                    ← Scripts legacy de auditoría puntual (no críticos de runtime)
-```
-
-### Detalles críticos de implementación
-
-- **GaleWatcher bridge**: `_run_on_main_loop_bounded` delega corrutinas del hilo GaleWatcher
-  al event loop principal vía `asyncio.run_coroutine_threadsafe`. Si el bridge supera el timeout
-  (`GALE_BRIDGE_PRICE_TIMEOUT_SEC = 2.2 s`), cancela el `concurrent.futures.Future` para evitar
-  acumulación de tareas huérfanas que congelen el loop.
-- **Reset de flags pyquotex**: si `buy()` expira en 30 s, se resetean
-  `ssl_Mutual_exclusion` y `ssl_Mutual_exclusion_write` para desbloquear el spin-lock interno
-  de la librería y permitir el siguiente `buy()` sin reconectar.
-- **Caja negra SQLite**: tablas `scans`, `scan_candidates`, `strategy_metrics`, `phase_log`.
-  Rotación diaria automática. Retención de archivos: 31 días.
-
----
+- src/main.py: orquestador principal
+- src/consolidation_bot.py: bot de consolidación con selección matemática del mejor candidato
+- src/entry_scorer.py: motor de scoring (0-100) para filtrar entradas
+- src/filter_and_sell_otc.py: bot de filtro y venta por payout
+- src/smc_auto_trader.py: trader SMC
 
 ## Setup rápido (Windows PowerShell)
 
-```powershell
-cd "C:\Users\v_jac\Desktop\QUOTEX - segunda estrategia"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+1. cd c:\Users\v_jac\Desktop\QUOTEX
+2. python -m venv .venv
+3. .\.venv\Scripts\Activate.ps1
+4. pip install --upgrade pip
+5. pip install -r requirements.txt
 
-## Variables requeridas en `.env`
+## Variables requeridas en .env
 
-```
-QUOTEX_EMAIL=tu@email.com
-QUOTEX_PASSWORD=tupassword
-```
+- QUOTEX_EMAIL
+- QUOTEX_PASSWORD
 
----
+## Ejecutar bots
 
-## Ejecución
+Orquestador:
 
-| Comando | Descripción |
-|---------|-------------|
-| `python main.py` | Loop continuo (DEMO) |
-| `python main.py --once` | Un solo ciclo y salir |
-| `python main.py --real` | Loop en cuenta REAL ⚠️ |
-| `python main.py --hub-readonly` | Solo monitoreo, sin órdenes |
-| `python main.py --hub-render fallback` | Fuerza render estable del HUB en terminal Windows |
+- python src/main.py --help
 
-## Parámetros CLI principales
+Consolidation (1 ciclo):
 
-```
-Gestión de capital
-  --amount-initial 1.01          Monto mínimo de orden (broker: > $1.00)
-  --max-loss-session 0.20        Stop-loss de sesión (fracción del saldo)
-  --cycle-profit-pct 0.10        Take-profit por ciclo (fracción)
+- python src/main.py consolidation --live
 
-Filtros operativos
-  --min-payout 85                Payout mínimo que aplica `main.py` sobre runtime
-  --scan-lead-sec 35.0           Anticipación del scan antes del open de vela
-  --same-asset-cooldown-sec 65   Cooldown entre entradas al mismo activo
+Consolidation 24/7:
 
-STRAT-A
-  --adaptive-threshold-base 50   Umbral base aplicado por CLI en runtime
-  --adaptive-threshold-low 48    Umbral bajo dinámico
-  --adaptive-threshold-high 54   Umbral alto dinámico
-  --structure-entry-lock-ttl-min 180
-```
+- python src/main.py consolidation --live --loop
 
-## Estado de Validación (actual)
+SMC:
 
-- OLD es autoridad única de ejecución.
-- NEW está integrado como observador shadow (sin autoridad live).
-- La instrumentación shadow permanece en runtime, pero los scripts auxiliares de postproceso en `src/lab/` fueron retirados en la limpieza actual.
-- La validación estadística formal NEW vs OLD todavía no es concluyente.
-- Antes de cualquier promoción de NEW, revisar `Documentos/files/ESTADO_REAL_SISTEMA.md`.
+- python src/main.py smc --live --asset EURUSD_otc --amount 1 --duration 60
 
----
+Filter sell:
 
-## Análisis y flujo de aprendizaje
+- python src/main.py filter-sell --live --min-payout 85 --amount 1
 
-Actualmente el flujo de aprendizaje se basa en logs del runtime y consultas directas al journal.
-Los comandos de postproceso shadow de `src/lab` fueron retirados en esta limpieza.
+## Monitoreo en vivo
+
+- Get-Content consolidation_bot.log -Wait -Tail 40
+
+## Nota de limpieza
+
+Los scripts de prueba y diagnóstico fueron movidos a src/lab para mantener src limpio sin eliminar herramientas útiles.

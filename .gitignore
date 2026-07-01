@@ -10,3 +10,18 @@ session.json
 *.db
 *.db-shm
 *.db-wal
+
+# Harness / agente
+*.tmp
+*.bak
+progress/impl_*.md
+progress/review_*.md
+progress/spec_*.md
+
+# Scratch / local only
+terminals/
+_test_conn.py
+_test_conn2.py
+analyze_axp_result.py
+query_axp.py
+test_exact_target.py

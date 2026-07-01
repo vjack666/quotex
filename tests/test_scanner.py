@@ -1,0 +1,248 @@
+"""Tests de scanner.py con activos/velas sintéticas."""
+from __future__ import annotations
+
+import asyncio
+import sys
+import time
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+SRC = Path(__file__).resolve().parent.parent / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from models import Candle
+import parallel_fetch
+from scanner import AssetScanner
+
+
+class FakeBot:
+    def __init__(self, greylist: set[str] | None = None):
+        self.client = MagicMock()
+        self.dry_run = True
+        self.account_type = "PRACTICE"
+        self.zones = {}
+        self.broken_zones = {}
+        self.trades = {}
+        self.stats = {
+            "scans": 0, "skipped": 0, "expired_zones": 0,
+            "filtered_sensor": 0, "strat_b_signals": 0,
+            "rejected_young_zone": 0, "score_rejected_age": 0,
+            "score_rejected_score": 0,
+        }
+        self.greylist_assets = greylist or set()
+        self.failed_assets = {}
+        self.pending_reversals = {}
+        self.pending_martin = {}
+        self.last_known_price = {}
+        self.order_blocks_by_asset = {}
+        self.ma_state_by_asset = {}
+        self.watched_candidates = {}
+        self.capture_dir = Path(__file__).parent / "_tmp_capture"
+        self.capture_dir.mkdir(exist_ok=True)
+        self._followup_capture_tasks = set()
+        self.compensation_pending = False
+        self.last_closed_amount = 0.0
+        self.last_closed_outcome = ""
+        self.accepted_scans_window = __import__("collections").deque(maxlen=10)
+        self.current_score_threshold = 65
+        self.asset_blacklist_until = {}
+
+
+def _candle(ts: int, price: float) -> Candle:
+    return Candle(ts=ts, open=price, high=price + 0.001, low=price - 0.001, close=price)
+
+
+@pytest.mark.asyncio
+async def test_scanner_collects_candidates(monkeypatch):
+    bot = FakeBot()
+    executor = MagicMock()
+    executor.refresh_balance_and_risk = AsyncMock(return_value=False)
+    executor._check_martin = AsyncMock(return_value=False)
+    executor._process_pending_martin = AsyncMock(return_value=([], False))
+    executor._update_dynamic_threshold = MagicMock(return_value=65)
+    executor._record_scan_acceptances = MagicMock()
+    executor._strategy_snapshot = MagicMock(return_value={})
+    executor._cleanup_asset_blacklist = MagicMock()
+    executor._is_asset_blacklisted = MagicMock(return_value=False)
+    executor._log_dry_run_verbose_cycle_summary = MagicMock()
+    executor._compute_initial_amount = MagicMock(return_value=(1.0, 0.8))
+
+    scanner = AssetScanner(bot, executor)
+
+    monkeypatch.setattr(
+        "scanner.get_open_assets",
+        AsyncMock(return_value=[("EURUSD_otc", 85)]),
+    )
+
+    async def fake_fetch(client, asset, tf, count, timeout_sec, retries=2):
+        if tf == 300:
+            return [_candle(i * 300, 1.1000) for i in range(20)]
+        return [_candle(i * 60, 1.1000) for i in range(25)]
+
+    monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr(scanner, "_process_pending_reversals", AsyncMock(return_value=[]))
+
+    await scanner.scan_all()
+    assert bot.stats["scans"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scanner_skips_greylisted_asset(monkeypatch):
+    bot = FakeBot(greylist={"USDDZD_otc"})
+    executor = MagicMock()
+    executor.refresh_balance_and_risk = AsyncMock(return_value=False)
+    executor._check_martin = AsyncMock(return_value=False)
+    executor._process_pending_martin = AsyncMock(return_value=([], False))
+    executor._update_dynamic_threshold = MagicMock(return_value=65)
+    executor._record_scan_acceptances = MagicMock()
+    executor._strategy_snapshot = MagicMock(return_value={})
+    executor._cleanup_asset_blacklist = MagicMock()
+    executor._is_asset_blacklisted = MagicMock(return_value=False)
+    executor._log_dry_run_verbose_cycle_summary = MagicMock()
+
+    scanner = AssetScanner(bot, executor)
+    monkeypatch.setattr(
+        "scanner.get_open_assets",
+        AsyncMock(return_value=[("USDDZD_otc", 90)]),
+    )
+
+    async def fake_fetch(*args, **kwargs):
+        return [_candle(i, 1.0) for i in range(20)]
+
+    monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
+
+    await scanner.scan_all()
+    assert bot.stats["skipped"] >= 1
+
+
+def _make_scanner_mocks(monkeypatch, assets: list[tuple[str, int]]):
+    bot = FakeBot()
+    executor = MagicMock()
+    executor.refresh_balance_and_risk = AsyncMock(return_value=False)
+    executor._check_martin = AsyncMock(return_value=False)
+    executor._process_pending_martin = AsyncMock(return_value=([], False))
+    executor._update_dynamic_threshold = MagicMock(return_value=65)
+    executor._record_scan_acceptances = MagicMock()
+    executor._strategy_snapshot = MagicMock(return_value={})
+    executor._cleanup_asset_blacklist = MagicMock()
+    executor._is_asset_blacklisted = MagicMock(return_value=False)
+    executor._log_dry_run_verbose_cycle_summary = MagicMock()
+    executor._compute_initial_amount = MagicMock(return_value=(1.0, 0.8))
+    executor.enter_trade = AsyncMock(return_value=True)
+
+    scanner = AssetScanner(bot, executor)
+    monkeypatch.setattr(
+        "scanner.get_open_assets",
+        AsyncMock(return_value=assets),
+    )
+    monkeypatch.setattr(scanner, "_process_pending_reversals", AsyncMock(return_value=[]))
+    return bot, executor, scanner
+
+
+@pytest.mark.asyncio
+async def test_parallel_fetch_uses_semaphore(monkeypatch):
+    sem_created: list[asyncio.Semaphore] = []
+    original_sem = asyncio.Semaphore
+
+    class TrackingSemaphore(original_sem):
+        def __init__(self, value: int) -> None:
+            super().__init__(value)
+            sem_created.append(self)
+
+    monkeypatch.setattr(asyncio, "Semaphore", TrackingSemaphore)
+    monkeypatch.setattr(
+        parallel_fetch,
+        "fetch_candles_with_retry",
+        AsyncMock(return_value=[]),
+    )
+
+    await parallel_fetch.fetch_candles_parallel(
+        MagicMock(),
+        ["A", "B", "C"],
+        300,
+        10,
+        concurrency=3,
+        timeout_sec=1.0,
+    )
+
+    assert len(sem_created) == 1
+
+
+@pytest.mark.asyncio
+async def test_parallel_fetch_respects_concurrency_limit(monkeypatch):
+    concurrency = 2
+    active = 0
+    max_active = 0
+    lock = asyncio.Lock()
+
+    async def slow_fetch(client, asset, tf, count, timeout_sec, retries=2):
+        nonlocal active, max_active
+        async with lock:
+            active += 1
+            max_active = max(max_active, active)
+        await asyncio.sleep(0.03)
+        async with lock:
+            active -= 1
+        return [_candle(0, 1.0)]
+
+    monkeypatch.setattr(parallel_fetch, "fetch_candles_with_retry", slow_fetch)
+
+    symbols = [f"SYM{i}" for i in range(6)]
+    t0 = time.monotonic()
+    result = await parallel_fetch.fetch_candles_parallel(
+        MagicMock(),
+        symbols,
+        300,
+        10,
+        concurrency=concurrency,
+        timeout_sec=5.0,
+    )
+    elapsed = time.monotonic() - t0
+
+    assert len(result) == len(symbols)
+    assert max_active <= concurrency
+    sequential_estimate = len(symbols) * 0.03
+    assert elapsed < sequential_estimate
+
+
+@pytest.mark.asyncio
+async def test_scan_all_prefetches_before_eval(monkeypatch):
+    num_assets = 4
+    delay_sec = 0.05
+    assets = [(f"ASSET{i}_otc", 85 + i) for i in range(num_assets)]
+    fetch_started: list[float] = []
+    fetch_completed: list[float] = []
+    eval_started_at: list[float] = []
+
+    async def fake_fetch(client, asset, tf, count, timeout_sec, retries=2):
+        if tf in (300, 60):
+            fetch_started.append(time.monotonic())
+            await asyncio.sleep(delay_sec)
+            fetch_completed.append(time.monotonic())
+        n = 25 if tf == 60 else 20
+        return [_candle(i * max(tf, 1), 1.1000) for i in range(n)]
+
+    def detect_with_flag(candles, **kwargs):
+        eval_started_at.append(time.monotonic())
+        return None
+
+    _, _, scanner = _make_scanner_mocks(monkeypatch, assets)
+    monkeypatch.setattr(parallel_fetch, "fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr("scanner.detect_consolidation", detect_with_flag)
+
+    await scanner.scan_all()
+
+    expected_prefetch_calls = num_assets * 2
+    assert len(fetch_started) == expected_prefetch_calls
+    assert len(fetch_completed) == expected_prefetch_calls
+    assert eval_started_at, "debe evaluar al menos un activo tras prefetch"
+
+    prefetch_span = max(fetch_completed) - min(fetch_started)
+    sequential_sum = expected_prefetch_calls * delay_sec
+    assert prefetch_span < sequential_sum * 0.75
+
+    assert max(fetch_completed) <= min(eval_started_at) + 0.01
