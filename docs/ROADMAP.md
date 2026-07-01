@@ -3,7 +3,7 @@
 > **Fuente de verdad operativa:** `feature_list.json` (estados y acceptance criteria).
 > Este documento es la vista legible del roadmap: fases, dependencias y progreso.
 >
-> **Última actualización:** 2026-06-29
+> **Última actualización:** 2026-06-30
 
 ---
 
@@ -12,10 +12,10 @@
 | Métrica | Valor |
 |---------|-------|
 | Features totales | 16 |
-| Completadas | **4** (25 %) |
+| Completadas | **7** (44 %) |
 | En curso | 0 |
-| Siguiente recomendada | **#4** `candle_cache` |
-| Tests | 61 passing (`python -m pytest tests/ -v`) |
+| Siguiente recomendada | **#7** `strategy_reversal_swing` |
+| Tests | 74 passing (`python -m pytest tests/ -v`) |
 | Gestión de riesgo activa | **Massaniello** (5 ops / 3 ITM / 60 min / PRACTICE) |
 
 ### Bloqueo operativo
@@ -35,21 +35,21 @@
 | 16 | `massaniello_risk` | ✅ done | Reemplaza martingala; `massaniello_engine.py` + `massaniello_risk.py` |
 | 2 | `implement_missing_modules` | ✅ done | SMC + `filter_and_sell_otc` |
 
-### Fase 1 — Rendimiento del scanner
+### Fase 1 — Rendimiento del scanner ✅
 
 | ID | Feature | Estado | Depende de |
 |----|---------|--------|------------|
 | 3 | `parallel_asset_scan` | ✅ done | #2 |
-| 4 | `candle_cache` | ⏳ **siguiente** | #3 |
-| 5 | `entry_sync_precision` | pending | #4 |
+| 4 | `candle_cache` | ✅ done | #3 |
+| 5 | `entry_sync_precision` | ✅ done | #4 |
 
 ### Fase 2 — Nuevas estrategias
 
 | ID | Feature | Estado | Depende de |
 |----|---------|--------|------------|
-| 6 | `strategy_momentum_1m` | pending | Fase 1 |
-| 7 | `strategy_reversal_swing` | pending | Fase 1 |
-| 8 | `strategy_order_block` | pending | Fase 1 |
+| 6 | `strategy_momentum_1m` | ✅ done | #5 |
+| 7 | `strategy_reversal_swing` | ⏳ **siguiente** | #5 |
+| 8 | `strategy_order_block` | pending | #5 |
 
 ### Fase 3 — Inteligencia y validación
 
@@ -77,10 +77,10 @@ flowchart TD
     F1["#1 refactor_monolith ✅"]
     F16["#16 massaniello_risk ✅"]
     F2["#2 missing_modules ⏳"]
-    F3["#3 parallel_scan"]
-    F4["#4 candle_cache"]
-    F5["#5 entry_sync"]
-    F6["#6 momentum"]
+    F3["#3 parallel_scan ✅"]
+    F4["#4 candle_cache ✅"]
+    F5["#5 entry_sync ✅"]
+    F6["#6 momentum ✅"]
     F7["#7 swing_reversal"]
     F8["#8 order_block"]
     F9["#9 backtesting"]
@@ -110,9 +110,13 @@ flowchart TD
 | `consolidation_bot.py` | Facade / orquestador (≤500 líneas) | #1 |
 | `connection.py` | I/O broker (velas, órdenes, reconexión) | #1 |
 | `scanner.py` | Escaneo y orquestación de señales | #1 |
+| `parallel_fetch.py` | Prefetch paralelo de velas | #3 |
+| `candle_cache.py` | Caché incremental por activo/tf | #4 |
+| `entry_sync.py` | Sincronización open 1m (<300ms) | #5 |
 | `executor.py` | Ejecución, ciclo, gestión de capital | #1, #16 |
 | `strat_a.py` | Estrategia consolidación (pura) | #1 |
 | `strat_b.py` | Estrategia Spring/Upthrust (pura) | #1 |
+| `strat_momentum.py` | Estrategia momentum 1m | #6 |
 | `massaniello_engine.py` | Motor matemático Massaniello | #16 |
 | `massaniello_risk.py` | Gestor de sesión y stakes | #16 |
 | `config.py` | Constantes operativas | #1 |
@@ -120,7 +124,7 @@ flowchart TD
 | `entry_scorer.py`, `trade_journal.py` | Scoring y persistencia | pre-existente |
 | `martingale_calculator.py` | **Deprecado** — no usar en código nuevo | legacy |
 
-### Módulos pendientes (feature #2)
+### Módulos SMC (feature #2) ✅
 
 - `smc_auto_trader.py`
 - `smc_decision_engine.py`
@@ -157,6 +161,9 @@ Log esperado: `🎯 SESIÓN MASSANIELLO CUMPLIDA`.
 | 2026-06-29 | #6, #13 actualizadas: referencias a Massaniello en lugar de martingala |
 | 2026-06-29 | Documento `docs/ROADMAP.md` creado |
 | 2026-06-29 | Carpeta `/agent` creada — workflow autónomo (`START.md`, handoff, tasks) |
+| 2026-06-30 | #2 `implement_missing_modules` completada |
+| 2026-06-30 | #3 `parallel_asset_scan` completada |
+| 2026-06-30 | #4 `candle_cache`, #5 `entry_sync_precision`, #6 `strategy_momentum_1m` completadas — progreso 7/16 |
 
 ---
 

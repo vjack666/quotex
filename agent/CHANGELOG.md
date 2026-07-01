@@ -8,16 +8,21 @@
 ## 2026-06-30
 
 ### Added
+- **Features #4, #5, #6** — `candle_cache.py`, `entry_sync.py`, `strat_momentum.py`; 13 new tests (74 total).
 - **Feature #3 `parallel_asset_scan`** — `parallel_fetch.py`; prefetch paralelo 5m+1m en `scanner.py`; 3 new tests (61 total).
 - **Feature #2 `implement_missing_modules`** — `smc_analysis.py`, `smc_decision_engine.py`, `smc_auto_trader.py`, `filter_and_sell_otc.py`; 18 new tests (58 total).
 
 ### Completed features
+- **#4 `candle_cache`** — Caché incremental por activo/tf; reviewer APPROVED.
+- **#5 `entry_sync_precision`** — Sincronización open 1m, lag ≤ 0.3s; reviewer APPROVED.
+- **#6 `strategy_momentum_1m`** — STRAT-MOMENTUM en scanner; reviewer APPROVED.
 - **#3 `parallel_asset_scan`** — Escaneo paralelo OTC; reviewer APPROVED.
 - **#2 `implement_missing_modules`** — SMC stack + filter-sell OTC; reviewer APPROVED.
 
 ### Changed
-- **`feature_list.json`** — #3 → `done`; progress 4/16; next `#4 candle_cache`.
-- **`agent/PROJECT_STATE.md`, `agent/TASKS.md`, `agent/HANDOFF.md`** — synced for #3 closure.
+- **`feature_list.json`** — #4, #5, #6 → `done`; progress 7/16; next `#7 strategy_reversal_swing`.
+- **`agent/PROJECT_STATE.md`, `agent/TASKS.md`, `agent/HANDOFF.md`** — synced for #4–#6 closure.
+- **`docs/ROADMAP.md`** — Fase 1 completa; Fase 2 en curso (momentum done).
 
 ---
 

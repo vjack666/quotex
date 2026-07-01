@@ -13,7 +13,7 @@
 | Type | HFT binary options bot for Quotex |
 | Language | Python 3.10+ (running 3.13) |
 | Risk manager | **Massaniello** (5 ops / 3 ITM / 60 min / PRACTICE) |
-| Roadmap progress | **4 / 16** features done (25 %) |
+| Roadmap progress | **7 / 16** features done (44 %) |
 
 ---
 
@@ -22,8 +22,15 @@
 Four-layer design (see `docs/architecture.md`):
 
 ```
-connection.py  →  scanner.py  →  strat_a / strat_b  →  executor.py
-                                                      ↘ massaniello_risk.py
+connection.py  →  scanner.py  →  strat_a / strat_b / strat_momentum  →  executor.py
+                                                                      ↘ massaniello_risk.py
+                                                                      ↘ entry_sync.py
+```
+
+Performance layer:
+
+```
+parallel_fetch.py  →  candle_cache.py (incremental prefetch)
 ```
 
 SMC stack (feature #2, invocable vía módulos / `asyncio.run(main())`):
@@ -41,9 +48,12 @@ filter_and_sell_otc.py (payout scan + PUT)
 | `connection.py` | Conexión | ✅ |
 | `scanner.py` | Análisis | ✅ |
 | `parallel_fetch.py` | Performance (prefetch velas) | ✅ |
+| `candle_cache.py` | Performance (caché incremental) | ✅ |
+| `entry_sync.py` | Performance (timing 1m) | ✅ |
 | `executor.py` | Ejecución | ✅ |
 | `strat_a.py` | Estrategia (consolidación) | ✅ |
 | `strat_b.py` | Estrategia (Spring/Upthrust) | ✅ |
+| `strat_momentum.py` | Estrategia (momentum 1m) | ✅ |
 | `massaniello_engine.py` | Riesgo (motor) | ✅ |
 | `massaniello_risk.py` | Riesgo (sesión) | ✅ |
 | `smc_analysis.py` | Estrategia (SMC puro) | ✅ |
@@ -60,14 +70,16 @@ filter_and_sell_otc.py (payout scan + PUT)
 
 ## Current milestone
 
-**Fase 0 — Fundamentos** (completa)
+**Fase 1 — Rendimiento del scanner** (completa)
 
-- ✅ #1 Monolith refactor
-- ✅ #2 Missing SMC / filter_sell modules
-- ✅ #16 Massaniello risk management
 - ✅ #3 Parallel asset scan (prefetch 5m+1m)
+- ✅ #4 Candle cache (actualización incremental)
+- ✅ #5 Entry sync precision (<300ms guard)
 
-**Siguiente:** Fase 1 — Performance (#4 `candle_cache`)
+**Fase 2 — Nuevas estrategias** (en curso)
+
+- ✅ #6 Strategy momentum 1m
+- ⏳ **Siguiente:** #7 `strategy_reversal_swing`
 
 ---
 
@@ -83,7 +95,10 @@ filter_and_sell_otc.py (payout scan + PUT)
 | Entry scorer | pre-existing | Adaptive threshold |
 | Massaniello session manager | #16 | Replaces martingale runtime |
 | Parallel candle prefetch | #3 | `parallel_fetch.py`; 5m+1m antes del bucle |
-| Test suite | #1, #2, #3, #16 | 61 tests, all green |
+| Incremental candle cache | #4 | `candle_cache.py`; TTL + merge por activo/tf |
+| Entry sync precision | #5 | `EntrySynchronizer`; lag ≤ 0.3s |
+| Strategy momentum 1m | #6 | `strat_momentum.py`; `STRAT-MOMENTUM` |
+| Test suite | #1–#6, #16 | 74 tests, all green |
 | SDD harness | infra | `init.ps1`, specs, agents |
 
 ---
@@ -109,9 +124,9 @@ _None — no feature currently `in_progress`._
 
 ## Next objectives (ordered)
 
-1. **#4** `candle_cache` — incremental candle fetch
+1. **#7** `strategy_reversal_swing` — swing S/R dinámico
 2. Fix Quotex credentials and validate Massaniello session in demo
-3. **#5** `entry_sync_precision` — <300ms entry timing
+3. **#8** `strategy_order_block` — order blocks institucionales
 4. **#11** `massaniello_persistence` — survive bot restarts
 
 ---
@@ -121,7 +136,7 @@ _None — no feature currently `in_progress`._
 | Check | Status |
 |-------|--------|
 | `.\init.ps1` | ✅ exit 0 |
-| `pytest tests/` | ✅ 61 passed |
+| `pytest tests/` | ✅ 74 passed |
 | Live broker connection | ❌ login invalid |
 | Massaniello demo session goal | ❌ not validated |
 

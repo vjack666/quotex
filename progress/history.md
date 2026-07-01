@@ -148,3 +148,29 @@ Feature #3 — `parallel_asset_scan`: escaneo paralelo de activos OTC.
 
 **Próximo paso recomendado:**
 Feature #4 — `candle_cache`: caché local de velas con actualización incremental.
+
+---
+
+## 2026-06-30 — Features #4, #5, #6 (APPROVED)
+
+**Qué se hizo:**
+- **#4 `candle_cache`** — `CandleCache` con clave `(asset, tf_sec)`, TTL, merge incremental, locks asyncio; integrado en prefetch paralelo.
+- **#5 `entry_sync_precision`** — `EntrySynchronizer` con `compute_timing` puro, `sync_and_validate`, `log_order_timing`; `ENTRY_MAX_LAG_SEC=0.3`.
+- **#6 `strategy_momentum_1m`** — `detect_momentum_1m` (cuerpo ≥1.5× promedio + cierre en tercio extremo); candidatos `STRAT-MOMENTUM` en scanner.
+- Suite ampliada: 13 tests nuevos (74 total, todos verdes).
+- Re-review reviewer: **APPROVED** tras verificar trazabilidad R1–R7, R1–R5, R1–R6 y tasks completas.
+
+**Archivos principales:**
+- `src/candle_cache.py`, `src/entry_sync.py`, `src/strat_momentum.py`
+- `src/config.py`, `src/parallel_fetch.py`, `src/scanner.py`, `src/executor.py`, `src/consolidation_bot.py`
+- `tests/test_candle_cache.py`, `tests/test_entry_sync.py`, `tests/test_strat_momentum.py`
+- `specs/candle_cache/`, `specs/entry_sync_precision/`, `specs/strategy_momentum_1m/`
+- `progress/impl_features_4_5_6.md`, `progress/review_features_4_5_6.md`
+
+**Estado final:**
+- `feature_list.json`: features #4, #5, #6 → `done`; progreso **7/16**
+- `python -m pytest tests/ -v` → 74 passed
+- `.\init.ps1` → exit 0
+
+**Próximo paso recomendado:**
+Feature #7 — `strategy_reversal_swing`: reversión en soporte/resistencia dinámica.

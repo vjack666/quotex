@@ -75,6 +75,7 @@ from strat_a import (
     validate_rejection_candle,
 )
 from strat_b import evaluate_strat_b, find_strong_support_2m
+from strat_momentum import detect_momentum_1m
 from trade_journal import get_journal
 
 if TYPE_CHECKING:
@@ -515,6 +516,7 @@ class AssetScanner:
 
         symbols = [sym for sym, _ in assets]
         fetch_t0 = time.monotonic()
+        candle_cache = getattr(self.bot, "candle_cache", None)
         candles_5m_by_asset = await fetch_candles_parallel(
             self.bot.client,
             symbols,
@@ -522,6 +524,7 @@ class AssetScanner:
             CANDLES_LOOKBACK,
             concurrency=CANDLE_FETCH_CONCURRENCY,
             timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
+            cache=candle_cache,
         )
         candles_1m_by_asset = await fetch_candles_parallel(
             self.bot.client,
@@ -530,6 +533,7 @@ class AssetScanner:
             36,
             concurrency=CANDLE_FETCH_CONCURRENCY,
             timeout_sec=CANDLE_FETCH_1M_TIMEOUT_SEC,
+            cache=candle_cache,
         )
         scan_fetch_elapsed_ms = int((time.monotonic() - fetch_t0) * 1000)
         log.info(
@@ -695,6 +699,49 @@ class AssetScanner:
                     score_original=round(strat_b_conf * 100.0, 1),
                 )
                 await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
+
+            momentum_hit = detect_momentum_1m(candles_1m)
+            if momentum_hit and sym not in self.bot.trades:
+                mom_dir, mom_strength = momentum_hit
+                mom_zone = ConsolidationZone(
+                    asset=sym,
+                    ceiling=float(candles_1m[-1].high),
+                    floor=float(candles_1m[-1].low),
+                    bars_inside=0,
+                    detected_at=time.time(),
+                    range_pct=0.0,
+                )
+                mom_amount, _ = self.executor._compute_initial_amount(payout)
+                mom_candidate = CandidateEntry(
+                    asset=sym,
+                    payout=payout,
+                    zone=mom_zone,
+                    direction=mom_dir,
+                    candles=candles_1m,
+                    score=round(mom_strength * 100.0, 1),
+                    score_breakdown={
+                        "compression": 0.0,
+                        "momentum": round(mom_strength * 35.0, 2),
+                        "trend": round(mom_strength * 25.0, 2),
+                        "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
+                    },
+                )
+                setattr(mom_candidate, "_strategy_origin", "STRAT-MOMENTUM")
+                setattr(mom_candidate, "_reversal_pattern", "momentum_1m")
+                setattr(mom_candidate, "_reversal_strength", mom_strength)
+                setattr(mom_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                setattr(mom_candidate, "_amount", mom_amount)
+                setattr(mom_candidate, "_stage", "initial")
+                candidates.append(mom_candidate)
+                self.bot.stats.setdefault("strat_momentum_signals", 0)
+                self.bot.stats["strat_momentum_signals"] += 1
+                log.info(
+                    "[STRAT-MOMENTUM] %s %s strength=%.2f score=%.1f",
+                    sym,
+                    mom_dir.upper(),
+                    mom_strength,
+                    mom_candidate.score,
+                )
 
             # STRAT-A requiere historial 5m mínimo para consolidación.
             if len(candles) < MIN_CONSOLIDATION_BARS + 2:
@@ -1437,7 +1484,7 @@ class AssetScanner:
                 stage,
                 journal_cid=cid,
                 signal_ts=getattr(winner, "_signal_ts_1m", winner.candles[-1].ts if winner.candles else None),
-                strategy_origin="STRAT-A",
+                strategy_origin=getattr(winner, "_strategy_origin", "STRAT-A"),
                 duration_sec=DURATION_SEC,
                 payout=winner.payout,
                 score_original=winner.score,

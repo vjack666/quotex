@@ -3,8 +3,8 @@
   "description": "Bot de trading de alta frecuencia para opciones binarias en Quotex. Estrategias: consolidación, Wyckoff Spring/Sweep, momentum, reversión, order blocks. Gestión de riesgo: Massaniello.",
   "roadmap": {
     "version": "2026-06-29",
-    "progress": { "done": 4, "total": 16 },
-    "next_recommended": "candle_cache",
+    "progress": { "done": 7, "total": 16 },
+    "next_recommended": "strategy_reversal_swing",
     "doc": "docs/ROADMAP.md",
     "blockers": [
       "Credenciales Quotex demo inválidas en .env — login rechazado por el broker"
@@ -82,7 +82,7 @@
         "Los tests cubren el caso de primera carga, actualización y expiración"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [3]
     },
     {
@@ -99,7 +99,7 @@
         "Tests cubren el nuevo sincronizador"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [4]
     },
     {
@@ -116,7 +116,7 @@
         "Los tests cubren casos de momentum alcista, bajista y falso"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [5]
     },
     {

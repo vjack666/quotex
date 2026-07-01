@@ -57,6 +57,7 @@ from config import (
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets, place_order
+from entry_sync import EntrySynchronizer
 from entry_scorer import CandidateEntry
 from models import ConsolidationZone, EntryTimingInfo, MartinPending, TradeState
 from strat_a import price_at_ceiling, price_at_floor
@@ -71,6 +72,7 @@ class TradeExecutor:
     def __init__(self, client, bot):
         self.client = client
         self.bot = bot
+        self.entry_sync = EntrySynchronizer()
 
     @staticmethod
     def _uses_massaniello() -> bool:
@@ -799,73 +801,8 @@ class TradeExecutor:
             "greylist_assets": sorted(self.greylist_assets),
         }
     async def _sync_to_next_candle_open(self, signal_ts: Optional[int] = None) -> EntryTimingInfo:
-        """
-        Sincroniza/valida timing de entrada al inicio de vela de 1m.
-
-        Regla operativa:
-        - Esperar siempre al próximo open de vela 1m.
-        - Rechazar si el envío queda tardío (> ENTRY_MAX_LAG_SEC).
-        - La duración de la orden es fija (DURATION_SEC = 30s).
-
-        Devuelve un EntryTimingInfo con telemetría de timing.
-        """
-        if not ENTRY_SYNC_TO_CANDLE:
-            return EntryTimingInfo(
-                ok=True,
-                lag_sec=0.0,
-                duration_sec=DURATION_SEC,
-                time_since_open_sec=0.0,
-                secs_to_close_sec=float(TF_1M),
-                decision="SYNC_DISABLED",
-            )
-
-        now = time.time()
-        next_open = ((int(now) // TF_1M) + 1) * TF_1M
-        wait_sec = max(0.0, next_open - now)
-        if wait_sec > 0:
-            log.info("⏳ Esperando apertura de vela 1m: %.2fs", wait_sec)
-            await asyncio.sleep(wait_sec)
-
-        send_ts = time.time()
-        lag_sec = send_ts - next_open
-        time_since_open = send_ts % TF_1M
-        secs_to_close = max(0.0, TF_1M - time_since_open)
-
-        if lag_sec > ENTRY_MAX_LAG_SEC or secs_to_close <= ENTRY_REJECT_LAST_SEC:
-            log.info(
-                "⏳ Señal rechazada por timing 1m: lag=%.2fs, restante=%.2fs (max_lag=%.2fs)",
-                lag_sec,
-                secs_to_close,
-                ENTRY_MAX_LAG_SEC,
-            )
-            return EntryTimingInfo(
-                ok=False,
-                lag_sec=lag_sec,
-                duration_sec=DURATION_SEC,
-                time_since_open_sec=time_since_open,
-                secs_to_close_sec=secs_to_close,
-                decision="REJECT_LATE_1M",
-            )
-
-        duration_dynamic = DURATION_SEC
-        dur_min = duration_dynamic // 60
-        dur_seg = duration_dynamic % 60
-        log.info(
-            "⏱ Entrada sincronizada al open 1m: lag=%.2fs, restante=%.2fs → duración fija=%dm%02ds (%ds)",
-            lag_sec,
-            secs_to_close,
-            dur_min,
-            dur_seg,
-            duration_dynamic,
-        )
-        return EntryTimingInfo(
-            ok=True,
-            lag_sec=lag_sec,
-            duration_sec=duration_dynamic,
-            time_since_open_sec=time_since_open,
-            secs_to_close_sec=secs_to_close,
-            decision="SYNCED_1M_OPEN",
-        )
+        """Delega sincronización y validación de timing al EntrySynchronizer."""
+        return await self.entry_sync.sync_and_validate(signal_ts)
     async def _resolve_trade(self, trade: "TradeState", sym: str) -> None:
         """
         Consulta el resultado de una operación expirada al broker
@@ -1133,6 +1070,7 @@ class TradeExecutor:
 
         if stage in ("initial", "martin"):
             timing = await self._sync_to_next_candle_open(signal_ts)
+            self.entry_sync.log_order_timing(sym, timing)
             if journal_cid:
                 _j = get_journal()
                 if _j._conn is not None:

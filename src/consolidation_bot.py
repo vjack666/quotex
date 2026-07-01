@@ -26,6 +26,7 @@ from pyquotex.stable_api import Quotex  # type: ignore
 
 import config as _config
 from config import *  # noqa: F401,F403 — re-export para main.py
+from candle_cache import CandleCache
 from connection import ConnectionManager, connect_with_retry, looks_like_connection_issue
 from errors import BotError
 from executor import TradeExecutor
@@ -120,6 +121,7 @@ class ConsolidationBot:
         if greylist_assets is not None:
             self.greylist_assets = {a.strip() for a in greylist_assets if a and a.strip()}
 
+        self.candle_cache = CandleCache()
         self.connection_mgr = ConnectionManager(client)
         self.executor = TradeExecutor(client, self)
         self.scanner = AssetScanner(self, self.executor)
