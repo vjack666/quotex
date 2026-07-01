@@ -4,6 +4,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import List
 
 from config import DURATION_SEC, MIN_PAYOUT
 
@@ -18,7 +20,6 @@ class Candle:
 
     @property
     def body(self) -> float:
-        """Tamaño absoluto del cuerpo (proxy de volumen)."""
         return abs(self.close - self.open)
 
     @property
@@ -42,6 +43,40 @@ class ConsolidationZone:
     @property
     def age_minutes(self) -> float:
         return (time.time() - self.detected_at) / 60
+
+
+class SignalMode(Enum):
+    REBOUND = "rebound"
+    BREAKOUT = "breakout"
+
+
+@dataclass
+class CandidateEntry:
+    asset: str
+    payout: int
+    zone: ConsolidationZone
+    direction: str
+    candles: List[Candle]
+    score: float = 0.0
+    score_breakdown: dict = field(default_factory=dict)
+    reversal_pattern: str = "none"
+    reversal_strength: float = 0.0
+    reversal_confirms: bool = False
+    mode: SignalMode = SignalMode.REBOUND
+    candles_h1: List[Candle] = field(default_factory=list)
+    zone_memory: list = field(default_factory=list)
+
+    def __str__(self) -> str:
+        bd = self.score_breakdown
+        mode_label = self.mode.value
+        return (
+            f"{self.asset:20s} {self.direction.upper():4s} [{mode_label}] "
+            f"SCORE={self.score:.1f}/100 "
+            f"[compression={bd.get('compression', 0):.1f} "
+            f"bounce/momentum={bd.get('bounce', bd.get('momentum', 0)):.1f} "
+            f"trend={bd.get('trend', 0):.1f} "
+            f"payout={bd.get('payout', 0):.1f}]"
+        )
 
 
 @dataclass
@@ -77,7 +112,6 @@ class EntryTimingInfo:
 
 @dataclass
 class PendingReversal:
-    """Activo esperando confirmación de patrón 1m antes de entrar."""
     asset: str
     zone: ConsolidationZone
     proposed_direction: str
