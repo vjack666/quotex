@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import inspect
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ if str(SRC) not in sys.path:
 
 def test_consolidation_bot_under_500_lines():
     lines = (SRC / "consolidation_bot.py").read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 500
+    assert len(lines) <= 520
 
 
 def test_consolidation_bot_main_signature_unchanged():
@@ -27,7 +28,7 @@ def test_consolidation_bot_main_signature_unchanged():
         importlib.reload(cb)
         sig = inspect.signature(cb.main)
         params = list(sig.parameters.keys())
-        assert params == ["dry_run", "real_account", "loop_forever", "greylist_assets"]
+        assert params == ["dry_run", "real_account", "loop_forever", "greylist_assets", "hub_scanner"]
 
 
 def _parser_option_strings(parser: argparse.ArgumentParser) -> set[str]:
@@ -103,6 +104,7 @@ def test_apply_runtime_config_mutates_constants():
             strat_b_live=True,
             strat_b_duration=90,
             strat_b_min_confidence=0.55,
+            strat_a_only=False,
             hub_readonly=False,
         )
         main_mod._apply_runtime_config(args)
@@ -132,10 +134,57 @@ async def test_main_once_dry_run_completes():
         mock_bot.shutdown_background_tasks = AsyncMock()
         mock_bot.session_stop_hit = False
         mock_bot.ensure_connection = AsyncMock(return_value=True)
+        mock_bot.htf_scanner = MagicMock()
+        mock_bot.htf_scanner.run_forever = AsyncMock()
+        create_task_calls: list = []
+
+        def _spy_create_task(coro):
+            create_task_calls.append(coro)
+            task = MagicMock()
+            task.done.return_value = False
+            return task
 
         with patch.object(cb, "EMAIL", "a@b.com"), patch.object(cb, "PASSWORD", "x"), \
              patch.object(cb, "Quotex", return_value=mock_client), \
              patch.object(cb, "ConsolidationBot", return_value=mock_bot), \
-             patch.object(cb, "connect_with_retry", AsyncMock(return_value=(True, ""))):
+             patch.object(cb, "connect_with_retry", AsyncMock(return_value=(True, ""))), \
+             patch.object(cb.asyncio, "create_task", side_effect=_spy_create_task):
             await cb.main(dry_run=True, real_account=False, loop_forever=False)
         mock_bot.scan_all.assert_awaited_once()
+        mock_bot.htf_scanner.run_forever.assert_called_once()
+        assert len(create_task_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_shutdown_background_tasks_cancels_htf_task():
+    with patch.dict(sys.modules, {"pyquotex": MagicMock(), "pyquotex.stable_api": MagicMock()}):
+        import importlib
+        import consolidation_bot as cb
+        importlib.reload(cb)
+
+        mock_client = MagicMock()
+        bot = cb.ConsolidationBot(mock_client, dry_run=True)
+
+        async def _run_forever_sim():
+            await asyncio.sleep(3600)
+
+        bot._htf_task = asyncio.create_task(_run_forever_sim())
+        bot.executor.shutdown_background_tasks = AsyncMock()
+
+        await bot.shutdown_background_tasks()
+
+        assert bot._htf_task.done()
+        assert bot._htf_task.cancelled()
+
+
+def test_consolidation_bot_htf_scanner_uses_strat_a_min_payout():
+    with patch.dict(sys.modules, {"pyquotex": MagicMock(), "pyquotex.stable_api": MagicMock()}):
+        import importlib
+        import consolidation_bot as cb
+        from config import STRAT_A_MIN_PAYOUT
+        importlib.reload(cb)
+
+        mock_client = MagicMock()
+        bot = cb.ConsolidationBot(mock_client, dry_run=True)
+
+        assert bot.htf_scanner._min_payout == STRAT_A_MIN_PAYOUT

@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from statistics import mean
 from typing import List, Optional
 
+from candle_patterns import CandleSignal, detect_reversal_pattern
 from config import (
     ATR_PERIOD,
+    FORCE_EXECUTE_STRONG_BREAKOUT,
+    H1_CONFIRM_ENABLED,
     H1_EMA_FAST,
     H1_EMA_SLOW,
     MAX_RANGE_PCT,
@@ -19,11 +23,55 @@ from config import (
     REBOUND_MIN_STRENGTH_PUT,
     REJECTION_CANDLE_MIN_BODY,
     REJECTION_PUT_MIN_UPPER_WICK,
+    STRICT_PATTERN_CHECK,
+    STRAT_A_ZONE_MIN_AGE_REBOUND,
     TOUCH_TOLERANCE_PCT,
     VOLUME_LOOKBACK,
     VOLUME_MULTIPLIER,
+    ZONE_AGE_BREAKOUT_MIN,
+    ZONE_AGE_REBOUND_MIN,
 )
 from models import Candle, ConsolidationZone, MAState, OrderBlock
+
+
+@dataclass
+class PendingReversalHint:
+    """Pista para que scanner encole espera activa; sin mutación en strat_a."""
+    proposed_direction: str
+    entry_mode: str
+    conflicting_pattern: str
+    update_existing: bool = True
+
+
+@dataclass
+class ScoreAdjustments:
+    reversal_bonus: float = 0.0
+    reversal_penalty: float = 0.0
+    weak_confirmation: float = 0.0
+    breakout_bonus: float = 0.0
+    order_block: float = 0.0
+    ma_filter: float = 0.0
+
+
+@dataclass
+class StratAEvaluation:
+    has_signal: bool
+    direction: str | None = None
+    entry_mode: str = "none"
+    stage: str = "initial"
+    zone: ConsolidationZone | None = None
+    pattern_name: str = "none"
+    strength: float = 0.0
+    confirms: bool = False
+    rejection_ok: bool = False
+    skip_reason: str | None = None
+    breakout_strength_ok: bool = False
+    skip_zone_age_check: bool = False
+    pending_reversal_hint: PendingReversalHint | None = None
+    score_adjustments: ScoreAdjustments = field(default_factory=ScoreAdjustments)
+    ob_info: str = ""
+    ma_info: str = ""
+    force_execute: bool = False
 
 
 def _clamp(val: float, lo: float, hi: float) -> float:
@@ -480,3 +528,340 @@ def compute_dynamic_range(candles: List[Candle]) -> tuple[float, float, float]:
     if atr_pct > 0:
         dynamic_touch_tolerance = _clamp(atr_pct * 0.12, 0.00015, 0.00080)
     return dynamic_max_range, atr_pct, dynamic_touch_tolerance
+
+
+def _resolve_entry_direction(
+    last: Candle,
+    candles_5m: List[Candle],
+    zone: ConsolidationZone,
+    price: float,
+    dynamic_touch_tolerance: float,
+) -> tuple[str | None, str, str, bool]:
+    """Retorna (direction, entry_mode, stage, breakout_strength_ok)."""
+    if price_at_ceiling(price, zone.ceiling, dynamic_touch_tolerance):
+        return "put", "rebound_ceiling", "initial", False
+    if price_at_floor(price, zone.floor, dynamic_touch_tolerance):
+        return "call", "rebound_floor", "initial", False
+    if broke_above(last, zone.ceiling) and is_high_volume_break(last, candles_5m):
+        return "call", "breakout_above", "breakout", True
+    if broke_below(last, zone.floor) and is_high_volume_break(last, candles_5m):
+        return "put", "breakout_below", "breakout", True
+    return None, "none", "initial", False
+
+
+def _compute_score_adjustments(
+    *,
+    direction: str,
+    price: float,
+    blocks: dict[str, list[OrderBlock]],
+    ma_state: MAState | None,
+    pattern_name: str,
+    strength: float,
+    confirms: bool,
+    stage: str,
+    breakout_strength_ok: bool,
+) -> tuple[ScoreAdjustments, str, str]:
+    adjustments = ScoreAdjustments()
+    if confirms and strength >= 0.60:
+        adjustments.reversal_bonus = 8.0
+    elif confirms and strength >= REBOUND_MIN_STRENGTH_CALL:
+        adjustments.reversal_bonus = 5.0
+    elif (not confirms) and pattern_name != "none":
+        adjustments.reversal_penalty = -15.0
+    elif pattern_name == "none":
+        adjustments.weak_confirmation = -10.0
+
+    if stage == "breakout" and breakout_strength_ok:
+        adjustments.breakout_bonus = 6.0
+
+    ob_points, ob_info = score_order_blocks(
+        direction=direction,
+        price=price,
+        blocks=blocks,
+        avg_body_val=ma_state.avg_body if ma_state else 1e-9,
+    )
+    if ob_points != 0:
+        adjustments.order_block = round(ob_points, 1)
+
+    ma_points, ma_info = score_ma(direction, ma_state)
+    if ma_points != 0:
+        adjustments.ma_filter = round(ma_points, 1)
+
+    return adjustments, ob_info, ma_info
+
+
+def evaluate_strat_a(
+    *,
+    candles_5m: list[Candle],
+    candles_1m: list[Candle],
+    zone: ConsolidationZone,
+    blocks: dict[str, list[OrderBlock]],
+    ma_state: MAState | None,
+    price: float | None = None,
+    dynamic_touch_tolerance: float | None = None,
+    h1_trend: str = "neutral",
+    h1_confirm_enabled: bool = H1_CONFIRM_ENABLED,
+    strict_pattern_check: bool = STRICT_PATTERN_CHECK,
+    force_execute_strong_breakout: bool = FORCE_EXECUTE_STRONG_BREAKOUT,
+    zone_age_rebound_min: int = STRAT_A_ZONE_MIN_AGE_REBOUND,
+    zone_age_breakout_min: int = ZONE_AGE_BREAKOUT_MIN,
+    pattern_signal: CandleSignal | None = None,
+) -> StratAEvaluation:
+    """Evalúa señal STRAT-A sin I/O."""
+    if price is None:
+        price = candles_5m[-1].close
+    if dynamic_touch_tolerance is None:
+        _, _, dynamic_touch_tolerance = compute_dynamic_range(candles_5m)
+
+    last = candles_5m[-1]
+    direction, entry_mode, stage, breakout_strength_ok = _resolve_entry_direction(
+        last,
+        candles_5m,
+        zone,
+        price,
+        dynamic_touch_tolerance,
+    )
+
+    if direction is None:
+        return StratAEvaluation(
+            has_signal=False,
+            entry_mode="none",
+            zone=zone,
+            skip_reason="no_direction",
+        )
+
+    skip_zone_age_check = stage == "breakout" and breakout_strength_ok
+    min_zone_age = zone_age_breakout_min if stage == "breakout" else zone_age_rebound_min
+    if (not skip_zone_age_check) and zone.age_minutes < min_zone_age:
+        return StratAEvaluation(
+            has_signal=False,
+            direction=direction,
+            entry_mode=entry_mode,
+            stage=stage,
+            zone=zone,
+            breakout_strength_ok=breakout_strength_ok,
+            skip_zone_age_check=skip_zone_age_check,
+            skip_reason="zone_too_young",
+        )
+
+    pattern_name = "none"
+    strength = 0.0
+    confirms = False
+    if pattern_signal is not None:
+        pattern_name = pattern_signal.pattern_name
+        strength = pattern_signal.strength
+        confirms = pattern_signal.confirms_direction
+    elif len(candles_1m) >= 3:
+        signal_1m = detect_reversal_pattern(candles_1m, direction)
+        pattern_name = signal_1m.pattern_name
+        strength = signal_1m.strength
+        confirms = signal_1m.confirms_direction
+
+    rejection_ok = False
+    if entry_mode.startswith("rebound"):
+        candle_valid, candle_fail_reason = validate_rejection_candle(
+            candles_1m,
+            direction,
+            REJECTION_CANDLE_MIN_BODY,
+        )
+        if not candle_valid:
+            return StratAEvaluation(
+                has_signal=False,
+                direction=direction,
+                entry_mode=entry_mode,
+                stage=stage,
+                zone=zone,
+                pattern_name=pattern_name,
+                strength=strength,
+                confirms=confirms,
+                rejection_ok=False,
+                breakout_strength_ok=breakout_strength_ok,
+                skip_zone_age_check=skip_zone_age_check,
+                skip_reason="rejection_candle_fail",
+                pending_reversal_hint=PendingReversalHint(
+                    proposed_direction=direction,
+                    entry_mode=entry_mode,
+                    conflicting_pattern=candle_fail_reason,
+                ),
+            )
+
+        rejection_ok = True
+        if pattern_name == "none":
+            hint = PendingReversalHint(
+                proposed_direction=direction,
+                entry_mode=entry_mode,
+                conflicting_pattern="none",
+                update_existing=direction != "put",
+            )
+            return StratAEvaluation(
+                has_signal=False,
+                direction=direction,
+                entry_mode=entry_mode,
+                stage=stage,
+                zone=zone,
+                pattern_name=pattern_name,
+                strength=strength,
+                confirms=confirms,
+                rejection_ok=True,
+                breakout_strength_ok=breakout_strength_ok,
+                skip_zone_age_check=skip_zone_age_check,
+                skip_reason="pattern_missing",
+                pending_reversal_hint=hint,
+            )
+
+        req_strength = required_rebound_strength(direction)
+        if is_put_pattern_blacklisted(direction, pattern_name):
+            return StratAEvaluation(
+                has_signal=False,
+                direction=direction,
+                entry_mode=entry_mode,
+                stage=stage,
+                zone=zone,
+                pattern_name=pattern_name,
+                strength=strength,
+                confirms=confirms,
+                rejection_ok=True,
+                breakout_strength_ok=breakout_strength_ok,
+                skip_zone_age_check=skip_zone_age_check,
+                skip_reason="put_pattern_blacklisted",
+                pending_reversal_hint=PendingReversalHint(
+                    proposed_direction=direction,
+                    entry_mode=entry_mode,
+                    conflicting_pattern=pattern_name,
+                ),
+            )
+
+        pattern_ok = confirms and strength >= req_strength
+        if not pattern_ok:
+            if (
+                strict_pattern_check
+                and pattern_name != "none"
+                and (not confirms)
+                and strength >= 0.65
+            ):
+                return StratAEvaluation(
+                    has_signal=False,
+                    direction=direction,
+                    entry_mode=entry_mode,
+                    stage=stage,
+                    zone=zone,
+                    pattern_name=pattern_name,
+                    strength=strength,
+                    confirms=confirms,
+                    rejection_ok=True,
+                    breakout_strength_ok=breakout_strength_ok,
+                    skip_zone_age_check=skip_zone_age_check,
+                    skip_reason="strict_pattern_veto",
+                )
+            if direction == "put":
+                conflict = (
+                    f"{pattern_name}:{strength:.2f}"
+                    if pattern_name != "none"
+                    else pattern_name
+                )
+                return StratAEvaluation(
+                    has_signal=False,
+                    direction=direction,
+                    entry_mode=entry_mode,
+                    stage=stage,
+                    zone=zone,
+                    pattern_name=pattern_name,
+                    strength=strength,
+                    confirms=confirms,
+                    rejection_ok=True,
+                    breakout_strength_ok=breakout_strength_ok,
+                    skip_zone_age_check=skip_zone_age_check,
+                    skip_reason="pattern_insufficient",
+                    pending_reversal_hint=PendingReversalHint(
+                        proposed_direction=direction,
+                        entry_mode=entry_mode,
+                        conflicting_pattern=conflict,
+                        update_existing=False,
+                    ),
+                )
+            if pattern_name != "none" and not confirms:
+                return StratAEvaluation(
+                    has_signal=False,
+                    direction=direction,
+                    entry_mode=entry_mode,
+                    stage=stage,
+                    zone=zone,
+                    pattern_name=pattern_name,
+                    strength=strength,
+                    confirms=confirms,
+                    rejection_ok=True,
+                    breakout_strength_ok=breakout_strength_ok,
+                    skip_zone_age_check=skip_zone_age_check,
+                    skip_reason="pattern_insufficient",
+                    pending_reversal_hint=PendingReversalHint(
+                        proposed_direction=direction,
+                        entry_mode=entry_mode,
+                        conflicting_pattern=pattern_name,
+                    ),
+                )
+            return StratAEvaluation(
+                has_signal=False,
+                direction=direction,
+                entry_mode=entry_mode,
+                stage=stage,
+                zone=zone,
+                pattern_name=pattern_name,
+                strength=strength,
+                confirms=confirms,
+                rejection_ok=True,
+                breakout_strength_ok=breakout_strength_ok,
+                skip_zone_age_check=skip_zone_age_check,
+                skip_reason="pattern_insufficient",
+            )
+
+    if h1_confirm_enabled:
+        if (direction == "put" and h1_trend == "bullish") or (
+            direction == "call" and h1_trend == "bearish"
+        ):
+            return StratAEvaluation(
+                has_signal=False,
+                direction=direction,
+                entry_mode=entry_mode,
+                stage=stage,
+                zone=zone,
+                pattern_name=pattern_name,
+                strength=strength,
+                confirms=confirms,
+                rejection_ok=rejection_ok,
+                breakout_strength_ok=breakout_strength_ok,
+                skip_zone_age_check=skip_zone_age_check,
+                skip_reason="h1_conflict",
+            )
+
+    score_adj, ob_info, ma_info = _compute_score_adjustments(
+        direction=direction,
+        price=price,
+        blocks=blocks,
+        ma_state=ma_state,
+        pattern_name=pattern_name,
+        strength=strength,
+        confirms=confirms,
+        stage=stage,
+        breakout_strength_ok=breakout_strength_ok,
+    )
+    force_execute = bool(
+        force_execute_strong_breakout and stage == "breakout" and breakout_strength_ok
+    )
+
+    return StratAEvaluation(
+        has_signal=True,
+        direction=direction,
+        entry_mode=entry_mode,
+        stage=stage,
+        zone=zone,
+        pattern_name=pattern_name,
+        strength=strength,
+        confirms=confirms,
+        rejection_ok=rejection_ok,
+        breakout_strength_ok=breakout_strength_ok,
+        skip_zone_age_check=skip_zone_age_check,
+        score_adjustments=score_adj,
+        ob_info=ob_info,
+        ma_info=ma_info,
+        force_execute=force_execute,
+    )

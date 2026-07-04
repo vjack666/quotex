@@ -39,7 +39,8 @@ Mira el status de la primera feature no-`done` / no-`blocked` en
    `.claude/agents/spec_author.md`.
 2. El `spec_author` redacta `specs/<name>/{requirements.md, design.md, tasks.md}`
    y cambia el status a `spec_ready`.
-3. **PARAS.** No lanzas implementer. Tu mensaje al humano:
+3. **PARAS.** Ejecuta `.\scripts\notify-attention.ps1 -Task "Spec <name> listo" -Reason approval`.
+   No lanzas implementer. Tu mensaje al humano:
    > "Spec listo en `specs/<name>/`. Revísalo y di **'aprobado'** para
    > continuar con la implementación, o pídeme cambios."
 
@@ -53,7 +54,8 @@ Mira el status de la primera feature no-`done` / no-`blocked` en
 
 ### Caso C — status == `spec_ready` SIN aprobación humana
 
-NO continúes. El humano todavía no ha leído el spec. Recuérdale qué le toca.
+NO continúes. Ejecuta `notify-attention.ps1 -Reason approval` si aún no lo hiciste.
+El humano todavía no ha leído el spec. Recuérdale qué le toca.
 
 ### Caso D — status == `in_progress`
 
@@ -74,6 +76,15 @@ del tipo: "resultado en `progress/impl_<name>.md`" o
 | Media (2-3 archivos) | 1 spec_author → ⏸ → 1 implementer → 1 reviewer |
 | Compleja (refactor) | 2-3 explorers → 1 spec_author → ⏸ → 1 implementer → 1 reviewer |
 | Muy compleja | Divide en sub-tareas y vuelve a aplicar la tabla |
+
+## Notificaciones y memoria (obligatorio)
+
+| Evento | Acción |
+|--------|--------|
+| `spec_ready` | `.\scripts\notify-attention.ps1 -Reason approval` |
+| Reviewer APPROVED | `.\scripts\notify-attention.ps1 -Reason done` |
+| Bloqueo / `init.ps1` FAIL | `.\scripts\notify-attention.ps1 -Reason blocked` o `error` |
+| Fin de sesión con hitos | `mem_save` vía Engram MCP si está disponible |
 
 ## Qué NO haces
 

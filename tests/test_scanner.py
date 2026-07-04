@@ -13,8 +13,12 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from models import Candle
+from datetime import datetime
+
+from candle_patterns import CandleSignal
+from models import Candle, ConsolidationZone, PendingReversal
 import parallel_fetch
+import scan_prefetch
 from scanner import AssetScanner
 
 
@@ -49,6 +53,33 @@ class FakeBot:
         self.accepted_scans_window = __import__("collections").deque(maxlen=10)
         self.current_score_threshold = 65
         self.asset_blacklist_until = {}
+        self.htf_scanner = _FakeHTFScanner()
+
+
+class _FakeHTFScanner:
+    def __init__(self, default: list | None = None):
+        self._default = default if default is not None else []
+
+    def get_candles_15m(self, sym: str) -> list:
+        return self._default
+
+
+def _bearish_15m_candles(n: int = 60, base: float = 50.0) -> list:
+    candles: list[Candle] = []
+    for i in range(n):
+        drift = i * -0.01
+        price = base + drift
+        close = price - 0.005
+        candles.append(
+            Candle(
+                ts=i * 900,
+                open=price,
+                high=max(price, close) + 0.01,
+                low=min(price, close) - 0.01,
+                close=close,
+            )
+        )
+    return candles
 
 
 def _candle(ts: int, price: float) -> Candle:
@@ -83,6 +114,7 @@ async def test_scanner_collects_candidates(monkeypatch):
         return [_candle(i * 60, 1.1000) for i in range(25)]
 
     monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr(scan_prefetch, "fetch_candles_with_retry", fake_fetch)
     monkeypatch.setattr(scanner, "_process_pending_reversals", AsyncMock(return_value=[]))
 
     await scanner.scan_all()
@@ -113,6 +145,7 @@ async def test_scanner_skips_greylisted_asset(monkeypatch):
         return [_candle(i, 1.0) for i in range(20)]
 
     monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr(scan_prefetch, "fetch_candles_with_retry", fake_fetch)
 
     await scanner.scan_all()
     assert bot.stats["skipped"] >= 1
@@ -218,7 +251,7 @@ async def test_scan_all_prefetches_before_eval(monkeypatch):
     eval_started_at: list[float] = []
 
     async def fake_fetch(client, asset, tf, count, timeout_sec, retries=2):
-        if tf in (300, 60):
+        if tf in (300, 60, 180, 3600):
             fetch_started.append(time.monotonic())
             await asyncio.sleep(delay_sec)
             fetch_completed.append(time.monotonic())
@@ -230,13 +263,16 @@ async def test_scan_all_prefetches_before_eval(monkeypatch):
         return None
 
     _, _, scanner = _make_scanner_mocks(monkeypatch, assets)
-    monkeypatch.setattr(parallel_fetch, "fetch_candles_with_retry", fake_fetch)
+    monkeypatch.setattr(scan_prefetch, "fetch_candles_with_retry", fake_fetch)
     monkeypatch.setattr("scanner.fetch_candles_with_retry", fake_fetch)
     monkeypatch.setattr("scanner.detect_consolidation", detect_with_flag)
+    monkeypatch.setattr(scan_prefetch, "SCAN_WS_INTER_ASSET_DELAY_SEC", 0)
 
     await scanner.scan_all()
 
-    expected_prefetch_calls = num_assets * 2
+    expected_primary = num_assets * 2
+    expected_secondary = num_assets * 2
+    expected_prefetch_calls = expected_primary + expected_secondary
     assert len(fetch_started) == expected_prefetch_calls
     assert len(fetch_completed) == expected_prefetch_calls
     assert eval_started_at, "debe evaluar al menos un activo tras prefetch"
@@ -246,3 +282,88 @@ async def test_scan_all_prefetches_before_eval(monkeypatch):
     assert prefetch_span < sequential_sum * 0.75
 
     assert max(fetch_completed) <= min(eval_started_at) + 0.01
+
+
+@pytest.mark.asyncio
+async def test_strat_a_only_skips_momentum_candidate(monkeypatch):
+    import scanner as scanner_mod
+    from scan_prefetch import ScanCycleData
+
+    _, _, scanner = _make_scanner_mocks(monkeypatch, [("EURUSD_otc", 85)])
+    monkeypatch.setattr(scanner_mod._runtime_config, "STRAT_A_ONLY", True)
+    monkeypatch.setattr(scanner_mod._runtime_config, "STRAT_MOMENTUM_ENABLED", False)
+    monkeypatch.setattr(
+        "scanner.detect_momentum_1m",
+        lambda _candles: ("call", 0.85),
+    )
+
+    candles_1m = [_candle(i * 60, 1.1000) for i in range(25)]
+    cycle = ScanCycleData(
+        symbols=["EURUSD_otc"],
+        assets=[("EURUSD_otc", 85)],
+        candles_5m={"EURUSD_otc": []},
+        candles_1m={"EURUSD_otc": candles_1m},
+    )
+
+    result = await scanner._scan_phase_evaluate_assets(cycle)
+    momentum = [
+        c for c in result["candidates"]
+        if getattr(c, "_strategy_origin", None) == "STRAT-MOMENTUM"
+    ]
+    assert len(momentum) == 0
+
+
+@pytest.mark.asyncio
+async def test_process_pending_reversals_confirmed_pattern_no_attribute_error(monkeypatch):
+    """Regression: confirmed pending reversal must not crash on strat_a helpers."""
+    bot = FakeBot()
+    bot.htf_scanner = _FakeHTFScanner(default=_bearish_15m_candles(60, base=50.0))
+    executor = MagicMock()
+    executor._compute_initial_amount = MagicMock(return_value=(2.5, 0.8))
+    scanner = AssetScanner(bot, executor)
+
+    zone = ConsolidationZone(
+        asset="USDEGP_otc",
+        ceiling=50.0,
+        floor=49.0,
+        bars_inside=10,
+        detected_at=time.time(),
+        range_pct=0.02,
+    )
+    bot.pending_reversals["USDEGP_otc"] = PendingReversal(
+        asset="USDEGP_otc",
+        zone=zone,
+        proposed_direction="put",
+        conflicting_pattern="none",
+        detected_at=datetime.now(),
+        entry_mode="rebound_ceiling",
+        payout=85,
+    )
+
+    candles_1m = [
+        Candle(ts=0, open=49.5, high=49.6, low=49.4, close=49.55),
+        Candle(ts=60, open=50.0, high=50.5, low=49.2, close=49.3),
+        Candle(ts=120, open=49.3, high=49.4, low=49.2, close=49.35),
+    ]
+
+    monkeypatch.setattr(
+        "scanner.detect_reversal_pattern",
+        lambda _candles, _direction: CandleSignal("shooting_star", 0.75, True),
+    )
+    monkeypatch.setattr(
+        "scanner.fetch_candles_with_retry",
+        AsyncMock(return_value=[]),
+    )
+
+    result = await scanner._process_pending_reversals(
+        {"USDEGP_otc": 85},
+        {"USDEGP_otc": candles_1m},
+        {"USDEGP_otc": 50.0},
+    )
+
+    assert len(result) == 1
+    assert result[0].asset == "USDEGP_otc"
+    assert result[0].direction == "put"
+    assert getattr(result[0], "_reversal_pattern") == "shooting_star"
+    assert "USDEGP_otc" not in bot.pending_reversals
+    executor._compute_initial_amount.assert_called_once_with(85)

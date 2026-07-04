@@ -11,6 +11,7 @@ from pyquotex.stable_api import Quotex  # type: ignore
 from config import (
     CF_403_BACKOFF_SEC,
     CONNECT_RETRIES,
+    CONNECT_RETRY_DELAY_SEC,
     FETCH_RETRIES,
     FETCH_RETRY_BACKOFF_SEC,
     HEALTHCHECK_RECONNECT_RETRIES,
@@ -35,24 +36,60 @@ def raw_to_candle(raw: dict) -> Optional[Candle]:
         return None
 
 
+def _min_expected_candles(count: int) -> int:
+    return max(3, int(count * 0.5))
+
+
+def _candles_from_raw(raw_list: list) -> List[Candle]:
+    candles = [raw_to_candle(r) for r in raw_list if isinstance(r, dict)]
+    valid = [c for c in candles if c and c.high > 0]
+    return sorted(valid, key=lambda c: c.ts)
+
+
 async def fetch_candles(
     client: Quotex,
     asset: str,
     tf_sec: int,
     count: int,
+    *,
+    timeout_sec: Optional[float] = None,
 ) -> List[Candle]:
+    min_expected = _min_expected_candles(count)
     end_time = time.time()
     offset = count * tf_sec
+    valid: List[Candle] = []
     try:
         raw_list = await client.get_candles(asset, end_time, offset, tf_sec)
     except Exception as exc:
         log.debug("Error velas %s tf=%ss: %s", asset, tf_sec, exc)
-        return []
-    if not raw_list:
-        return []
-    candles = [raw_to_candle(r) for r in raw_list if isinstance(r, dict)]
-    valid = [c for c in candles if c and c.high > 0]
-    return sorted(valid, key=lambda c: c.ts)
+        raw_list = None
+    if raw_list:
+        valid = _candles_from_raw(raw_list)
+        if len(valid) >= min_expected:
+            return valid
+    got = len(valid)
+    if hasattr(client, "get_historical_candles"):
+        log.info(
+            "%s tf=%ss: get_candles returned %d<%d, using get_historical_candles",
+            asset, tf_sec, got, min_expected,
+        )
+        amount_of_seconds = count * tf_sec
+        hist_timeout = int(timeout_sec) if timeout_sec is not None else 30
+        try:
+            historical = await client.get_historical_candles(
+                asset, amount_of_seconds, tf_sec, timeout=hist_timeout,
+            )
+            if historical:
+                valid_hist = _candles_from_raw(historical)
+                if len(valid_hist) > count:
+                    valid_hist = valid_hist[-count:]
+                if valid_hist:
+                    return valid_hist
+        except Exception as exc:
+            log.debug(
+                "Error get_historical_candles %s tf=%ss: %s", asset, tf_sec, exc,
+            )
+    return valid
 
 
 async def fetch_candles_with_retry(
@@ -64,13 +101,14 @@ async def fetch_candles_with_retry(
     retries: int = FETCH_RETRIES,
 ) -> List[Candle]:
     attempts = max(1, int(retries))
+    min_expected = _min_expected_candles(count)
     for attempt in range(1, attempts + 1):
         try:
             candles = await asyncio.wait_for(
-                fetch_candles(client, asset, tf_sec, count),
+                fetch_candles(client, asset, tf_sec, count, timeout_sec=timeout_sec),
                 timeout=timeout_sec,
             )
-            if candles:
+            if candles and len(candles) >= min_expected:
                 return candles
         except asyncio.TimeoutError:
             log.debug(
@@ -302,7 +340,7 @@ async def connect_with_retry(client: Quotex) -> Tuple[bool, str]:
         if "403" in reason_txt or "cloudflare" in reason_txt.lower() or "cf-mitigated" in reason_txt.lower():
             await asyncio.sleep(CF_403_BACKOFF_SEC)
         else:
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(CONNECT_RETRY_DELAY_SEC)
     return False, str(reason)
 
 
@@ -343,5 +381,5 @@ class ConnectionManager:
                 pass
             except Exception as exc:
                 log.warning("Excepción en reconexión: %s", exc)
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(CONNECT_RETRY_DELAY_SEC)
         return False

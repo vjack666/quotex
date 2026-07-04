@@ -15,6 +15,7 @@ if str(SRC) not in sys.path:
 from connection import (
     connect_with_retry,
     fetch_candles,
+    fetch_candles_with_retry,
     looks_like_connection_issue,
     place_order,
 )
@@ -36,19 +37,71 @@ def test_looks_like_connection_issue_403():
 async def test_fetch_candles_happy_path():
     client = MagicMock()
     client.get_candles = AsyncMock(return_value=[
-        {"time": 1, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05},
+        {"time": i, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05}
+        for i in range(5)
     ])
     candles = await fetch_candles(client, "EURUSD_otc", 60, 5)
-    assert len(candles) == 1
+    assert len(candles) == 5
     assert candles[0].close == 1.05
+    client.get_historical_candles.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_candles_fallback_to_historical():
+    client = MagicMock()
+    client.get_candles = AsyncMock(return_value=[
+        {"time": i, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05}
+        for i in range(2)
+    ])
+    client.get_historical_candles = AsyncMock(return_value=[
+        {"time": i, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0 + i * 0.01}
+        for i in range(55)
+    ])
+    candles = await fetch_candles(client, "EURUSD_otc", 300, 55)
+    assert len(candles) == 55
+    assert candles[-1].close == pytest.approx(1.54)
+    client.get_historical_candles.assert_called_once_with(
+        "EURUSD_otc", 55 * 300, 300, timeout=30,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_candles_no_fallback_when_enough():
+    client = MagicMock()
+    raw = [
+        {"time": i, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05}
+        for i in range(30)
+    ]
+    client.get_candles = AsyncMock(return_value=raw)
+    candles = await fetch_candles(client, "EURUSD_otc", 300, 55)
+    assert len(candles) == 30
+    client.get_historical_candles.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_fetch_candles_timeout_returns_empty():
     client = MagicMock()
     client.get_candles = AsyncMock(side_effect=asyncio.TimeoutError())
+    client.get_historical_candles = AsyncMock(side_effect=RuntimeError("historical fail"))
     candles = await fetch_candles(client, "EURUSD_otc", 60, 5)
     assert candles == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_candles_with_retry_retries_on_too_few(monkeypatch):
+    monkeypatch.setattr("connection.FETCH_RETRIES", 2)
+    monkeypatch.setattr("connection.FETCH_RETRY_BACKOFF_SEC", 0.0)
+    client = MagicMock()
+    client.get_candles = AsyncMock(return_value=[
+        {"time": i, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05}
+        for i in range(2)
+    ])
+    client.get_historical_candles = AsyncMock(side_effect=RuntimeError("historical fail"))
+    candles = await fetch_candles_with_retry(
+        client, "EURUSD_otc", 300, 55, timeout_sec=5.0,
+    )
+    assert candles == []
+    assert client.get_candles.call_count == 2
 
 
 @pytest.mark.asyncio

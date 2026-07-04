@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from candle_patterns import detect_reversal_pattern, explain_no_pattern_reason
+import config as _runtime_config
 from config import (
     ADAPTIVE_THRESHOLD_HIGH,
     ADAPTIVE_THRESHOLD_LOW,
@@ -25,58 +26,78 @@ from config import (
     COOLDOWN_BETWEEN_ENTRIES,
     DRY_RUN_VERBOSE,
     DURATION_SEC,
-    FORCE_EXECUTE_STRONG_BREAKOUT,
     H1_CANDLES_LOOKBACK,
-    H1_CONFIRM_ENABLED,
     H1_FETCH_TIMEOUT_SEC,
     H1_TF_SEC,
     MAX_CONCURRENT_TRADES,
     MAX_CONSOLIDATION_MIN,
     MIN_CONSOLIDATION_BARS,
     MIN_PAYOUT,
-    ORDER_BLOCK_CANDLES,
-    ORDER_BLOCK_TF_SEC,
+
     REBOUND_MIN_STRENGTH_CALL,
+    REBOUND_MIN_STRENGTH_PUT,
     REJECTION_CANDLE_MIN_BODY,
     SCAN_MAX_ASSETS_PER_CYCLE,
+    SCAN_PHASE_LOG,
     SCAN_PROGRESS_EVERY,
-    STRICT_PATTERN_CHECK,
+
+    STRAT_A_MIN_PAYOUT,
+    STRAT_A_MIN_SCORE,
+    STRAT_A_RADAR_ENABLED,
+    STRAT_A_RADAR_MIN_READINESS,
+    STRAT_A_ZONE_MIN_AGE_REBOUND,
     STRAT_B_CAN_TRADE,
     STRAT_B_DURATION_SEC,
+    STRAT_MOMENTUM_ENABLED,
     STRAT_B_LOG_TOP_N,
     STRAT_B_MIN_CONFIDENCE,
     STRAT_B_MIN_CONFIDENCE_EARLY,
     STRAT_B_PREVIEW_MIN_CONF,
+    TF_1M,
     TF_5M,
     ZONE_AGE_BREAKOUT_MIN,
     ZONE_AGE_REBOUND_MIN,
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets
-from parallel_fetch import fetch_candles_parallel
+from entry_decision_engine import (
+    _check_htf_available_and_aligned,
+    _check_zone_memory_no_wall,
+)
+from scan_prefetch import (
+    ScanCycleData,
+    decrement_failed_assets,
+    prefetch_primary_candles,
+    prefetch_strat_a_secondary,
+    symbols_needing_strat_a_prefetch,
+)
 from loop_utils import sleep_with_inline_countdown
 from entry_scorer import CandidateEntry, explain_score, score_candidate, select_best
 from models import Candle, ConsolidationZone, PendingReversal
 from strat_a import (
-    broke_above,
-    broke_below,
     compute_dynamic_range,
     compute_ma_state,
     detect_consolidation,
-    detect_order_blocks,
+    evaluate_strat_a,
     infer_h1_trend,
-    is_high_volume_break,
     is_put_pattern_blacklisted,
+    PendingReversalHint,
     price_at_ceiling,
     price_at_floor,
     required_rebound_strength,
-    score_ma,
-    score_order_blocks,
+    StratAEvaluation,
     validate_rejection_candle,
+)
+from strat_a_radar import (
+    RadarWatchEntry,
+    compute_readiness,
+    rank_and_trim,
+    should_watch,
 )
 from strat_b import evaluate_strat_b, find_strong_support_2m
 from strat_momentum import detect_momentum_1m
 from trade_journal import get_journal
+from zone_memory import query_nearby_zones, score_zone_memory
 
 if TYPE_CHECKING:
     from executor import TradeExecutor
@@ -96,6 +117,110 @@ class AssetScanner:
         self.bot = bot
         self.executor = executor
 
+    @staticmethod
+    def _phase_log(phase: str, detail: str) -> None:
+        if SCAN_PHASE_LOG:
+            log.info("[FASE %s] %s", phase, detail)
+
+    @staticmethod
+    def _radar_enabled() -> bool:
+        return bool(_runtime_config.STRAT_A_ONLY or STRAT_A_RADAR_ENABLED)
+
+    @staticmethod
+    def _is_strat_a_candidate(candidate: CandidateEntry) -> bool:
+        return getattr(candidate, "_strategy_origin", "STRAT-A") == "STRAT-A"
+
+    @staticmethod
+    def _score_threshold_for_candidate(
+        candidate: CandidateEntry,
+        session_threshold: int,
+    ) -> int:
+        if getattr(candidate, "_strategy_origin", "STRAT-A") == "STRAT-A":
+            return STRAT_A_MIN_SCORE
+        return session_threshold
+
+    @staticmethod
+    def _log_strat_a_pattern_veto(sym: str, ev: StratAEvaluation) -> None:
+        side = "techo" if ev.entry_mode == "rebound_ceiling" else "piso"
+        if ev.skip_reason == "pattern_missing":
+            log.info(
+                "⛔ [STRAT-A] %s: rebote %s — sin patrón 1m confirmado",
+                sym,
+                side,
+            )
+        elif ev.skip_reason == "pattern_insufficient":
+            log.info(
+                "⛔ [STRAT-A] %s: rebote %s — patrón 1m insuficiente (%s %.2f)",
+                sym,
+                side,
+                ev.pattern_name,
+                ev.strength,
+            )
+        elif ev.skip_reason == "strict_pattern_veto":
+            log.info(
+                "⛔ [STRAT-A] %s: rebote %s — patrón contradictorio confirmado %s %.2f",
+                sym,
+                side,
+                ev.pattern_name,
+                ev.strength,
+            )
+
+    def _radar_entry_from_evaluation(
+        self,
+        sym: str,
+        payout: int,
+        zone: ConsolidationZone,
+        price: float,
+        ev: StratAEvaluation,
+        dynamic_touch_tolerance: float,
+    ) -> RadarWatchEntry | None:
+        if not self._radar_enabled():
+            return None
+        if ev.direction is None or ev.has_signal:
+            return None
+        if payout < STRAT_A_MIN_PAYOUT:
+            return None
+        if not should_watch(zone, price, ev.entry_mode, ev.stage, dynamic_touch_tolerance):
+            return None
+        in_pending = sym in self.bot.pending_reversals
+        readiness = compute_readiness(
+            zone,
+            price,
+            payout,
+            ev.entry_mode,
+            ev.stage,
+            in_pending=in_pending,
+            dynamic_touch_tolerance=dynamic_touch_tolerance,
+        )
+        return RadarWatchEntry(
+            asset=sym,
+            payout=payout,
+            zone=zone,
+            direction=ev.direction,
+            entry_mode=ev.entry_mode,
+            stage=ev.stage,
+            readiness_score=readiness,
+            side_label="techo" if ev.entry_mode == "rebound_ceiling" else (
+                "piso" if ev.entry_mode == "rebound_floor" else "ruptura"
+            ),
+        )
+
+    def _update_radar_watchlist(self, entries_from_cycle: list[RadarWatchEntry]) -> None:
+        if not self._radar_enabled():
+            return
+        merged: dict[str, RadarWatchEntry] = dict(self.bot.radar_watchlist)
+        for entry in entries_from_cycle:
+            merged[entry.asset] = entry
+        trimmed = rank_and_trim(list(merged.values()))
+        self.bot.radar_watchlist = {e.asset: e for e in trimmed}
+        if trimmed:
+            parts = [
+                f"{e.asset} {e.direction.upper()} {e.side_label} readiness={e.readiness_score:.0f}"
+                for e in trimmed
+            ]
+            log.info("[RADAR] Watchlist (%d): %s", len(trimmed), " | ".join(parts))
+        elif merged:
+            log.info("[RADAR] Watchlist vacía tras filtro readiness (min=%.0f)", STRAT_A_RADAR_MIN_READINESS)
 
     def _compute_ma_state(self, asset: str, candles_5m: List[Candle]):
         prev = self.bot.ma_state_by_asset.get(asset)
@@ -103,6 +228,310 @@ class AssetScanner:
         if state is not None:
             self.bot.ma_state_by_asset[asset] = state
         return state
+
+    def _merge_zone_state(
+        self,
+        sym: str,
+        zone: ConsolidationZone,
+        candles: List[Candle],
+        payout: int,
+    ) -> ConsolidationZone | None:
+        if sym in self.bot.zones:
+            existing = self.bot.zones[sym]
+            if MAX_CONSOLIDATION_MIN > 0 and existing.age_minutes > MAX_CONSOLIDATION_MIN:
+                log.info(
+                    "⏱  %s: zona expirada por TIME_LIMIT (%.0fmin) | "
+                    "techo=%.5f piso=%.5f rango=%.3f%% barras=%d | precio_actual=%.5f",
+                    sym,
+                    existing.age_minutes,
+                    existing.ceiling,
+                    existing.floor,
+                    existing.range_pct * 100,
+                    existing.bars_inside,
+                    candles[-1].close if candles else 0.0,
+                )
+                get_journal().log_expired_zone(
+                    asset=sym,
+                    expiry_reason="TIME_LIMIT",
+                    ceiling=existing.ceiling,
+                    floor=existing.floor,
+                    range_pct=existing.range_pct,
+                    bars_inside=existing.bars_inside,
+                    age_min=existing.age_minutes,
+                    last_close=candles[-1].close if candles else 0.0,
+                    payout=payout,
+                )
+                del self.bot.zones[sym]
+                self.bot.stats["expired_zones"] += 1
+                return None
+            zone.detected_at = existing.detected_at
+        self.bot.zones[sym] = zone
+        return zone
+
+    def _price_sanity_ok(self, sym: str, zone: ConsolidationZone, price: float) -> bool:
+        _zone_mid = (zone.ceiling + zone.floor) / 2.0
+        if _zone_mid > 0 and not (zone.floor * 0.85 <= price <= zone.ceiling * 1.15):
+            _last_valid = self.bot.last_known_price.get(sym)
+            _last_txt = f" (último válido: {_last_valid:.5f})" if _last_valid else ""
+            log.warning(
+                "⚠ %s: precio %.5f contaminado — fuera de zona [%.5f, %.5f]%s",
+                sym, price, zone.floor * 0.85, zone.ceiling * 1.15, _last_txt,
+            )
+            self.bot.stats["skipped"] += 1
+            return False
+
+        _last_valid = self.bot.last_known_price.get(sym)
+        if _last_valid and _last_valid > 0:
+            _delta_pct = abs(price - _last_valid) / _last_valid
+            if _delta_pct > 0.05:
+                log.warning(
+                    "⚠ %s: precio %.5f contaminado — cambio de %.1f%% vs último válido %.5f",
+                    sym, price, _delta_pct * 100, _last_valid,
+                )
+                self.bot.stats["skipped"] += 1
+                return False
+        return True
+
+    def _apply_pending_reversal_hint(
+        self,
+        sym: str,
+        zone: ConsolidationZone,
+        payout: int,
+        hint: PendingReversalHint,
+        skip_reason: str,
+        candles_1m: List[Candle],
+    ) -> None:
+        side = "techo" if hint.entry_mode == "rebound_ceiling" else "piso"
+        if sym not in self.bot.pending_reversals:
+            self.bot.pending_reversals[sym] = PendingReversal(
+                asset=sym,
+                zone=zone,
+                proposed_direction=hint.proposed_direction,
+                conflicting_pattern=hint.conflicting_pattern,
+                detected_at=datetime.now(tz=BROKER_TZ),
+                entry_mode=hint.entry_mode,
+                payout=payout,
+            )
+            if skip_reason == "rejection_candle_fail":
+                log.info(
+                    "⏳ %s: vela 1m no confirma rebote en %s (%s) — esperando confirmación (1/%d)",
+                    sym, side, hint.conflicting_pattern,
+                    self.bot.pending_reversals[sym].max_wait_scans,
+                )
+            elif skip_reason in ("pattern_missing", "pattern_insufficient") and hint.proposed_direction == "put":
+                if hint.conflicting_pattern == "none":
+                    log.info(
+                        "↪ %s: PUT requiere patrón ≥%.2f, detectado %s (%s)",
+                        sym,
+                        REBOUND_MIN_STRENGTH_PUT,
+                        hint.conflicting_pattern,
+                        explain_no_pattern_reason(candles_1m, hint.proposed_direction),
+                    )
+                else:
+                    parts = hint.conflicting_pattern.split(":")
+                    pat = parts[0]
+                    stren = parts[1] if len(parts) > 1 else "0.00"
+                    log.info(
+                        "↪ %s: PUT requiere patrón ≥%.2f, detectado %s %s",
+                        sym,
+                        REBOUND_MIN_STRENGTH_PUT,
+                        pat,
+                        stren,
+                    )
+            elif skip_reason in ("pattern_missing", "pattern_insufficient"):
+                log.info(
+                    "⏳ %s: patrón conflictivo (%s) en %s — esperando reversión (intento 1/%d)",
+                    sym, hint.conflicting_pattern, side,
+                    self.bot.pending_reversals[sym].max_wait_scans,
+                )
+        elif hint.update_existing:
+            self.bot.pending_reversals[sym].conflicting_pattern = hint.conflicting_pattern
+            self.bot.pending_reversals[sym].zone = zone
+
+        if skip_reason == "put_pattern_blacklisted":
+            log.info(
+                "↪ %s: patrón %s en lista negra para PUT — skip",
+                sym,
+                hint.conflicting_pattern,
+            )
+
+    def _bump_strat_a_skip_stats(self, skip_reason: str | None) -> None:
+        if skip_reason == "zone_too_young":
+            self.bot.stats["rejected_young_zone"] += 1
+        if skip_reason == "h1_conflict":
+            self.bot.stats["filtered_sensor"] += 1
+        elif skip_reason in ("htf_reject", "zone_memory_wall"):
+            self.bot.stats["skipped"] += 1
+        elif skip_reason is not None:
+            self.bot.stats["skipped"] += 1
+
+    def _apply_strat_a_htf_zone_gates(
+        self,
+        sym: str,
+        direction: str,
+        price: float,
+    ) -> tuple[bool, list, list, str | None]:
+        """
+        Veto HTF 15m y muro zone_memory antes de crear candidato STRAT-A.
+
+        Retorna (passed, candles_15m, zones, skip_reason).
+        """
+        candles_15m = self.bot.htf_scanner.get_candles_15m(sym)
+        veto, _htf_trend = _check_htf_available_and_aligned(
+            candles_15m, direction, infer_h1_trend,
+        )
+        if not veto.passed:
+            log.info("⛔ [STRAT-A] %s: %s", sym, veto.reason)
+            self._bump_strat_a_skip_stats("htf_reject")
+            try:
+                from instrumentation_layer import metrics
+                metrics.gate_htf_reject += 1
+            except Exception:
+                pass
+            return False, candles_15m, [], "htf_reject"
+
+        journal = get_journal()
+        zones = query_nearby_zones(journal.db_path, sym, price)
+        zone_adj = score_zone_memory(zones, direction, price) if zones else 0.0
+        wall = _check_zone_memory_no_wall(zone_adj, -10.0)
+        if not wall.passed:
+            log.info("⛔ [STRAT-A] %s: zone_memory wall (adj=%.1f)", sym, zone_adj)
+            self._bump_strat_a_skip_stats("zone_memory_wall")
+            return False, candles_15m, zones, "zone_memory_wall"
+
+        return True, candles_15m, zones, None
+
+    async def _handle_breakout_side_effects(
+        self,
+        sym: str,
+        zone: ConsolidationZone,
+        candles: List[Candle],
+        candles_1m: List[Candle],
+        payout: int,
+        ev: StratAEvaluation,
+    ) -> None:
+        last = candles[-1]
+        if ev.entry_mode == "breakout_above":
+            log.info(
+                "🟢 %s: BROKEN_ABOVE techo=%.5f | cierre=%.5f cuerpo=%.5f → CALL inmediato",
+                sym, zone.ceiling, last.close, last.body,
+            )
+            reason = "BROKEN_ABOVE"
+        else:
+            log.info(
+                "🔴 %s: BROKEN_BELOW piso=%.5f | cierre=%.5f cuerpo=%.5f → PUT inmediato",
+                sym, zone.floor, last.close, last.body,
+            )
+            reason = "BROKEN_BELOW"
+
+        expired_zone_id = get_journal().log_expired_zone(
+            asset=sym,
+            expiry_reason=reason,
+            ceiling=zone.ceiling,
+            floor=zone.floor,
+            range_pct=zone.range_pct,
+            bars_inside=zone.bars_inside,
+            age_min=zone.age_minutes,
+            last_close=last.close,
+            break_body=last.body,
+            payout=payout,
+        )
+        capture_file = self._record_broken_zone_snapshot(
+            asset=sym,
+            payout=payout,
+            reason=reason,
+            expired_zone_id=expired_zone_id,
+            zone=zone,
+            last=last,
+            candles_1m_used=candles_1m,
+            candles_5m_used=candles,
+        )
+        self._schedule_followup_capture(sym, capture_file)
+        log.info("🧾 %s: snapshot %s guardado -> %s", sym, reason, capture_file.name)
+        self.bot.broken_zones[sym] = time.time()
+
+    def _candidate_from_strat_a_evaluation(
+        self,
+        sym: str,
+        payout: int,
+        candles: List[Candle],
+        h1_candles: List[Candle],
+        ev: StratAEvaluation,
+        amount: float,
+        ma_state: Any,
+        blocks: dict[str, list],
+        ob_tf_label: str,
+        candles_1m: List[Candle],
+    ) -> CandidateEntry:
+        candidate = CandidateEntry(
+            asset=sym,
+            payout=payout,
+            zone=ev.zone,
+            direction=ev.direction,
+            candles=candles,
+        )
+        candidate.candles_h1 = h1_candles
+        candidate._reversal_pattern = ev.pattern_name  # type: ignore[attr-defined]
+        candidate._reversal_strength = ev.strength  # type: ignore[attr-defined]
+        candidate._reversal_confirms = ev.confirms  # type: ignore[attr-defined]
+        candidate._entry_mode = ev.entry_mode  # type: ignore[attr-defined]
+        candidate._signal_ts_1m = candles_1m[-1].ts if candles_1m else None  # type: ignore[attr-defined]
+        candidate._amount = amount  # type: ignore[attr-defined]
+        candidate._stage = ev.stage  # type: ignore[attr-defined]
+        candidate._ma_state = ma_state  # type: ignore[attr-defined]
+        candidate._order_blocks = blocks  # type: ignore[attr-defined]
+        candidate._ob_tf = ob_tf_label  # type: ignore[attr-defined]
+        candidate._force_execute = ev.force_execute  # type: ignore[attr-defined]
+        candidate._strategy_origin = "STRAT-A"  # type: ignore[attr-defined]
+        return candidate
+
+    def _apply_score_adjustments(
+        self,
+        candidate: CandidateEntry,
+        ev: StratAEvaluation,
+        ob_tf_label: str,
+        sym: str,
+    ) -> None:
+        adj = ev.score_adjustments
+        if adj.reversal_bonus:
+            candidate.score = round(candidate.score + adj.reversal_bonus, 1)
+            candidate.score_breakdown["reversal_bonus"] = adj.reversal_bonus
+        elif adj.reversal_penalty:
+            candidate.score = round(candidate.score + adj.reversal_penalty, 1)
+            candidate.score_breakdown["reversal_penalty"] = adj.reversal_penalty
+        elif adj.weak_confirmation:
+            candidate.score = round(candidate.score + adj.weak_confirmation, 1)
+            candidate.score_breakdown["weak_confirmation"] = adj.weak_confirmation
+
+        if adj.breakout_bonus:
+            candidate.score = round(candidate.score + adj.breakout_bonus, 1)
+            candidate.score_breakdown["breakout_bonus"] = adj.breakout_bonus
+
+        if adj.order_block:
+            candidate.score = round(candidate.score + adj.order_block, 1)
+            candidate.score_breakdown["order_block"] = adj.order_block
+        candidate._ob_info = f"tf={ob_tf_label} | {ev.ob_info}"  # type: ignore[attr-defined]
+
+        if adj.ma_filter:
+            candidate.score = round(candidate.score + adj.ma_filter, 1)
+            candidate.score_breakdown["ma_filter"] = adj.ma_filter
+        candidate._ma_info = ev.ma_info  # type: ignore[attr-defined]
+
+        log.info(
+            "[OB] %s tf=%s dir=%s ajuste=%+.1f | %s",
+            sym,
+            ob_tf_label,
+            ev.direction.upper() if ev.direction else "",
+            adj.order_block,
+            ev.ob_info,
+        )
+        log.info(
+            "[MA] %s dir=%s ajuste=%+.1f | %s",
+            sym,
+            ev.direction.upper() if ev.direction else "",
+            adj.ma_filter,
+            ev.ma_info,
+        )
 
     def _serialize_candles(candles: List[Candle]) -> list[dict[str, float | int]]:
         return [
@@ -344,14 +773,14 @@ class AssetScanner:
                 "✓" if confirms else "✗",
             )
 
-            req_strength = self._required_rebound_strength(pr.proposed_direction)
-            candle_valid, candle_fail_reason = self._validate_rejection_candle(
+            req_strength = required_rebound_strength(pr.proposed_direction)
+            candle_valid, candle_fail_reason = validate_rejection_candle(
                 candles_1m,
                 pr.proposed_direction,
                 REJECTION_CANDLE_MIN_BODY,
             )
 
-            if self._is_put_pattern_blacklisted(pr.proposed_direction, pattern_name):
+            if is_put_pattern_blacklisted(pr.proposed_direction, pattern_name):
                 log.info(
                     "↪ %s: patrón %s en lista negra para PUT — skip",
                     sym,
@@ -365,6 +794,14 @@ class AssetScanner:
             can_enter = candle_valid and confirms and strength >= req_strength
 
             if can_enter:
+                passed, candles_15m, zones, _skip = self._apply_strat_a_htf_zone_gates(
+                    sym, pr.proposed_direction, price,
+                )
+                if not passed:
+                    if pr.scans_waited >= pr.max_wait_scans:
+                        to_remove.append(sym)
+                    continue
+
                 log.info(
                     "✅ %s: reversión confirmada tras %d scan(s) — entrando %s",
                     sym, pr.scans_waited, pr.proposed_direction.upper(),
@@ -389,15 +826,18 @@ class AssetScanner:
                     candles=candles_5m,
                 )
                 candidate.candles_h1 = h1_hist
+                candidate.zone_memory = zones
+                candidate.candles_15m = candles_15m
                 candidate._reversal_pattern = pattern_name  # type: ignore[attr-defined]
                 candidate._reversal_strength = strength  # type: ignore[attr-defined]
                 candidate._reversal_confirms = confirms  # type: ignore[attr-defined]
                 candidate._entry_mode = pr.entry_mode  # type: ignore[attr-defined]
                 candidate._signal_ts_1m = candles_1m[-1].ts if candles_1m else None  # type: ignore[attr-defined]
-                amount, _ = self._compute_initial_amount(payout)
+                amount, _ = self.executor._compute_initial_amount(payout)
                 candidate._amount = amount  # type: ignore[attr-defined]
                 candidate._stage = "initial"  # type: ignore[attr-defined]
                 candidate._from_pending = True  # type: ignore[attr-defined]
+                candidate._strategy_origin = "STRAT-A"  # type: ignore[attr-defined]
                 score_candidate(candidate)
                 if confirms and strength >= 0.60:
                     candidate.score = round(candidate.score + 8.0, 1)
@@ -449,19 +889,15 @@ class AssetScanner:
             self.bot.pending_reversals.pop(sym, None)
 
         return ready_candidates
-    async def scan_all(self) -> None:
-        """
-        Escanea todos los activos, puntúa cada candidato con el sensor
-        matemático y opera SOLO el mejor (o los N mejores si MAX_ENTRIES_CYCLE > 1).
-        Si ninguno supera el umbral dinámico de score, no opera ese ciclo.
-        """
-        if await self.executor.refresh_balance_and_risk():
-            return
+
+    async def _scan_phase_prepare(self) -> list[tuple[str, int]] | None:
+        """FASE 1/5 — martin, assets, filtros iniciales."""
+        self._phase_log("1/5", "Preparación — martin, assets, filtros")
 
         assets = await get_open_assets(self.bot.client, MIN_PAYOUT)
         if not assets:
             log.warning("No se obtuvieron activos OTC disponibles.")
-            return
+            return None
 
         total_assets_available = len(assets)
         if SCAN_MAX_ASSETS_PER_CYCLE > 0 and len(assets) > SCAN_MAX_ASSETS_PER_CYCLE:
@@ -473,67 +909,50 @@ class AssetScanner:
             )
 
         self.bot.stats["scans"] += 1
-        accepted_this_scan = 0
         self.executor._cleanup_asset_blacklist()
-        log.info("═══ SCAN #%d | %d activos payout≥%d%% ═══",
-                 self.bot.stats["scans"], len(assets), MIN_PAYOUT)
+        log.info(
+            "═══ SCAN #%d | %d activos payout≥%d%% ═══",
+            self.bot.stats["scans"],
+            len(assets),
+            MIN_PAYOUT,
+        )
 
-        # 1) Revisar martingalas de trades abiertos
         for sym in list(self.bot.trades.keys()):
             entered = await self.executor._check_martin(sym)
             if entered:
                 await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
             await asyncio.sleep(0.2)
 
-        # Si hay operaciones abiertas: seguir escaneando para vigilar oportunidades.
-        # El bloque de ejecución (paso 5) impedirá abrir nuevas entradas si se alcanzó
-        # MAX_CONCURRENT_TRADES; los candidatos buenos se guardan en watched_candidates.
         if self.bot.trades:
-            activos_abiertos = ', '.join(self.bot.trades.keys())
+            activos_abiertos = ", ".join(self.bot.trades.keys())
             log.info(
                 "👁 Operación activa [%s] — escaneando igual para vigilar oportunidades.",
                 activos_abiertos,
             )
         else:
-            # Sin trades activos: limpiar vigilados viejos (> 5 min) para no ensuciar el log.
             if self.bot.watched_candidates:
-                stale = [a for a, (_, ts) in self.bot.watched_candidates.items() if time.time() - ts > 300]
+                stale = [
+                    a for a, (_, ts) in self.bot.watched_candidates.items()
+                    if time.time() - ts > 300
+                ]
                 for a in stale:
                     del self.bot.watched_candidates[a]
 
-        # 2) Recolectar candidatos sin trade abierto
-        candidates: list[CandidateEntry] = []
-        cycle_ob_summary: dict[str, str] = {}
-        cycle_ma_summary: dict[str, str] = {}
-        strat_b_total = 0
-        strat_b_insufficient = 0
-        strat_b_timeout = 0  # fetches 1m que devolvieron 0 velas (timeout)
-        strat_b_hits: list[tuple[str, int, float]] = []
-        strat_b_nearmiss: list[tuple[str, int, float, str]] = []
-        # Acumuladores para pending_reversals (populados durante el loop).
-        candles_1m_collected: dict[str, list] = {}
-        last_prices_collected: dict[str, float] = {}
+        decrement_failed_assets(self.bot)
+        return assets
 
+    async def _scan_phase_prefetch(self, assets: list[tuple[str, int]]) -> ScanCycleData:
+        """FASE 2/5 y 3b — prefetch primario (5m+1m) y secundario (OB+H1)."""
         symbols = [sym for sym, _ in assets]
-        fetch_t0 = time.monotonic()
         candle_cache = getattr(self.bot, "candle_cache", None)
-        candles_5m_by_asset = await fetch_candles_parallel(
+
+        self._phase_log("2/5", "Prefetch primario — 5m+1m paralelo")
+        fetch_t0 = time.monotonic()
+        candles_5m, candles_1m = await prefetch_primary_candles(
             self.bot.client,
             symbols,
-            TF_5M,
-            CANDLES_LOOKBACK,
-            concurrency=CANDLE_FETCH_CONCURRENCY,
-            timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
-            cache=candle_cache,
-        )
-        candles_1m_by_asset = await fetch_candles_parallel(
-            self.bot.client,
-            symbols,
-            60,
-            36,
-            concurrency=CANDLE_FETCH_CONCURRENCY,
-            timeout_sec=CANDLE_FETCH_1M_TIMEOUT_SEC,
-            cache=candle_cache,
+            candle_cache,
+            CANDLE_FETCH_CONCURRENCY,
         )
         scan_fetch_elapsed_ms = int((time.monotonic() - fetch_t0) * 1000)
         log.info(
@@ -543,15 +962,69 @@ class AssetScanner:
             CANDLE_FETCH_CONCURRENCY,
         )
 
-        # Decrementar contadores de activos en cooldown post-fallo.
-        expired_failed = [a for a, n in self.bot.failed_assets.items() if n <= 1]
-        for a in expired_failed:
-            del self.bot.failed_assets[a]
-        for a in self.bot.failed_assets:
-            self.bot.failed_assets[a] -= 1
+        strat_a_symbols = symbols_needing_strat_a_prefetch(
+            assets,
+            self.bot,
+            candles_5m,
+            is_blacklisted=self.executor._is_asset_blacklisted,
+        )
+        self._phase_log(
+            "3b/5",
+            f"Prefetch secundario OB+H1 — {len(strat_a_symbols)} símbolos",
+        )
+        candles_ob, candles_h1, ob_tf_labels, blocks_by_symbol = await prefetch_strat_a_secondary(
+            self.bot.client,
+            strat_a_symbols,
+            candles_5m,
+            candle_cache,
+            CANDLE_FETCH_CONCURRENCY,
+        )
+        log.info(
+            "⚡ Prefetch OB: blocks_precalc=%d | símbolos=%d",
+            len(blocks_by_symbol),
+            len(strat_a_symbols),
+        )
+
+        return ScanCycleData(
+            symbols=symbols,
+            assets=assets,
+            candles_5m=candles_5m,
+            candles_1m=candles_1m,
+            candles_ob=candles_ob,
+            candles_h1=candles_h1,
+            ob_tf_labels=ob_tf_labels,
+            blocks_by_symbol=blocks_by_symbol,
+        )
+
+    async def _scan_phase_evaluate_assets(
+        self,
+        cycle: ScanCycleData,
+    ) -> dict[str, Any]:
+        """FASE 3/5 — STRAT-B, MOMENTUM y STRAT-A sin I/O de red."""
+        self._phase_log("3/5", "Evaluación — STRAT-B/MOMENTUM/STRAT-A")
+        if _runtime_config.STRAT_A_ONLY:
+            log.info("[STRAT-A-ONLY] Modo activo — solo candidatos consolidación")
+
+        candidates: list[CandidateEntry] = []
+        cycle_ob_summary: dict[str, str] = {}
+        cycle_ma_summary: dict[str, str] = {}
+        strat_b_total = 0
+        strat_b_insufficient = 0
+        strat_b_timeout = 0
+        strat_b_hits: list[tuple[str, int, float]] = []
+        strat_b_nearmiss: list[tuple[str, int, float, str]] = []
+        candles_1m_collected: dict[str, list] = {}
+        last_prices_collected: dict[str, float] = {}
+        radar_entries_from_cycle: list[RadarWatchEntry] = []
+
+        candles_5m_by_asset = cycle.candles_5m
+        candles_1m_by_asset = cycle.candles_1m
+        assets = cycle.assets
 
         for idx, (sym, payout) in enumerate(assets, start=1):
-            if SCAN_PROGRESS_EVERY > 0 and (idx == 1 or idx % SCAN_PROGRESS_EVERY == 0 or idx == len(assets)):
+            if SCAN_PROGRESS_EVERY > 0 and (
+                idx == 1 or idx % SCAN_PROGRESS_EVERY == 0 or idx == len(assets)
+            ):
                 log.info("⏱ Progreso scan: %d/%d activos", idx, len(assets))
 
             if sym in self.bot.trades:
@@ -565,14 +1038,18 @@ class AssetScanner:
             if self.executor._is_asset_blacklisted(sym):
                 until_ts = self.bot.asset_blacklist_until.get(sym, time.time())
                 remain_min = max(0.0, (until_ts - time.time()) / 60.0)
-                log.warning("⏭ %s: blacklist temporal activa (%.1f min restantes)", sym, remain_min)
+                log.warning(
+                    "⏭ %s: blacklist temporal activa (%.1f min restantes)", sym, remain_min,
+                )
                 self.bot.stats["skipped"] += 1
                 continue
 
-            # Skip activos que fallaron recientemente en place_order().
             if sym in self.bot.failed_assets:
-                log.info("⏭ %s skipped — falló en ciclo anterior (%d ciclos restantes)",
-                         sym, self.bot.failed_assets[sym])
+                log.info(
+                    "⏭ %s skipped — falló en ciclo anterior (%d ciclos restantes)",
+                    sym,
+                    self.bot.failed_assets[sym],
+                )
                 continue
 
             candles = candles_5m_by_asset.get(sym, [])
@@ -608,9 +1085,14 @@ class AssetScanner:
             strat_b_conf = float(strat_b_info.get("confidence", 0.0) or 0.0)
             strat_b_signal_type = str(strat_b_info.get("signal_type") or "")
             strat_b_direction = str(strat_b_info.get("direction") or "call")
-            strat_b_reason = str(strat_b_info.get("reason", f"{strat_b_signal_type or 'Señal'} detectado") or "Señal detectada")
+            strat_b_reason = str(
+                strat_b_info.get("reason", f"{strat_b_signal_type or 'Señal'} detectado")
+                or "Señal detectada"
+            )
             is_early_wyckoff = strat_b_signal_type.startswith("wyckoff_early")
-            strat_b_required_conf = STRAT_B_MIN_CONFIDENCE_EARLY if is_early_wyckoff else STRAT_B_MIN_CONFIDENCE
+            strat_b_required_conf = (
+                STRAT_B_MIN_CONFIDENCE_EARLY if is_early_wyckoff else STRAT_B_MIN_CONFIDENCE
+            )
             if strat_b_signal:
                 self.bot.stats["strat_b_signals"] += 1
                 strat_b_hits.append((sym, payout, strat_b_conf, strat_b_direction, strat_b_signal_type))
@@ -618,9 +1100,9 @@ class AssetScanner:
                 if strat_b_conf >= STRAT_B_PREVIEW_MIN_CONF:
                     strat_b_nearmiss.append((sym, payout, strat_b_conf, strat_b_reason))
 
-            # Modo opcional: STRAT-B puede abrir operación por sí sola.
             if (
-                STRAT_B_CAN_TRADE
+                not _runtime_config.STRAT_A_ONLY
+                and STRAT_B_CAN_TRADE
                 and strat_b_signal
                 and strat_b_conf >= strat_b_required_conf
                 and len(self.bot.trades) < MAX_CONCURRENT_TRADES
@@ -645,7 +1127,6 @@ class AssetScanner:
                 else:
                     pattern_label = "Wyckoff"
 
-                # Registrar STRAT-B en caja negra (journal) antes de enviar la orden.
                 b_candidate = CandidateEntry(
                     asset=sym,
                     payout=payout,
@@ -700,7 +1181,11 @@ class AssetScanner:
                 )
                 await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
 
-            momentum_hit = detect_momentum_1m(candles_1m)
+            momentum_hit = (
+                detect_momentum_1m(candles_1m)
+                if not _runtime_config.STRAT_A_ONLY and _runtime_config.STRAT_MOMENTUM_ENABLED
+                else None
+            )
             if momentum_hit and sym not in self.bot.trades:
                 mom_dir, mom_strength = momentum_hit
                 mom_zone = ConsolidationZone(
@@ -743,7 +1228,16 @@ class AssetScanner:
                     mom_candidate.score,
                 )
 
-            # STRAT-A requiere historial 5m mínimo para consolidación.
+            if payout < STRAT_A_MIN_PAYOUT:
+                log.info(
+                    "⛔ [STRAT-A] %s: payout=%d%% < %d%% — excluido del scan",
+                    sym,
+                    payout,
+                    STRAT_A_MIN_PAYOUT,
+                )
+                self.bot.stats["skipped"] = self.bot.stats.get("skipped", 0) + 1
+                continue
+
             if len(candles) < MIN_CONSOLIDATION_BARS + 2:
                 continue
 
@@ -755,82 +1249,19 @@ class AssetScanner:
                 continue
 
             zone.asset = sym
-
-            if sym in self.bot.zones:
-                existing = self.bot.zones[sym]
-                if MAX_CONSOLIDATION_MIN > 0 and existing.age_minutes > MAX_CONSOLIDATION_MIN:
-                    log.info(
-                        "⏱  %s: zona expirada por TIME_LIMIT (%.0fmin) | "
-                        "techo=%.5f piso=%.5f rango=%.3f%% barras=%d | precio_actual=%.5f",
-                        sym,
-                        existing.age_minutes,
-                        existing.ceiling,
-                        existing.floor,
-                        existing.range_pct * 100,
-                        existing.bars_inside,
-                        candles[-1].close if candles else 0.0,
-                    )
-                    get_journal().log_expired_zone(
-                        asset=sym,
-                        expiry_reason="TIME_LIMIT",
-                        ceiling=existing.ceiling,
-                        floor=existing.floor,
-                        range_pct=existing.range_pct,
-                        bars_inside=existing.bars_inside,
-                        age_min=existing.age_minutes,
-                        last_close=candles[-1].close if candles else 0.0,
-                        payout=payout,
-                    )
-                    del self.bot.zones[sym]
-                    self.bot.stats["expired_zones"] += 1
-                    continue
-                zone.detected_at = existing.detected_at
-            self.bot.zones[sym] = zone
-
-            last = candles[-1]
-            price = last.close
-
-            # ── Guardia de precio contra contaminación cruzada de pyquotex ──
-            # Capa 1: precio fuera del rango de zona ±15% → descarte.
-            _zone_mid = (zone.ceiling + zone.floor) / 2.0
-            if _zone_mid > 0 and not (zone.floor * 0.85 <= price <= zone.ceiling * 1.15):
-                _last_valid = self.bot.last_known_price.get(sym)
-                _last_txt = f" (último válido: {_last_valid:.5f})" if _last_valid else ""
-                log.warning(
-                    "⚠ %s: precio %.5f contaminado — fuera de zona [%.5f, %.5f]%s",
-                    sym, price, zone.floor * 0.85, zone.ceiling * 1.15, _last_txt,
-                )
-                self.bot.stats["skipped"] += 1
+            zone = self._merge_zone_state(sym, zone, candles, payout)
+            if zone is None:
                 continue
 
-            # Capa 2: variación > 5% respecto al último precio válido conocido → descarte.
-            _last_valid = self.bot.last_known_price.get(sym)
-            if _last_valid and _last_valid > 0:
-                _delta_pct = abs(price - _last_valid) / _last_valid
-                if _delta_pct > 0.05:
-                    log.warning(
-                        "⚠ %s: precio %.5f contaminado — cambio de %.1f%% vs último válido %.5f",
-                        sym, price, _delta_pct * 100, _last_valid,
-                    )
-                    self.bot.stats["skipped"] += 1
-                    continue
+            price = candles[-1].close
+            if not self._price_sanity_ok(sym, zone, price):
+                continue
 
-            # Precio válido — actualizar registro.
             self.bot.last_known_price[sym] = price
             last_prices_collected[sym] = price
-            candles_ob = await fetch_candles_with_retry(
-                self.bot.client,
-                sym,
-                ORDER_BLOCK_TF_SEC,
-                ORDER_BLOCK_CANDLES,
-                timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
-                retries=1,
-            )
-            ob_tf_label = "3m"
-            if len(candles_ob) < 6:
-                candles_ob = candles
-                ob_tf_label = "5m_fallback"
-            blocks = detect_order_blocks(candles_ob)
+
+            blocks = cycle.blocks_by_symbol.get(sym, {"bull": [], "bear": []})
+            ob_tf_label = cycle.ob_tf_labels.get(sym, "5m_fallback")
             self.bot.order_blocks_by_asset[sym] = blocks
             ma_state = self._compute_ma_state(sym, candles)
             if blocks.get("bull"):
@@ -849,374 +1280,71 @@ class AssetScanner:
                     f"{ma_state.trend} (MA35={ma_state.ma35:.4f} {comparator} MA50={ma_state.ma50:.4f})"
                 )
 
-            direction: Optional[str] = None
-            amount, _ = self.executor._compute_initial_amount(payout)
-            stage = "initial"
-            entry_mode = "none"
-            breakout_strength_ok = False
+            h1_candles = cycle.candles_h1.get(sym, [])
+            h1_trend = infer_h1_trend(h1_candles)
 
-            if price_at_ceiling(price, zone.ceiling, dynamic_touch_tolerance):
-                direction = "put"
-                entry_mode = "rebound_ceiling"
-            elif price_at_floor(price, zone.floor, dynamic_touch_tolerance):
-                direction = "call"
-                entry_mode = "rebound_floor"
-            elif broke_above(last, zone.ceiling) and is_high_volume_break(last, candles):
-                # Ruptura con fuerza hacia arriba: compra inmediata (momentum).
-                direction = "call"
-                stage = "breakout"
-                entry_mode = "breakout_above"
-                breakout_strength_ok = True
-                log.info(
-                    "🟢 %s: BROKEN_ABOVE techo=%.5f | cierre=%.5f cuerpo=%.5f → CALL inmediato",
-                    sym, zone.ceiling, last.close, last.body,
-                )
-                expired_zone_id = get_journal().log_expired_zone(
-                    asset=sym,
-                    expiry_reason="BROKEN_ABOVE",
-                    ceiling=zone.ceiling,
-                    floor=zone.floor,
-                    range_pct=zone.range_pct,
-                    bars_inside=zone.bars_inside,
-                    age_min=zone.age_minutes,
-                    last_close=last.close,
-                    break_body=last.body,
-                    payout=payout,
-                )
-                capture_file = self._record_broken_zone_snapshot(
-                    asset=sym,
-                    payout=payout,
-                    reason="BROKEN_ABOVE",
-                    expired_zone_id=expired_zone_id,
-                    zone=zone,
-                    last=last,
-                    candles_1m_used=candles_1m,
-                    candles_5m_used=candles,
-                )
-                self._schedule_followup_capture(sym, capture_file)
-                log.info("🧾 %s: snapshot BROKEN_ABOVE guardado -> %s", sym, capture_file.name)
-                self.bot.broken_zones[sym] = time.time()
-            elif broke_below(last, zone.floor) and is_high_volume_break(last, candles):
-                # Ruptura con fuerza hacia abajo: venta inmediata (momentum).
-                direction = "put"
-                stage = "breakout"
-                entry_mode = "breakout_below"
-                breakout_strength_ok = True
-                log.info(
-                    "🔴 %s: BROKEN_BELOW piso=%.5f | cierre=%.5f cuerpo=%.5f → PUT inmediato",
-                    sym, zone.floor, last.close, last.body,
-                )
-                expired_zone_id = get_journal().log_expired_zone(
-                    asset=sym,
-                    expiry_reason="BROKEN_BELOW",
-                    ceiling=zone.ceiling,
-                    floor=zone.floor,
-                    range_pct=zone.range_pct,
-                    bars_inside=zone.bars_inside,
-                    age_min=zone.age_minutes,
-                    last_close=last.close,
-                    break_body=last.body,
-                    payout=payout,
-                )
-                capture_file = self._record_broken_zone_snapshot(
-                    asset=sym,
-                    payout=payout,
-                    reason="BROKEN_BELOW",
-                    expired_zone_id=expired_zone_id,
-                    zone=zone,
-                    last=last,
-                    candles_1m_used=candles_1m,
-                    candles_5m_used=candles,
-                )
-                self._schedule_followup_capture(sym, capture_file)
-                log.info("🧾 %s: snapshot BROKEN_BELOW guardado -> %s", sym, capture_file.name)
-                self.bot.broken_zones[sym] = time.time()
-
-            if direction is None:
-                self.bot.stats["skipped"] += 1
-                continue
-
-            # Si la ruptura ya fue validada con fuerza (BROKEN_ABOVE/BELOW),
-            # no bloquearla por antigüedad de zona para mantener el modo "inmediato".
-            skip_zone_age_check = stage == "breakout" and breakout_strength_ok
-            min_zone_age = ZONE_AGE_BREAKOUT_MIN if stage == "breakout" else ZONE_AGE_REBOUND_MIN
-            if (not skip_zone_age_check) and zone.age_minutes < min_zone_age:
-                log.info(
-                    "⏭ %s: zona demasiado joven (%.1fmin < %dmin) — skip",
-                    sym,
-                    zone.age_minutes,
-                    min_zone_age,
-                )
-                self.bot.stats["rejected_young_zone"] += 1
-                self.bot.stats["skipped"] += 1
-                continue
-
-            # Confirmación de reversión para entradas por rebote en techo/piso.
-            pattern_name = "none"
-            strength = 0.0
-            confirms = False
-            if len(candles_1m) >= 3:
-                signal_1m = detect_reversal_pattern(candles_1m, direction)
-                pattern_name = signal_1m.pattern_name
-                strength = signal_1m.strength
-                confirms = signal_1m.confirms_direction
-
-            if entry_mode.startswith("rebound"):
-                side = "techo" if entry_mode == "rebound_ceiling" else "piso"
-                
-                # Validar forma de la vela 1m que tocó piso/techo
-                candle_valid, candle_fail_reason = validate_rejection_candle(
-                    candles_1m, direction, REJECTION_CANDLE_MIN_BODY
-                )
-                
-                if not candle_valid:
-                    # Vela no confirma rebote → espera activa
-                    if sym not in self.bot.pending_reversals:
-                        self.bot.pending_reversals[sym] = PendingReversal(
-                            asset=sym,
-                            zone=zone,
-                            proposed_direction=direction,
-                            conflicting_pattern=candle_fail_reason,
-                            detected_at=datetime.now(tz=BROKER_TZ),
-                            entry_mode=entry_mode,
-                            payout=payout,
-                        )
-                        log.info(
-                            "⏳ %s: vela 1m no confirma rebote en %s (%s) — esperando confirmación (1/%d)",
-                            sym, side, candle_fail_reason,
-                            self.bot.pending_reversals[sym].max_wait_scans,
-                        )
-                    else:
-                        # Ya existe: actualizar razón de rechazo y zona
-                        self.bot.pending_reversals[sym].conflicting_pattern = candle_fail_reason
-                        self.bot.pending_reversals[sym].zone = zone
-                    self.bot.stats["skipped"] += 1
-                    continue
-                
-                # Vela confirma dirección — validar patrón de reversión como antes
-                req_strength = required_rebound_strength(direction)
-                if is_put_pattern_blacklisted(direction, pattern_name):
-                    if sym not in self.bot.pending_reversals:
-                        self.bot.pending_reversals[sym] = PendingReversal(
-                            asset=sym,
-                            zone=zone,
-                            proposed_direction=direction,
-                            conflicting_pattern=pattern_name,
-                            detected_at=datetime.now(tz=BROKER_TZ),
-                            entry_mode=entry_mode,
-                            payout=payout,
-                        )
-                    else:
-                        self.bot.pending_reversals[sym].conflicting_pattern = pattern_name
-                        self.bot.pending_reversals[sym].zone = zone
-                    log.info(
-                        "↪ %s: patrón %s en lista negra para PUT — skip",
-                        sym,
-                        pattern_name,
-                    )
-                    self.bot.stats["skipped"] += 1
-                    continue
-                pattern_ok = confirms and strength >= req_strength
-
-                if not pattern_ok:
-                    if STRICT_PATTERN_CHECK and pattern_name != "none" and (not confirms) and strength >= 0.65:
-                        log.info(
-                            "⛔ %s: STRICT_PATTERN_CHECK activo — descarte antes de score por patrón contradictorio confirmado %s %.2f en %s",
-                            sym,
-                            pattern_name,
-                            strength,
-                            side,
-                        )
-                        self.bot.stats["skipped"] += 1
-                        continue
-                    if direction == "put":
-                        if sym not in self.bot.pending_reversals:
-                            self.bot.pending_reversals[sym] = PendingReversal(
-                                asset=sym,
-                                zone=zone,
-                                proposed_direction=direction,
-                                conflicting_pattern=f"{pattern_name}:{strength:.2f}",
-                                detected_at=datetime.now(tz=BROKER_TZ),
-                                entry_mode=entry_mode,
-                                payout=payout,
-                            )
-                        if pattern_name == "none":
-                            log.info(
-                                "↪ %s: PUT requiere patrón ≥%.2f, detectado %s %.2f (%s)",
-                                sym,
-                                req_strength,
-                                pattern_name,
-                                strength,
-                                explain_no_pattern_reason(candles_1m, direction),
-                            )
-                        else:
-                            log.info(
-                                "↪ %s: PUT requiere patrón ≥%.2f, detectado %s %.2f",
-                                sym,
-                                req_strength,
-                                pattern_name,
-                                strength,
-                            )
-                        self.bot.stats["skipped"] += 1
-                        continue
-                    if pattern_name != "none" and not confirms:
-                        # Patrón contradictorio: registrar para espera activa.
-                        if sym not in self.bot.pending_reversals:
-                            self.bot.pending_reversals[sym] = PendingReversal(
-                                asset=sym,
-                                zone=zone,
-                                proposed_direction=direction,
-                                conflicting_pattern=pattern_name,
-                                detected_at=datetime.now(tz=BROKER_TZ),
-                                entry_mode=entry_mode,
-                                payout=payout,
-                            )
-                            log.info(
-                                "⏳ %s: patrón conflictivo (%s) en %s — "
-                                "esperando reversión (intento 1/%d)",
-                                sym, pattern_name, side,
-                                self.bot.pending_reversals[sym].max_wait_scans,
-                            )
-                        else:
-                            # Ya existe: actualizar patrón conflictivo y zona.
-                            self.bot.pending_reversals[sym].conflicting_pattern = pattern_name
-                            self.bot.pending_reversals[sym].zone = zone
-                    else:
-                        log.info(
-                            "↪ %s: rebote en %s sin patrón suficiente (%s %.2f) — esperando confirmación.",
-                            sym, side, pattern_name, strength,
-                        )
-                    self.bot.stats["skipped"] += 1
-                    continue
-
-            if H1_CONFIRM_ENABLED:
-                h1_candles = await fetch_candles_with_retry(
-                    self.bot.client,
-                    sym,
-                    H1_TF_SEC,
-                    H1_CANDLES_LOOKBACK,
-                    timeout_sec=H1_FETCH_TIMEOUT_SEC,
-                )
-                h1_trend = infer_h1_trend(h1_candles)
-                if (direction == "put" and h1_trend == "bullish") or (
-                    direction == "call" and h1_trend == "bearish"
-                ):
-                    self.bot.stats["filtered_sensor"] += 1
-                    continue
-            else:
-                h1_candles = await fetch_candles_with_retry(
-                    self.bot.client,
-                    sym,
-                    H1_TF_SEC,
-                    H1_CANDLES_LOOKBACK,
-                    timeout_sec=H1_FETCH_TIMEOUT_SEC,
-                )
-
-            candidate = CandidateEntry(
-                asset=sym,
-                payout=payout,
+            ev = evaluate_strat_a(
+                candles_5m=candles,
+                candles_1m=candles_1m,
                 zone=zone,
-                direction=direction,
-                candles=candles,
-            )
-            candidate.candles_h1 = h1_candles
-
-            candidate._reversal_pattern = pattern_name  # type: ignore[attr-defined]
-            candidate._reversal_strength = strength  # type: ignore[attr-defined]
-            candidate._reversal_confirms = confirms  # type: ignore[attr-defined]
-            candidate._entry_mode = entry_mode  # type: ignore[attr-defined]
-            candidate._signal_ts_1m = candles_1m[-1].ts if candles_1m else None  # type: ignore[attr-defined]
-
-            candidate._amount = amount  # type: ignore[attr-defined]
-            candidate._stage = stage  # type: ignore[attr-defined]
-            candidate._ma_state = ma_state  # type: ignore[attr-defined]
-            candidate._order_blocks = blocks  # type: ignore[attr-defined]
-            candidate._ob_tf = ob_tf_label  # type: ignore[attr-defined]
-            candidate._force_execute = bool(
-                FORCE_EXECUTE_STRONG_BREAKOUT and stage == "breakout" and breakout_strength_ok
-            )  # type: ignore[attr-defined]
-
-            score_candidate(candidate)
-
-            # Calcular body_ratio para log
-            body_ratio = 0.0
-            if len(candles_1m) > 0:
-                last_1m = candles_1m[-1]
-                if last_1m.range > 0:
-                    body_ratio = abs(last_1m.close - last_1m.open) / last_1m.range
-
-            # Modificador por confirmación 1m.
-            if confirms and strength >= 0.60:
-                candidate.score = round(candidate.score + 8.0, 1)
-                candidate.score_breakdown["reversal_bonus"] = 8.0
-                log.debug(
-                    "1m_pattern=%s strength=%.2f body_ratio=%.0f%% +8pts reversal_bonus",
-                    pattern_name, strength, body_ratio * 100,
-                )
-            elif confirms and strength >= REBOUND_MIN_STRENGTH_CALL:
-                candidate.score = round(candidate.score + 5.0, 1)
-                candidate.score_breakdown["reversal_bonus"] = 5.0
-                log.debug(
-                    "1m_pattern=%s strength=%.2f body_ratio=%.0f%% +5pts reversal_bonus",
-                    pattern_name, strength, body_ratio * 100,
-                )
-            elif (not confirms) and pattern_name != "none":
-                candidate.score = round(candidate.score - 15.0, 1)
-                candidate.score_breakdown["reversal_penalty"] = -15.0
-                log.debug(
-                    "1m_pattern=%s strength=%.2f body_ratio=%.0f%% -15pts reversal_penalty",
-                    pattern_name, strength, body_ratio * 100,
-                )
-            elif pattern_name == "none":
-                # Sin patrón detectado: vela confirma dirección (ya validada arriba)
-                candidate.score = round(candidate.score - 10.0, 1)
-                candidate.score_breakdown["weak_confirmation"] = -10.0
-                log.debug(
-                    "1m_pattern=%s strength=%.2f body_ratio=%.0f%% -10pts weak_confirmation",
-                    pattern_name, strength, body_ratio * 100,
-                )
-
-            if stage == "breakout" and breakout_strength_ok:
-                candidate.score = round(candidate.score + 6.0, 1)
-                candidate.score_breakdown["breakout_bonus"] = 6.0
-
-            ob_points, ob_info = score_order_blocks(
-                direction=direction,
-                price=price,
                 blocks=blocks,
-                avg_body=ma_state.avg_body if ma_state else 1e-9,
-            )
-            if ob_points != 0:
-                candidate.score = round(candidate.score + ob_points, 1)
-                candidate.score_breakdown["order_block"] = round(ob_points, 1)
-            candidate._ob_info = f"tf={ob_tf_label} | {ob_info}"  # type: ignore[attr-defined]
-
-            ma_points, ma_info = score_ma(direction, ma_state)
-            if ma_points != 0:
-                candidate.score = round(candidate.score + ma_points, 1)
-                candidate.score_breakdown["ma_filter"] = round(ma_points, 1)
-            candidate._ma_info = ma_info  # type: ignore[attr-defined]
-
-            log.info(
-                "[OB] %s tf=%s dir=%s ajuste=%+.1f | %s",
-                sym,
-                ob_tf_label,
-                direction.upper(),
-                ob_points,
-                ob_info,
-            )
-            log.info(
-                "[MA] %s dir=%s ajuste=%+.1f | %s",
-                sym,
-                direction.upper(),
-                ma_points,
-                ma_info,
+                ma_state=ma_state,
+                dynamic_touch_tolerance=dynamic_touch_tolerance,
+                h1_trend=h1_trend,
+                zone_age_rebound_min=STRAT_A_ZONE_MIN_AGE_REBOUND,
             )
 
+            if ev.entry_mode.startswith("breakout"):
+                await self._handle_breakout_side_effects(
+                    sym, zone, candles, candles_1m, payout, ev,
+                )
+
+            if ev.pending_reversal_hint:
+                self._apply_pending_reversal_hint(
+                    sym, zone, payout, ev.pending_reversal_hint, ev.skip_reason or "", candles_1m,
+                )
+
+            radar_entry = self._radar_entry_from_evaluation(
+                sym, payout, zone, price, ev, dynamic_touch_tolerance,
+            )
+            if radar_entry is not None:
+                radar_entries_from_cycle.append(radar_entry)
+
+            if not ev.has_signal:
+                if ev.skip_reason == "zone_too_young":
+                    min_zone_age = (
+                        ZONE_AGE_BREAKOUT_MIN if ev.stage == "breakout" else STRAT_A_ZONE_MIN_AGE_REBOUND
+                    )
+                    log.info(
+                        "⏭ %s: zona demasiado joven (%.1fmin < %dmin) — skip",
+                        sym,
+                        zone.age_minutes,
+                        min_zone_age,
+                    )
+                elif (
+                    ev.entry_mode.startswith("rebound")
+                    and ev.skip_reason in ("pattern_missing", "pattern_insufficient", "strict_pattern_veto")
+                ):
+                    self._log_strat_a_pattern_veto(sym, ev)
+                self._bump_strat_a_skip_stats(ev.skip_reason)
+                continue
+
+            passed, candles_15m, zones, _skip = self._apply_strat_a_htf_zone_gates(
+                sym, ev.direction, price,
+            )
+            if not passed:
+                continue
+
+            amount, _ = self.executor._compute_initial_amount(payout)
+            candidate = self._candidate_from_strat_a_evaluation(
+                sym, payout, candles, h1_candles, ev, amount, ma_state, blocks, ob_tf_label, candles_1m,
+            )
+            candidate.zone_memory = zones
+            candidate.candles_15m = candles_15m
+            score_candidate(candidate)
+            self._apply_score_adjustments(candidate, ev, ob_tf_label, sym)
             candidates.append(candidate)
-            await asyncio.sleep(0.30)  # breve pausa para separar respuestas WebSocket
 
-        # Resumen STRAT-B por ciclo (evita spam por activo).
         log.info(
             "[STRAT-B] Resumen ciclo: %d evaluados | señales=%d | "
             "timeout_fetch=%d | datos_insuficientes=%d | sin_patrón=%d",
@@ -1273,7 +1401,175 @@ class AssetScanner:
                     reason,
                 )
 
-        # 3) Procesar reversiones pendientes (espera activa post-conflicto).
+        if radar_entries_from_cycle:
+            self._update_radar_watchlist(radar_entries_from_cycle)
+
+        return {
+            "candidates": candidates,
+            "cycle_ob_summary": cycle_ob_summary,
+            "cycle_ma_summary": cycle_ma_summary,
+            "candles_1m_collected": candles_1m_collected,
+            "last_prices_collected": last_prices_collected,
+        }
+
+    async def radar_watch_tick(self) -> bool:
+        """Tick 1m sobre pares en watchlist. Devuelve True si se intentó entrada."""
+        watchlist = (
+            self.bot.radar_watchlist
+            if isinstance(getattr(self.bot, "radar_watchlist", None), dict)
+            else {}
+        )
+        if not self._radar_enabled() or not watchlist:
+            return False
+
+        if await self.executor.refresh_balance_and_risk():
+            return False
+
+        entries_before = self.bot.stats.get("entries", 0)
+        watch_items = list(watchlist.items())
+        candidates: list[CandidateEntry] = []
+        candles_1m_collected: dict[str, list] = {}
+        last_prices_collected: dict[str, float] = {}
+        stale_assets: list[str] = []
+        radar_1m_count = 36
+
+        for sym, watch in watch_items:
+            try:
+                candles_1m = await self.bot.candle_cache.get_or_update(
+                    self.bot.client,
+                    sym,
+                    TF_1M,
+                    radar_1m_count,
+                )
+            except Exception as exc:
+                log.warning("[RADAR] %s: fetch 1m falló (%s)", sym, exc)
+                continue
+
+            if len(candles_1m) < 3:
+                continue
+
+            price = float(candles_1m[-1].close)
+            candles_1m_collected[sym] = candles_1m
+            last_prices_collected[sym] = price
+
+            zone = self.bot.zones.get(sym, watch.zone)
+            if zone is None:
+                stale_assets.append(sym)
+                continue
+
+            candles_5m = await self.bot.candle_cache.get_or_update(
+                self.bot.client, sym, TF_5M, CANDLES_LOOKBACK,
+            )
+            if len(candles_5m) < MIN_CONSOLIDATION_BARS + 2:
+                continue
+
+            _, _, dynamic_touch_tolerance = compute_dynamic_range(candles_5m)
+
+            if not should_watch(zone, price, watch.entry_mode, watch.stage, dynamic_touch_tolerance):
+                log.info(
+                    "[RADAR] %s: precio %.5f salió del extremo (%s) — removido",
+                    sym, price, watch.side_label,
+                )
+                stale_assets.append(sym)
+                continue
+
+            blocks = self.bot.order_blocks_by_asset.get(sym, {"bull": [], "bear": []})
+            ma_state = self.bot.ma_state_by_asset.get(sym)
+            h1_candles = await self.bot.candle_cache.get_or_update(
+                self.bot.client, sym, H1_TF_SEC, H1_CANDLES_LOOKBACK,
+            )
+            h1_trend = infer_h1_trend(h1_candles)
+
+            ev = evaluate_strat_a(
+                candles_5m=candles_5m,
+                candles_1m=candles_1m,
+                zone=zone,
+                blocks=blocks,
+                ma_state=ma_state,
+                price=price,
+                dynamic_touch_tolerance=dynamic_touch_tolerance,
+                h1_trend=h1_trend,
+                zone_age_rebound_min=STRAT_A_ZONE_MIN_AGE_REBOUND,
+            )
+
+            if ev.pending_reversal_hint:
+                self._apply_pending_reversal_hint(
+                    sym, zone, watch.payout, ev.pending_reversal_hint, ev.skip_reason or "", candles_1m,
+                )
+
+            if not ev.has_signal:
+                if (
+                    ev.entry_mode.startswith("rebound")
+                    and ev.skip_reason in ("pattern_missing", "pattern_insufficient", "strict_pattern_veto")
+                ):
+                    self._log_strat_a_pattern_veto(sym, ev)
+                continue
+
+            passed, candles_15m, zones, _skip = self._apply_strat_a_htf_zone_gates(
+                sym, ev.direction, price,
+            )
+            if not passed:
+                continue
+
+            amount, _ = self.executor._compute_initial_amount(watch.payout)
+            candidate = self._candidate_from_strat_a_evaluation(
+                sym,
+                watch.payout,
+                candles_5m,
+                h1_candles,
+                ev,
+                amount,
+                ma_state,
+                blocks,
+                "radar_cache",
+                candles_1m,
+            )
+            candidate.zone_memory = zones
+            candidate.candles_15m = candles_15m
+            score_candidate(candidate)
+            self._apply_score_adjustments(candidate, ev, "radar", sym)
+            setattr(candidate, "_from_radar", True)
+            candidates.append(candidate)
+            log.info(
+                "[RADAR] %s: señal lista en tick — %s %s readiness=%.0f",
+                sym, ev.direction.upper(), watch.side_label, watch.readiness_score,
+            )
+
+        for sym in stale_assets:
+            self.bot.radar_watchlist.pop(sym, None)
+
+        assets_map: dict[str, int] = {sym: w.payout for sym, w in self.bot.radar_watchlist.items()}
+        for sym, pr in self.bot.pending_reversals.items():
+            assets_map.setdefault(sym, pr.payout)
+
+        if not candidates and not self.bot.pending_reversals:
+            return False
+
+        eval_result = {
+            "candidates": candidates,
+            "cycle_ob_summary": {},
+            "cycle_ma_summary": {},
+            "candles_1m_collected": candles_1m_collected,
+            "last_prices_collected": last_prices_collected,
+        }
+        await self._scan_phase_select_execute(eval_result, list(assets_map.items()))
+        return self.bot.stats.get("entries", 0) > entries_before
+
+    async def _scan_phase_select_execute(
+        self,
+        eval_result: dict[str, Any],
+        assets: list[tuple[str, int]],
+    ) -> None:
+        """FASE 4/5 y 5/5 — pending reversals, selección y ejecución."""
+        self._phase_log("4/5", "Pending reversals + selección")
+
+        candidates: list[CandidateEntry] = eval_result["candidates"]
+        cycle_ob_summary = eval_result["cycle_ob_summary"]
+        cycle_ma_summary = eval_result["cycle_ma_summary"]
+        candles_1m_collected = eval_result["candles_1m_collected"]
+        last_prices_collected = eval_result["last_prices_collected"]
+        accepted_this_scan = 0
+
         if self.bot.pending_reversals:
             assets_payout_map = dict(assets)
             pending_confirmed = await self._process_pending_reversals(
@@ -1282,7 +1578,10 @@ class AssetScanner:
                 last_prices_collected,
             )
             if pending_confirmed:
-                log.info("⏳→✅ %d candidato(s) de pending_reversals agregados al ciclo.", len(pending_confirmed))
+                log.info(
+                    "⏳→✅ %d candidato(s) de pending_reversals agregados al ciclo.",
+                    len(pending_confirmed),
+                )
                 candidates.extend(pending_confirmed)
 
         candidates, pending_martin_entered = await self.executor._process_pending_martin(candidates)
@@ -1309,7 +1608,6 @@ class AssetScanner:
             cycle_ma_summary=cycle_ma_summary,
         )
 
-        # 3) Log de candidatos
         if not candidates:
             log.info("  Sin señales este ciclo.")
             self.executor._record_scan_acceptances(0)
@@ -1325,9 +1623,21 @@ class AssetScanner:
         journal = get_journal()
         log.info("── %d candidatos evaluados ──", len(candidates))
         for c in sorted(candidates, key=lambda x: -x.score):
+            eff_threshold = self._score_threshold_for_candidate(c, session_threshold)
+            if (
+                self._is_strat_a_candidate(c)
+                and c.score < STRAT_A_MIN_SCORE
+                and c.score >= session_threshold
+            ):
+                log.info(
+                    "⛔ [STRAT-A] %s: score=%.1f < %d — veto calidad (umbral STRAT-A fijo)",
+                    c.asset,
+                    c.score,
+                    STRAT_A_MIN_SCORE,
+                )
             rng_pips = (c.zone.ceiling - c.zone.floor) * 10_000
-            status = "✅" if c.score >= session_threshold else "❌"
-            decision_tag = "ACEPTADO" if c.score >= session_threshold else "RECHAZADO"
+            status = "✅" if c.score >= eff_threshold else "❌"
+            decision_tag = "ACEPTADO" if c.score >= eff_threshold else "RECHAZADO"
             rev_pattern = getattr(c, "_reversal_pattern", "none")
             rev_strength = float(getattr(c, "_reversal_strength", 0.0) or 0.0)
             rev_confirms = bool(getattr(c, "_reversal_confirms", False))
@@ -1357,16 +1667,23 @@ class AssetScanner:
                 rev_txt,
                 ob_adj,
                 ma_adj,
-                session_threshold,
+                eff_threshold,
                 decision_tag,
             )
             log.info("      [OB] %s", getattr(c, "_ob_info", "sin datos"))
             log.info("      [MA] %s", getattr(c, "_ma_info", "sin datos"))
 
-        # 4) Seleccionar mejores
-        selected, rejected = select_best(candidates, threshold=session_threshold)
+        selected, rejected = select_best(
+            candidates,
+            threshold=session_threshold,
+            threshold_for=lambda c: self._score_threshold_for_candidate(c, session_threshold),
+        )
 
-        forced_breakouts = [c for c in candidates if bool(getattr(c, "_force_execute", False))]
+        forced_breakouts = [
+            c for c in candidates
+            if bool(getattr(c, "_force_execute", False))
+            and c.score >= self._score_threshold_for_candidate(c, session_threshold)
+        ]
         if forced_breakouts:
             existing = {id(c) for c in selected}
             for c in forced_breakouts:
@@ -1379,7 +1696,6 @@ class AssetScanner:
                 len(forced_breakouts),
             )
 
-        # Registrar rechazados por score
         for c in rejected:
             journal.log_candidate(
                 c,
@@ -1389,7 +1705,6 @@ class AssetScanner:
                 stage=getattr(c, "_stage", "initial"),
                 strategy=self.executor._strategy_snapshot(),
             )
-            # Telemetría de antigüedad de zona
             age_penalty = abs(c.score_breakdown.get("age_penalty", 0.0))
             if age_penalty > 0 and c.zone.age_minutes > 120:
                 self.bot.stats["score_rejected_age"] += 1
@@ -1407,16 +1722,19 @@ class AssetScanner:
             self.executor._record_scan_acceptances(0)
             return
 
-        log.info("[STRAT-A] 🏆 Mejor(es) seleccionado(s): %d de %d candidatos",
-                 len(selected), len(candidates))
+        log.info(
+            "[STRAT-A] 🏆 Mejor(es) seleccionado(s): %d de %d candidatos",
+            len(selected),
+            len(candidates),
+        )
 
-        # 5) Ejecutar seleccionados
+        self._phase_log("5/5", "Ejecución")
+
         if len(self.bot.trades) >= MAX_CONCURRENT_TRADES:
             log.info(
                 "🛑 Límite alcanzado (%d/%d). Se posponen nuevas entradas.",
                 len(self.bot.trades), MAX_CONCURRENT_TRADES,
             )
-            # Guardar el mejor candidato como "vigilado" para entrar cuando cierre el trade activo.
             best_watched = max(selected, key=lambda x: x.score)
             self.bot.watched_candidates[best_watched.asset] = (best_watched, time.time())
             rev_w = getattr(best_watched, "_reversal_pattern", "none")
@@ -1426,7 +1744,6 @@ class AssetScanner:
                 best_watched.direction.upper(), best_watched.asset,
                 best_watched.score, best_watched.payout, rev_w,
             )
-            # Registrar rechazados por límite
             for c in selected:
                 journal.log_candidate(
                     c,
@@ -1454,9 +1771,10 @@ class AssetScanner:
             log.info(explain_score(winner, threshold=session_threshold))
             amount = getattr(winner, "_amount", 0.0)
             stage = getattr(winner, "_stage", "initial")
-            # Si hay compensación pendiente por LOSS anterior, escalar el monto
             if self.bot.compensation_pending and stage == "initial":
-                amount, exp_profit = self.executor._compute_compensation_amount(winner.payout, self.bot.last_closed_amount)
+                amount, exp_profit = self.executor._compute_compensation_amount(
+                    winner.payout, self.bot.last_closed_amount,
+                )
                 log.info(
                     "🔁 COMPENSACIÓN activa — monto dinámico $%.2f | payout=%d%% | recup=%.2f (est. neto=%.2f)",
                     amount,
@@ -1464,7 +1782,6 @@ class AssetScanner:
                     self.bot.last_closed_amount,
                     exp_profit,
                 )
-            # Pre-registrar como ACCEPTED (outcome se actualiza después)
             outcome = "DRY_RUN" if self.bot.dry_run else "PENDING"
             cid = journal.log_candidate(
                 winner,
@@ -1494,3 +1811,22 @@ class AssetScanner:
 
         self.bot.stats["skipped"] += len(rejected)
         self.executor._record_scan_acceptances(accepted_this_scan)
+
+    async def scan_all(self) -> None:
+        """
+        Escanea todos los activos, puntúa cada candidato con el sensor
+        matemático y opera SOLO el mejor (o los N mejores si MAX_ENTRIES_CYCLE > 1).
+        Si ninguno supera el umbral dinámico de score, no opera ese ciclo.
+        """
+        if await self.executor.refresh_balance_and_risk():
+            return
+
+        assets = await self._scan_phase_prepare()
+        if not assets:
+            return
+
+        cycle = await self._scan_phase_prefetch(assets)
+        eval_result = await self._scan_phase_evaluate_assets(cycle)
+        self.bot.last_scan_candidates = eval_result.get("candidates", [])
+        await self._scan_phase_select_execute(eval_result, assets)
+

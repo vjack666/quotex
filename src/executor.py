@@ -191,7 +191,6 @@ class TradeExecutor:
             return max(MIN_ORDER_AMOUNT, capped)
         return max(MIN_ORDER_AMOUNT, self._round_up_to_cents(amount))
 
-    @staticmethod
     def _update_dynamic_threshold(self) -> int:
         if len(self.bot.accepted_scans_window) < ADAPTIVE_THRESHOLD_WINDOW_SCANS:
             self.bot.current_score_threshold = ADAPTIVE_THRESHOLD_BASE
@@ -430,6 +429,10 @@ class TradeExecutor:
             if price is None:
                 await asyncio.sleep(MARTIN_MONITOR_INTERVAL_SEC)
                 continue
+
+            hub = getattr(self.bot, "_hub_scanner", None)
+            if hub is not None and price is not None:
+                hub.update_active_trade_timer(secs_left, price)
 
             losing_probably = (
                 price < trade.entry_price * (1.0 - MARTIN_ALERT_PCT)
@@ -818,6 +821,9 @@ class TradeExecutor:
             trade.resolved = True
             if self.bot.trades.get(sym) is trade:
                 self.bot.trades.pop(sym, None)
+            hub = getattr(self.bot, "_hub_scanner", None)
+            if hub is not None:
+                hub.close_active_trade()
             return
 
         outcome = "UNRESOLVED"
@@ -880,6 +886,11 @@ class TradeExecutor:
         balance_now = self.bot.current_balance if self.bot.current_balance is not None else 0.0
         log.info("🏁 %s %s $%.2f | saldo: $%.2f", sym, outcome, profit, balance_now)
         self._update_cycle_after_result(outcome=outcome, profit=profit)
+
+        hub = getattr(self.bot, "_hub_scanner", None)
+        if hub is not None:
+            hub.record_trade_result(asset=sym, outcome=outcome, profit=profit)
+            hub.close_active_trade()
 
         if outcome == "WIN":
             if trade.strategy_origin == "STRAT-B":
@@ -1139,6 +1150,15 @@ class TradeExecutor:
             score_original=float(score_original),
         )
         trade = self.bot.trades[sym]
+        hub = getattr(self.bot, "_hub_scanner", None)
+        if hub is not None:
+            hub.record_entry(
+                strategy=strategy_origin,
+                asset=sym,
+                direction=direction,
+                duration_sec=int(duration_sec),
+                entry_price=float(open_price) if open_price else None,
+            )
         self._track_task(asyncio.create_task(self._resolve_trade_after_expiry(sym, trade), name=f"resolve:{sym}:{stage}"))
         if strategy_origin == "STRAT-A" and stage == "initial":
             self._track_task(asyncio.create_task(self._monitor_trade_live(sym, trade), name=f"monitor:{sym}"))

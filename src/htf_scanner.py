@@ -6,7 +6,7 @@ asyncio independiente. Mantiene un cache de velas 15m por activo y lo refresca
 cada TTL segundos sin bloquear el loop de trading principal.
 
 USO EN main.py:
-    from src.htf_scanner import HTFScanner
+    from htf_scanner import HTFScanner
     htf = HTFScanner(client, min_payout=85)
     asyncio.create_task(htf.run_forever())
 
@@ -264,7 +264,7 @@ class HTFScanner:
 
     async def _fetch_15m(self, asset: str) -> list:
         """Fetch con timeout y semáforo propio. Devuelve [] en caso de fallo."""
-        from consolidation_bot import fetch_candles_with_retry  # import lazy: evita circular
+        from connection import fetch_candles_with_retry  # import lazy: evita circular
         try:
             async with self._sem:
                 candles = await asyncio.wait_for(

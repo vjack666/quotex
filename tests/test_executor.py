@@ -103,3 +103,103 @@ def test_executor_cycle_reset_on_target():
     ex._update_cycle_after_result("WIN", 1.0)
     assert bot.cycle_ops == 0
     assert bot.cycle_wins == 0
+
+
+@pytest.mark.asyncio
+async def test_executor_enter_trade_strat_a_initial_sets_origin_and_monitor(monkeypatch):
+    bot = FakeBot()
+    client = MagicMock()
+    client.get_balance = AsyncMock(return_value=1000.0)
+    ex = TradeExecutor(client, bot)
+
+    zone = ConsolidationZone(
+        asset="EURUSD_otc",
+        ceiling=1.1,
+        floor=1.0,
+        bars_inside=15,
+        detected_at=0.0,
+        range_pct=0.001,
+    )
+
+    monitor_mock = AsyncMock()
+    monkeypatch.setattr(ex, "_monitor_trade_live", monitor_mock)
+    monkeypatch.setattr(
+        "executor.place_order",
+        AsyncMock(return_value=(True, "DRY-1", 0.0, 0, "")),
+    )
+    monkeypatch.setattr(
+        ex,
+        "_sync_to_next_candle_open",
+        AsyncMock(
+            return_value=__import__("executor").EntryTimingInfo(
+                ok=True,
+                lag_sec=0.0,
+                duration_sec=30,
+                time_since_open_sec=0.0,
+                secs_to_close_sec=60.0,
+                decision="SYNC_DISABLED",
+            )
+        ),
+    )
+    monkeypatch.setattr(ex, "_resolve_trade_after_expiry", AsyncMock())
+
+    ok = await ex.enter_trade(
+        "EURUSD_otc",
+        "call",
+        1.0,
+        zone,
+        "strat-a initial",
+        "initial",
+        strategy_origin="STRAT-A",
+    )
+
+    assert ok is True
+    trade = bot.trades["EURUSD_otc"]
+    assert trade.strategy_origin == "STRAT-A"
+    assert trade.stage == "initial"
+    assert bot.stats["strat_a_signals"] == 1
+    monitor_names = {t.get_name() for t in bot._trade_tasks}
+    assert "monitor:EURUSD_otc" in monitor_names
+
+
+@pytest.mark.asyncio
+async def test_executor_enter_trade_strat_a_breakout_no_monitor(monkeypatch):
+    bot = FakeBot()
+    client = MagicMock()
+    client.get_balance = AsyncMock(return_value=1000.0)
+    ex = TradeExecutor(client, bot)
+
+    zone = ConsolidationZone(
+        asset="EURUSD_otc",
+        ceiling=1.1,
+        floor=1.0,
+        bars_inside=15,
+        detected_at=0.0,
+        range_pct=0.001,
+    )
+
+    monitor_mock = AsyncMock()
+    monkeypatch.setattr(ex, "_monitor_trade_live", monitor_mock)
+    monkeypatch.setattr(
+        "executor.place_order",
+        AsyncMock(return_value=(True, "DRY-2", 0.0, 0, "")),
+    )
+    monkeypatch.setattr(ex, "_resolve_trade_after_expiry", AsyncMock())
+
+    ok = await ex.enter_trade(
+        "EURUSD_otc",
+        "call",
+        1.0,
+        zone,
+        "strat-a breakout",
+        "breakout",
+        strategy_origin="STRAT-A",
+    )
+
+    assert ok is True
+    trade = bot.trades["EURUSD_otc"]
+    assert trade.stage == "breakout"
+    assert trade.strategy_origin == "STRAT-A"
+    task_names = {t.get_name() for t in bot._trade_tasks}
+    assert "monitor:EURUSD_otc" not in task_names
+    assert "resolve:EURUSD_otc:breakout" in task_names

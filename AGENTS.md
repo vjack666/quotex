@@ -39,6 +39,9 @@ completo). No modifiques código hasta recibir instrucciones.
 | `docs/specs.md` | Proceso SDD: EARS notation, los 3 archivos, puerta de aprobación humana | Antes de redactar o leer un spec |
 | `docs/verification.md` | Cómo verificar que tu trabajo funciona (incluye trazabilidad requirements) | Antes de declarar una tarea como done |
 | `CHECKPOINTS.md` | Criterios objetivos de "estado final correcto" | Para auto-evaluarte |
+| `docs/engram.md` | Memoria persistente Engram (MCP) + notificaciones | Al iniciar sesión / tras decisiones |
+| `.cursor/mcp.json` | Servidor MCP Engram (proyecto) | Tras `.\scripts\install-engram.ps1` |
+| `scripts/notify-attention.ps1` | Ventana modal cuando el agente necesita al humano | Leader al llegar a puerta SDD o cierre |
 | `.claude/agents/` | Definiciones de subagentes (leader, spec_author, implementer, reviewer) | Si orquestas trabajo |
 | `src/` | Código fuente del bot | Para implementar |
 | `hub/` | Dashboard de monitoreo | Para modificar |
@@ -81,7 +84,18 @@ Antes de terminar:
 4. Vacía `progress/current.md` dejando solo la plantilla.
 5. No dejes archivos temporales, ni `print()` de debug, ni TODOs sin contexto.
 
-## 6. Si te bloqueas
+## 6. Engram (memoria) y notificaciones
+
+- **Instalación:** `.\scripts\install-engram.ps1` (una vez; ver `docs/engram.md`).
+- **Al iniciar:** `mem_search` / `mem_context` si MCP Engram está activo.
+- **Tras decisiones importantes:** `mem_save` (complementa `agent/HANDOFF.md`).
+- **Atención humana obligatoria:** cuando `spec_ready`, feature `done`, bloqueo o
+  `init.ps1` en rojo, ejecuta:
+  ```powershell
+  .\scripts\notify-attention.ps1 -Task "<qué pasó>" -Reason approval|done|blocked|error
+  ```
+
+## 7. Si te bloqueas
 
 - Relee la sección relevante de `docs/`.
 - Si la herramienta no hace lo que esperas, **no inventes un workaround**:

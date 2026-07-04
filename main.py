@@ -2,7 +2,9 @@ import sys
 import io
 import argparse
 import asyncio
+import os
 from pathlib import Path
+from typing import Any, Optional
 
 # Forzar UTF-8 en stdout/stderr para evitar UnicodeEncodeError en Windows (CP1252).
 if hasattr(sys.stdout, "reconfigure"):
@@ -19,6 +21,25 @@ ROOT = Path(__file__).resolve().parent
 SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+
+def _load_dotenv() -> None:
+    """Carga .env antes de importar módulos src (config lee EMAIL al importar)."""
+    import os
+
+    for candidate in (ROOT / ".env", SRC_DIR / ".env"):
+        if not candidate.exists():
+            continue
+        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+        break
+
+
+_load_dotenv()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,6 +87,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.70,
         help="Confianza mínima [0.0-1.0] para habilitar entrada STRAT-B",
     )
+    p.add_argument(
+        "--strat-a-only",
+        action="store_true",
+        help="Solo STRAT-A: deshabilita STRAT-B trades y candidatos STRAT-MOMENTUM",
+    )
     return p
 
 
@@ -86,6 +112,17 @@ def _apply_runtime_config(args: argparse.Namespace) -> None:
     cb.STRAT_B_CAN_TRADE = bool(args.strat_b_live)
     cb.STRAT_B_DURATION_SEC = max(30, int(args.strat_b_duration))
     cb.STRAT_B_MIN_CONFIDENCE = max(0.0, min(1.0, float(args.strat_b_min_confidence)))
+
+    if bool(args.strat_a_only):
+        cb.STRAT_A_ONLY = True
+        cb.STRAT_B_CAN_TRADE = False
+        cb.STRAT_MOMENTUM_ENABLED = False
+        import config as _cfg_flags
+
+        _cfg_flags.STRAT_A_ONLY = True
+        _cfg_flags.STRAT_MOMENTUM_ENABLED = False
+        _cfg_flags.STRAT_A_RADAR_ENABLED = True
+        cb.STRAT_A_RADAR_ENABLED = True
 
     # Modo HUB (solo lectura): fuerza escaneo por minuto y deshabilita trading.
     if bool(args.hub_readonly):
@@ -113,14 +150,35 @@ async def _render_hub_once() -> None:
 
 
 async def _run(args: argparse.Namespace) -> None:
+    _load_dotenv()
     import connection  # noqa: F401 — módulo requerido por arquitectura
     import executor  # noqa: F401
     import scanner  # noqa: F401
+    import config as _cfg
+
+    _cfg.EMAIL = (_cfg.EMAIL or __import__("os").environ.get("QUOTEX_EMAIL", "")).strip()
+    _cfg.PASSWORD = (_cfg.PASSWORD or __import__("os").environ.get("QUOTEX_PASSWORD", "")).strip()
     import consolidation_bot as cb
+
+    cb.EMAIL = _cfg.EMAIL
+    cb.PASSWORD = _cfg.PASSWORD
 
     _apply_runtime_config(args)
     hub_readonly = bool(args.hub_readonly)
     run_once = bool(args.once)
+
+    # ── Hub dashboard ──────────────────────────────────────────
+    hub_scanner: Any = None
+    hub_task: Optional[asyncio.Task] = None
+    hub_port = int(os.environ.get("HUB_PORT", "8080"))
+    if not run_once:
+        try:
+            from hub import HubScanner, init_server, start_server
+            hub_scanner = HubScanner()
+            init_server(hub_scanner)
+            hub_task = start_server(port=hub_port)
+        except Exception as exc:
+            print(f"[main] HUB dashboard no disponible: {exc}")
 
     if cb.RISK_MANAGER == "massaniello" and bool(args.real):
         print(
@@ -132,14 +190,13 @@ async def _run(args: argparse.Namespace) -> None:
     dry_run = hub_readonly
 
     if hub_readonly:
-        # Loop propio: un escaneo (loop_forever=False) → renderizar hub → esperar → repetir.
-        # Esto garantiza que el panel se dibuje después de cada ciclo.
         while True:
             try:
                 await cb.main(
                     dry_run=True,
                     real_account=bool(args.real),
                     loop_forever=False,
+                    hub_scanner=hub_scanner,
                 )
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
@@ -161,6 +218,7 @@ async def _run(args: argparse.Namespace) -> None:
             dry_run=dry_run,
             real_account=bool(args.real),
             loop_forever=not run_once,
+            hub_scanner=hub_scanner,
         )
 
 

@@ -18,6 +18,7 @@
 | S7 | Run `.\init.ps1` | **Stop** if exit code ≠ 0 (report, don't code) |
 | S8 | Emit startup summary (`START.md` § Phase E) | — |
 | S9 | Wait for human instruction | Never auto-implement |
+| S10 | Si necesitas al humano → `.\scripts\notify-attention.ps1` | Ventana modal + foco en IDE |
 
 ---
 

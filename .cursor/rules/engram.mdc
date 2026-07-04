@@ -1,0 +1,41 @@
+---
+description: Memoria persistente Engram para quotex-hft-bot
+alwaysApply: true
+---
+
+# Engram — Memory Protocol (quotex-hft-bot)
+
+Proyecto Engram: **quotex-hft-bot** (`.engram/config.json`).
+
+## Al iniciar sesión
+
+1. Si Engram MCP está disponible, llama `mem_session_start` y `mem_current_project`.
+2. Busca contexto previo: `mem_search` con términos como `STRAT-A`, `Massaniello`, `connection`, `scanner`.
+3. Lee `agent/HANDOFF.md` y `progress/current.md` — complementan Engram, no lo reemplazan.
+
+## Cuándo guardar (`mem_save`)
+
+Guarda observaciones tras:
+
+- Completar una feature SDD (spec/implementación/review)
+- Fix de bug con causa raíz (ej. fetch velas, pending reversals)
+- Decisión de arquitectura o cambio de roadmap
+- Bloqueo que requiera intervención humana
+- Validación live demo (#22) con métricas de sesión
+
+Formato sugerido: **What / Why / Where / Learned**.
+
+## Al cerrar sesión o antes de compaction
+
+1. `mem_save` con resumen de la sesión
+2. `mem_session_end` si aplica
+
+## Notificación humana (obligatorio)
+
+Cuando necesites atención del usuario (spec listo, feature done, bloqueo, error de `init.ps1`):
+
+```powershell
+.\scripts\notify-attention.ps1 -Task "<descripción corta>" -Reason "<approval|done|blocked|error>"
+```
+
+Ejecuta el script **antes** de pedir respuesta en el chat.

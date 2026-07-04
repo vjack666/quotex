@@ -64,6 +64,7 @@ class CandidateEntry:
     reversal_confirms: bool = False
     mode: SignalMode = SignalMode.REBOUND
     candles_h1: List[Candle] = field(default_factory=list)
+    candles_15m: List[Candle] = field(default_factory=list)
     zone_memory: list = field(default_factory=list)
 
     def __str__(self) -> str:

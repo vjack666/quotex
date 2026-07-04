@@ -110,6 +110,22 @@ Read every file in `/agent`:
 
 16. **Wait for instructions.** Never auto-start implementation.
 
+17. Si Engram MCP está activo, busca contexto previo (`mem_search` / `mem_context`).
+    Ver `docs/engram.md`.
+
+---
+
+## Notificación al humano (obligatorio)
+
+Cuando la sesión **necesite atención del usuario** (spec listo, feature done,
+bloqueo, error de entorno), ejecuta **antes** de pedir respuesta en chat:
+
+```powershell
+.\scripts\notify-attention.ps1 -Task "<descripción>" -Reason approval|done|blocked|error
+```
+
+Esto abre una ventana con **Aceptar** y trae Cursor/terminal al frente.
+
 ---
 
 ## Authority hierarchy

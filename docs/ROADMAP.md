@@ -3,7 +3,9 @@
 > **Fuente de verdad operativa:** `feature_list.json` (estados y acceptance criteria).
 > Este documento es la vista legible del roadmap: fases, dependencias y progreso.
 >
-> **Última actualización:** 2026-06-30
+> **Última actualización:** 2026-07-02
+>
+> **Prioridad actual:** backlog global — track **STRAT-A** (#17–#22) **completo** — ver `docs/ROADMAP_STRAT_A.md`
 
 ---
 
@@ -11,17 +13,18 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Features totales | 16 |
-| Completadas | **7** (44 %) |
+| Features totales | **22** (16 global + 6 STRAT-A) |
+| Completadas | **13** (59 %) |
 | En curso | 0 |
 | Siguiente recomendada | **#7** `strategy_reversal_swing` |
-| Tests | 74 passing (`python -m pytest tests/ -v`) |
+| Track STRAT-A | **6 / 6** ✅ completo |
+| Tests | 135 passing (`python -m pytest tests/ -q`) |
 | Gestión de riesgo activa | **Massaniello** (5 ops / 3 ITM / 60 min / PRACTICE) |
 
-### Bloqueo operativo
+### Estado operativo
 
-- Credenciales Quotex en `.env` rechazadas por el broker (*login inválido*).
-- Validación demo en vivo pendiente: meta **5 entradas / 3 ganadas en 1 hora**.
+- Credenciales Quotex en `.env` — login **PRACTICE OK** (2026-06-30).
+- Validación demo STRAT-A (#22) **completa** — 10 rechazos reject-first en PRACTICE (2026-07-02).
 
 ---
 
@@ -50,6 +53,19 @@
 | 6 | `strategy_momentum_1m` | ✅ done | #5 |
 | 7 | `strategy_reversal_swing` | ⏳ **siguiente** | #5 |
 | 8 | `strategy_order_block` | pending | #5 |
+
+### Track STRAT-A — Estrategia consolidación 5m al 100% ✅
+
+> Detalle completo: `docs/ROADMAP_STRAT_A.md`
+
+| ID | Feature | Estado | Depende de |
+|----|---------|--------|------------|
+| 17 | `strat_a_evaluate` | ✅ done | #1, #5 |
+| 18 | `strat_a_test_suite` | ✅ done | #17 |
+| 19 | `strat_a_quality_filters` | ✅ done | #18 |
+| 20 | `strat_a_htf_zone_wiring` | ✅ done | #19 |
+| 21 | `strat_a_ob_prefetch` | ✅ done | #20 |
+| 22 | `strat_a_live_validation` | ✅ done | #21 |
 
 ### Fase 3 — Inteligencia y validación
 
@@ -164,6 +180,7 @@ Log esperado: `🎯 SESIÓN MASSANIELLO CUMPLIDA`.
 | 2026-06-30 | #2 `implement_missing_modules` completada |
 | 2026-06-30 | #3 `parallel_asset_scan` completada |
 | 2026-06-30 | #4 `candle_cache`, #5 `entry_sync_precision`, #6 `strategy_momentum_1m` completadas — progreso 7/16 |
+| 2026-06-30 | Track STRAT-A creado (#17–#22); `docs/ROADMAP_STRAT_A.md`; prioridad sobre #7–#8 |
 
 ---
 

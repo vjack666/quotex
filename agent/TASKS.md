@@ -1,7 +1,7 @@
 # TASKS
 
 > Maintained by agents at session end. Sync with `feature_list.json` and `docs/ROADMAP.md`.
-> Last updated: 2026-06-30
+> Last updated: 2026-07-02 (cierre #22 — track STRAT-A completo)
 
 ---
 
@@ -13,19 +13,19 @@ _None._
 
 ## Next
 
-Priority order — pick **one** feature per session (Harness rule).
+**Track STRAT-A completo (6/6).** Retomar backlog global.
 
 | Priority | ID | Task | Phase | Depends on |
 |----------|----|------|-------|------------|
-| 1 | #7 | `strategy_reversal_swing` — reversión S/R dinámica | strategies | #5 ✅ |
-| 2 | — | Fix Quotex demo credentials in `.env` | ops | human |
-| 3 | — | Validate Massaniello live: 5 entries / 3 wins / 1h | validation | credentials |
-| 4 | #8 | `strategy_order_block` — order blocks institucionales | strategies | #5 ✅ |
+| 1 | #7 | `strategy_reversal_swing` | strategies | #5 ✅ |
+| 2 | #8 | `strategy_order_block` | strategies | #5 ✅ |
 
-### Backlog (after strategies phase)
+### Backlog global
 
 | ID | Task | Phase |
 |----|------|-------|
+| #7 | `strategy_reversal_swing` | strategies |
+| #8 | `strategy_order_block` | strategies |
 | #9 | `backtesting_engine` | intelligence |
 | #10 | `dynamic_weight_calibration` | intelligence |
 | #11 | `massaniello_persistence` | operations |
@@ -47,8 +47,15 @@ Priority order — pick **one** feature per session (Harness rule).
 | #5 | `entry_sync_precision` | 2026-06-30 | EntrySynchronizer; lag ≤ 0.3s |
 | #6 | `strategy_momentum_1m` | 2026-06-30 | STRAT-MOMENTUM en scanner |
 | #16 | `massaniello_risk` | 2026-06-29 | Replaces martingale; 40 tests at close |
+| #17 | `strat_a_evaluate` | 2026-07-02 | `evaluate_strat_a()` en strat_a.py |
+| #18 | `strat_a_test_suite` | 2026-07-02 | 16 unit + 9 E2E/pending; 109 tests total |
+| #19 | `strat_a_quality_filters` | 2026-07-02 | Reject-first payout/score/zona |
+| #20 | `strat_a_htf_zone_wiring` | 2026-07-02 | HTFScanner + zone_memory |
+| #21 | `strat_a_ob_prefetch` | 2026-07-02 | OB prefetch paralelo |
+| #22 | `strat_a_live_validation` | 2026-07-02 | Demo PRACTICE; 10 rechazos logged |
 | — | Roadmap + docs sync | 2026-06-29 | `docs/ROADMAP.md`, feature_list.json updated |
 | — | Agent workflow (`/agent`) | 2026-06-29 | Autonomous startup system created |
+| — | Track STRAT-A roadmap | 2026-06-30 | `docs/ROADMAP_STRAT_A.md`, features #17–#22 |
 
 ---
 

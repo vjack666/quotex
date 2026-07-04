@@ -27,12 +27,13 @@ from pyquotex.stable_api import Quotex  # type: ignore
 import config as _config
 from config import *  # noqa: F401,F403 — re-export para main.py
 from candle_cache import CandleCache
-from connection import ConnectionManager, connect_with_retry, looks_like_connection_issue
+from connection import ConnectionManager, connect_with_retry, get_open_assets, looks_like_connection_issue
+from htf_scanner import HTFScanner
 from errors import BotError
 from executor import TradeExecutor
 from loop_utils import seconds_until_next_scan, sleep_with_inline_countdown
 from massaniello_risk import MassanielloRiskManager
-from models import ConsolidationZone, PendingReversal, TradeState
+from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
@@ -116,6 +117,7 @@ class ConsolidationBot:
         self.asset_blacklist_until: dict[str, float] = {}
         self.order_blocks_by_asset: dict = {}
         self.ma_state_by_asset: dict = {}
+        self.radar_watchlist: dict[str, Any] = {}
         self._trade_tasks: set[asyncio.Task[Any]] = set()
         self.greylist_assets = set(GREYLIST_ASSETS)
         if greylist_assets is not None:
@@ -123,8 +125,41 @@ class ConsolidationBot:
 
         self.candle_cache = CandleCache()
         self.connection_mgr = ConnectionManager(client)
+        self.htf_scanner = HTFScanner(
+            client,
+            assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT),
+            min_payout=STRAT_A_MIN_PAYOUT,
+            on_asset_refresh=self._on_htf_asset_refresh,
+        )
+        self._htf_task: asyncio.Task[Any] | None = None
+        self._hub_scanner: Any = None
         self.executor = TradeExecutor(client, self)
         self.scanner = AssetScanner(self, self.executor)
+
+    def _on_htf_asset_refresh(
+        self,
+        sym: str,
+        payout: int,
+        candles_count: int,
+        age: float,
+        ttl: float,
+        ts: float,
+    ) -> None:
+        hub = self._hub_scanner
+        if hub is None:
+            return
+        try:
+            hub.update_htf_status(
+                asset=sym,
+                payout=payout,
+                candles=candles_count,
+                library_size=self.htf_scanner.library_size(),
+                cache_age_sec=age,
+                cache_ttl_sec=ttl,
+                refreshed_at_ts=ts,
+            )
+        except Exception:
+            return
 
     def set_session_start_balance(self, balance: float) -> None:
         self.executor.set_session_start_balance(balance)
@@ -142,6 +177,12 @@ class ConsolidationBot:
         return await self.executor.refresh_balance_and_risk()
 
     async def shutdown_background_tasks(self) -> None:
+        if self._htf_task and not self._htf_task.done():
+            self._htf_task.cancel()
+            try:
+                await self._htf_task
+            except asyncio.CancelledError:
+                pass
         await self.executor.shutdown_background_tasks()
 
     def log_stats(self) -> None:
@@ -189,6 +230,7 @@ async def main(
     real_account: bool,
     loop_forever: bool,
     greylist_assets: Optional[set[str]] = None,
+    hub_scanner: Any = None,
 ) -> None:
     if not EMAIL or not PASSWORD:
         print("ERROR: Falta QUOTEX_EMAIL / QUOTEX_PASSWORD en el .env")
@@ -229,6 +271,32 @@ async def main(
     if start_balance is not None:
         bot.set_session_start_balance(start_balance)
 
+    bot._htf_task = asyncio.create_task(bot.htf_scanner.run_forever())
+    log.info("[HTF] Scanner 15m iniciado en background")
+
+    if hub_scanner is not None:
+        bot._hub_scanner = hub_scanner
+
+        async def _hub_sync():
+            while True:
+                await asyncio.sleep(2.0)
+                hs = bot._hub_scanner
+                if hs is None:
+                    continue
+                hs.state.live_wins = bot.stats["strat_a_wins"] + bot.stats["strat_b_wins"]
+                hs.state.live_losses = bot.stats["strat_a_losses"] + bot.stats["strat_b_losses"]
+                if bot.current_balance is not None:
+                    hs.state.known_balance = bot.current_balance
+                hs.state.total_scans = bot.stats["scans"]
+                hs.update_masaniello_state(
+                    cycle_num=bot.cycle_id,
+                    trades_in_cycle=bot.cycle_ops,
+                    wins_in_cycle=bot.cycle_wins,
+                    losses_in_cycle=bot.cycle_losses,
+                )
+
+        asyncio.create_task(_hub_sync(), name="hub-sync")
+
     await bot.reconcile_pending_candidates()
 
     try:
@@ -243,6 +311,59 @@ async def main(
                     await asyncio.sleep(5.0)
                     continue
                 await bot.scan_all()
+
+                hub = bot._hub_scanner
+                if hub is not None:
+                    strat_a_payload, strat_b_payload = _extract_candidates_for_hub(bot)
+                    hub.record_scan_cycle(
+                        total_assets=max(0, bot.stats.get("total_assets_scanned", 0)),
+                        strat_a_candidates=strat_a_payload,
+                        strat_b_candidates=strat_b_payload,
+                        balance=bot.current_balance,
+                        cycle_id=bot.cycle_id,
+                        cycle_ops=bot.cycle_ops,
+                        cycle_wins=bot.cycle_wins,
+                        cycle_losses=bot.cycle_losses,
+                    )
+
+                radar_active = bool(STRAT_A_ONLY or STRAT_A_RADAR_ENABLED)
+                radar_watchlist = (
+                    bot.radar_watchlist
+                    if isinstance(getattr(bot, "radar_watchlist", None), dict)
+                    else {}
+                )
+                if radar_active and radar_watchlist:
+                    radar_started = time.time()
+                    entry_from_radar = False
+                    while radar_watchlist and not entry_from_radar:
+                        elapsed = time.time() - radar_started
+                        if elapsed >= STRAT_A_RADAR_FULL_SCAN_MIN_SEC:
+                            break
+                        try:
+                            entry_from_radar = await bot.scanner.radar_watch_tick()
+                        except BotError as exc:
+                            log.error("Error radar watch tick: %s", exc)
+                        except Exception as exc:
+                            log.error("Error radar watch tick: %s", exc, exc_info=True)
+                        radar_watchlist = (
+                            bot.radar_watchlist
+                            if isinstance(getattr(bot, "radar_watchlist", None), dict)
+                            else {}
+                        )
+                        if entry_from_radar or not radar_watchlist:
+                            break
+                        elapsed = time.time() - radar_started
+                        if elapsed >= STRAT_A_RADAR_FULL_SCAN_MIN_SEC:
+                            break
+                        wait_sec = min(
+                            float(STRAT_A_RADAR_TICK_SEC),
+                            float(STRAT_A_RADAR_FULL_SCAN_MIN_SEC) - elapsed,
+                        )
+                        if wait_sec > 0:
+                            await sleep_with_inline_countdown(
+                                wait_sec,
+                                "[RADAR] Próximo tick watchlist",
+                            )
                 await bot.reconcile_pending_candidates(max_age_minutes=PENDING_RECONCILE_AGE_MIN)
                 if bot.session_stop_hit:
                     break
@@ -292,6 +413,37 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pattern-put-blacklist", type=str, default=",".join(sorted(PATTERN_PUT_BLACKLIST)))
     p.add_argument("--scan-top-n", type=int, default=SCAN_MAX_ASSETS_PER_CYCLE)
     return p.parse_args()
+
+
+def _extract_candidates_for_hub(bot: Any) -> tuple[list[dict], list[dict]]:
+    """Convierte last_scan_candidates del bot a payloads para el hub."""
+    raw: list[CandidateEntry] | None = getattr(bot, "last_scan_candidates", None)
+    if not raw:
+        return [], []
+
+    strat_a: list[dict] = []
+    strat_b: list[dict] = []
+    for c in raw:
+        payload = {
+            "asset": c.asset,
+            "direction": c.direction,
+            "score": c.score,
+            "payout": c.payout,
+            "zone_ceiling": c.zone.ceiling,
+            "zone_floor": c.zone.floor,
+            "zone_age_min": c.zone.age_minutes,
+            "pattern": getattr(c, "_reversal_pattern", "none"),
+            "pattern_strength": getattr(c, "_reversal_strength", 0.0),
+            "entry_mode": getattr(c, "_entry_mode", "none"),
+        }
+        origin = getattr(c, "_strategy_origin", "STRAT-A")
+        if origin == "STRAT-B":
+            payload["confidence"] = c.score / 100.0
+            strat_b.append(payload)
+        else:
+            strat_a.append(payload)
+
+    return strat_a, strat_b
 
 
 if __name__ == "__main__":

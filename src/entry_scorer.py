@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from statistics import mean
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 from models import (
     Candle,
@@ -295,7 +295,12 @@ def score_candidate(
         w = WEIGHTS_BREAKOUT
         s_comp     = _score_compression(entry.zone, w["compression"])
         s_momentum = _score_momentum(entry.candles, w["momentum"])
-        s_trend    = _score_trend(entry.candles, entry.direction, w["trend"])
+        trend_candles = (
+            entry.candles_15m
+            if len(entry.candles_15m) >= 25
+            else entry.candles
+        )
+        s_trend    = _score_trend(trend_candles, entry.direction, w["trend"])
         s_payout   = _score_payout(entry.payout, w["payout"])
         age_adj    = _age_adjustment(entry.zone)
         hist_adj   = _score_historical_level(entry)
@@ -320,7 +325,12 @@ def score_candidate(
         w = WEIGHTS_REBOUND
         s_comp    = _score_compression(entry.zone, w["compression"])
         s_bounce  = _score_bounce(entry.candles, entry.zone, entry.direction, w["bounce"])
-        s_trend   = _score_trend(entry.candles, entry.direction, w["trend"])
+        trend_candles = (
+            entry.candles_15m
+            if len(entry.candles_15m) >= 25
+            else entry.candles
+        )
+        s_trend   = _score_trend(trend_candles, entry.direction, w["trend"])
         s_payout  = _score_payout(entry.payout, w["payout"])
         age_adj   = _age_adjustment(entry.zone)
         hist_adj  = _score_historical_level(entry)
@@ -347,9 +357,16 @@ def select_best(
     candidates: List[CandidateEntry],
     max_entries: int = MAX_ENTRIES_CYCLE,
     threshold: int = SCORE_THRESHOLD,
+    *,
+    threshold_for: Callable[[CandidateEntry], int] | None = None,
 ) -> Tuple[List[CandidateEntry], List[CandidateEntry]]:
-    passed = [c for c in candidates if c.score >= threshold]
-    failed = [c for c in candidates if c.score < threshold]
+    def _thresh(c: CandidateEntry) -> int:
+        if threshold_for is not None:
+            return threshold_for(c)
+        return threshold
+
+    passed = [c for c in candidates if c.score >= _thresh(c)]
+    failed = [c for c in candidates if c.score < _thresh(c)]
 
     passed.sort(key=lambda x: -x.score)
     failed.sort(key=lambda x: -x.score)
