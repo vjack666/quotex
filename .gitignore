@@ -25,3 +25,6 @@ _test_conn2.py
 analyze_axp_result.py
 query_axp.py
 test_exact_target.py
+
+# Flutter calculator project (build artifacts)
+calculadora_nuevo/
