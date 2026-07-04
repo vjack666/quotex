@@ -340,6 +340,23 @@ class Journal:
             "CREATE INDEX IF NOT EXISTS idx_shadow_category     ON shadow_decision_audit(new_category);"
             "CREATE INDEX IF NOT EXISTS idx_shadow_outcome      ON shadow_decision_audit(trade_outcome);"
         )
+        # Migración: tabla massaniello_state (persistencia de sesión Massaniello)
+        self.conn.executescript(
+            "CREATE TABLE IF NOT EXISTS massaniello_state ("
+            "    id               INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    saved_at         TEXT NOT NULL,"
+            "    operations       INTEGER NOT NULL,"
+            "    expected_wins    INTEGER NOT NULL,"
+            "    session_max_min  INTEGER NOT NULL,"
+            "    session_start_time REAL,"
+            "    entries          INTEGER NOT NULL DEFAULT 0,"
+            "    wins             INTEGER NOT NULL DEFAULT 0,"
+            "    losses           INTEGER NOT NULL DEFAULT 0,"
+            "    current_balance  REAL,"
+            "    initial_capital  REAL,"
+            "    session_active   INTEGER NOT NULL DEFAULT 1"
+            ");"
+        )
 
     def close(self) -> None:
         if not self._closed:

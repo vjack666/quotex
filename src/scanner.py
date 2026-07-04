@@ -49,6 +49,8 @@ from config import (
     STRAT_B_CAN_TRADE,
     STRAT_B_DURATION_SEC,
     STRAT_MOMENTUM_ENABLED,
+    STRAT_ORDER_BLOCK_ENABLED,
+    STRAT_ORDER_BLOCK_MIN_STRENGTH,
     STRAT_B_LOG_TOP_N,
     STRAT_B_MIN_CONFIDENCE,
     STRAT_B_MIN_CONFIDENCE_EARLY,
@@ -72,6 +74,7 @@ from scan_prefetch import (
     symbols_needing_strat_a_prefetch,
 )
 from loop_utils import sleep_with_inline_countdown
+from diversification_enforcer import DiversificationEnforcer
 from entry_scorer import CandidateEntry, explain_score, score_candidate, select_best
 from models import Candle, ConsolidationZone, PendingReversal
 from strat_a import (
@@ -96,6 +99,8 @@ from strat_a_radar import (
 )
 from strat_b import evaluate_strat_b, find_strong_support_2m
 from strat_momentum import detect_momentum_1m
+from strat_order_block import detect_order_block_entry
+from strat_reversal_swing import detect_reversal_swing
 from trade_journal import get_journal
 from zone_memory import query_nearby_zones, score_zone_memory
 
@@ -1107,6 +1112,21 @@ class AssetScanner:
                 and strat_b_conf >= strat_b_required_conf
                 and len(self.bot.trades) < MAX_CONCURRENT_TRADES
             ):
+                # ── Diversification guard ─────────────────────────────
+                d_enforcer: DiversificationEnforcer | None = getattr(
+                    self.bot, "diversification_enforcer", None,
+                )
+                if d_enforcer is not None:
+                    d_ok, d_reason = d_enforcer.check(self.bot.trades, sym)
+                    if not d_ok:
+                        log.info(
+                            "⛔ [STRAT-B] %s: diversificación — %s", sym, d_reason,
+                        )
+                        self.bot.stats["rejected_diversification"] = (
+                            self.bot.stats.get("rejected_diversification", 0) + 1
+                        )
+                        continue
+
                 b_amount, _ = self.executor._compute_initial_amount(payout)
                 pseudo_zone = ConsolidationZone(
                     asset=sym,
@@ -1126,7 +1146,7 @@ class AssetScanner:
                     pattern_label = "Wyckoff Early M1+M2 (Spring)"
                 else:
                     pattern_label = "Wyckoff"
-
+    
                 b_candidate = CandidateEntry(
                     asset=sym,
                     payout=payout,
@@ -1143,7 +1163,7 @@ class AssetScanner:
                 )
                 setattr(b_candidate, "_reversal_pattern", strat_b_signal_type or "none")
                 setattr(b_candidate, "_reversal_strength", strat_b_conf)
-
+    
                 b_strategy = self.executor._strategy_snapshot()
                 b_strategy.update(
                     {
@@ -1154,7 +1174,7 @@ class AssetScanner:
                         "strat_b_reason": strat_b_reason,
                     }
                 )
-
+    
                 b_outcome = "DRY_RUN" if self.bot.dry_run else "PENDING"
                 b_cid = get_journal().log_candidate(
                     b_candidate,
@@ -1164,7 +1184,7 @@ class AssetScanner:
                     outcome=b_outcome,
                     strategy=b_strategy,
                 )
-
+    
                 await self.executor.enter_trade(
                     sym,
                     strat_b_direction,
@@ -1226,6 +1246,100 @@ class AssetScanner:
                     mom_dir.upper(),
                     mom_strength,
                     mom_candidate.score,
+                )
+
+            # ── Reversal Swing ──
+            swing_hit = (
+                detect_reversal_swing(candles_1m)
+                if not _runtime_config.STRAT_A_ONLY and _runtime_config.STRAT_REVERSAL_SWING_ENABLED
+                else None
+            )
+            if swing_hit and sym not in self.bot.trades:
+                swing_dir, swing_strength = swing_hit
+                swing_zone = ConsolidationZone(
+                    asset=sym,
+                    ceiling=float(candles_1m[-1].high),
+                    floor=float(candles_1m[-1].low),
+                    bars_inside=0,
+                    detected_at=time.time(),
+                    range_pct=0.0,
+                )
+                swing_amount, _ = self.executor._compute_initial_amount(payout)
+                swing_candidate = CandidateEntry(
+                    asset=sym,
+                    payout=payout,
+                    zone=swing_zone,
+                    direction=swing_dir,
+                    candles=candles_1m,
+                    score=0.0,
+                    score_breakdown={},
+                    reversal_pattern="swing_rejection",
+                    reversal_strength=swing_strength,
+                    reversal_confirms=True,
+                )
+                setattr(swing_candidate, "_strategy_origin", "STRAT-REVERSAL-SWING")
+                setattr(swing_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                setattr(swing_candidate, "_amount", swing_amount)
+                setattr(swing_candidate, "_stage", "initial")
+                score_candidate(swing_candidate)
+                candidates.append(swing_candidate)
+                self.bot.stats.setdefault("strat_reversal_swing_signals", 0)
+                self.bot.stats["strat_reversal_swing_signals"] += 1
+                log.info(
+                    "[STRAT-MOMENTUM] %s %s strength=%.2f score=%.1f",
+                    sym,
+                    mom_dir.upper(),
+                    mom_strength,
+                    mom_candidate.score,
+                )
+
+            # ── Order Block (post-momentum, pre-STRAT-A) ──
+            ob_hit = (
+                detect_order_block_entry(candles_1m)
+                if not _runtime_config.STRAT_A_ONLY and STRAT_ORDER_BLOCK_ENABLED
+                else None
+            )
+            if ob_hit and sym not in self.bot.trades:
+                ob_dir, ob_strength, ob_low, ob_high = ob_hit
+                ob_zone = ConsolidationZone(
+                    asset=sym,
+                    ceiling=ob_high,
+                    floor=ob_low,
+                    bars_inside=0,
+                    detected_at=time.time(),
+                    range_pct=0.0,
+                )
+                ob_candidate = CandidateEntry(
+                    asset=sym,
+                    payout=payout,
+                    zone=ob_zone,
+                    direction=ob_dir,
+                    candles=candles_1m,
+                    score=round(ob_strength * 100.0, 1),
+                    mode=SignalMode.REBOUND,
+                    score_breakdown={
+                        "compression": 0.0,
+                        "bounce": round(ob_strength * 35.0, 2),
+                        "trend": round(ob_strength * 25.0, 2),
+                        "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
+                    },
+                )
+                setattr(ob_candidate, "_strategy_origin", "STRAT-ORDER-BLOCK")
+                setattr(ob_candidate, "_reversal_pattern", "order_block")
+                setattr(ob_candidate, "_reversal_strength", ob_strength)
+                setattr(ob_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                score_candidate(ob_candidate)
+                candidates.append(ob_candidate)
+                self.bot.stats.setdefault("strat_order_block_signals", 0)
+                self.bot.stats["strat_order_block_signals"] += 1
+                log.info(
+                    "[STRAT-ORDER-BLOCK] %s %s strength=%.2f score=%.1f ob_range=[%.5f, %.5f]",
+                    sym,
+                    ob_dir.upper(),
+                    ob_strength,
+                    ob_candidate.score,
+                    ob_low,
+                    ob_high,
                 )
 
             if payout < STRAT_A_MIN_PAYOUT:
@@ -1768,6 +1882,31 @@ class AssetScanner:
                     strategy=self.executor._strategy_snapshot(),
                 )
                 break
+
+            # ── Diversification guard ─────────────────────────────────────
+            d_enforcer: DiversificationEnforcer | None = getattr(
+                self.bot, "diversification_enforcer", None,
+            )
+            if d_enforcer is not None:
+                stage = getattr(winner, "_stage", "initial")
+                d_ok, d_reason = d_enforcer.check(
+                    self.bot.trades, winner.asset, stage=stage,
+                )
+                if not d_ok:
+                    log.info("⛔ %s: diversificación — %s", winner.asset, d_reason)
+                    journal.log_candidate(
+                        winner,
+                        decision="REJECTED_DIVERSIFICATION",
+                        reject_reason=d_reason,
+                        amount=getattr(winner, "_amount", 0.0),
+                        stage=stage,
+                        strategy=self.executor._strategy_snapshot(),
+                    )
+                    self.bot.stats["rejected_diversification"] = (
+                        self.bot.stats.get("rejected_diversification", 0) + 1
+                    )
+                    continue
+
             log.info(explain_score(winner, threshold=session_threshold))
             amount = getattr(winner, "_amount", 0.0)
             stage = getattr(winner, "_stage", "initial")

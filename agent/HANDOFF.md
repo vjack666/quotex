@@ -1,23 +1,27 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> Last session: 2026-07-02
+> Last session: 2026-07-04
+> **Roadmap completo:** 22/22 features done.
 
 ---
 
-## What was completed this session
+## What was completed this session (2026-07-04)
 
-1. **Feature #22 `strat_a_live_validation` (DONE)**
-   - Demo PRACTICE con `python main.py --strat-a-only`
-   - Conexión OK (balance 55.87 USD); HTF 15m + OB prefetch 16 blocks en vivo
-   - **10 rechazos reject-first** en log: 3 zona <30min + 7 payout <87%
-   - Criterio alternativo cumplido; Massaniello 0/5 ops (sin entradas)
-   - Evidencia: `progress/impl_strat_a_live_validation.md`, `consolidation_bot.log` línea 489254+
-   - Parser: `python progress/parse_strat_a_session.py` → exit 0
+1. **#7–#15 (batch global)** — 9 features implementadas
+   - Estrategias: `strat_reversal_swing`, `strat_order_block`
+   - Inteligencia: `backtester`, `weight_calibrator`
+   - Persistencia: `massaniello_persistence`
+   - Operaciones: `kelly_sizer`, `diversification_enforcer`, `alerter`
+   - Specs: `hub_live_websocket` copiadas
 
-2. **Track STRAT-A completo:** 6/6 features (#17–#22)
+2. **Mantenimiento**
+   - Log rotation (consolidation_bot.log ~63 MB)
+   - ROADMAP.md, PROJECT_STATE.md, CHECKPOINTS.md actualizados
+   - progress/current.md → history.md + reset
+   - TASKS.md, HANDOFF.md actualizados
 
-3. **Progreso roadmap:** **13/22** global
+3. **Progreso roadmap:** **22/22** — backlog global COMPLETO
 
 ---
 
@@ -25,24 +29,36 @@
 
 | Priority | Item | Owner |
 |----------|------|-------|
-| **P1** | Siguiente feature global (`strategy_reversal_swing` u otra `pending`) | Leader + Human |
-| **P2** | T17 `parallel_fetch` DRY para OB prefetch (opcional) | Agent |
+| **P1** | Validación live del sistema completo en PRACTICE | Human |
+| **P2** | Rotar log periódicamente | Agent |
+| **P3** | T17 `parallel_fetch` DRY para OB (opcional) | Agent |
 
 ---
 
 ## How to resume
 
 ```powershell
-cd "C:\Users\v_jac\Desktop\QUOTEX - segunda estrategia - copia"
+cd "C:\Users\v_jac\Desktop\QUOTEX"
 .\init.ps1
 ```
 
-Track STRAT-A cerrado. Revisar `feature_list.json` y `docs/ROADMAP.md` para siguiente prioridad global.
+Roadmap terminado. Próximo paso: validación live o planificar nueva fase de features.
 
 ---
 
 ## Files modified (this session)
 
-- `progress/impl_strat_a_live_validation.md`, `progress/parse_strat_a_session.py`
-- `progress/history.md`, `progress/current.md`, `agent/HANDOFF.md`
-- `feature_list.json` (#22 → done, 13/22, STRAT-A 6/6)
+- `src/strat_reversal_swing.py`, `src/strat_order_block.py`, `src/backtester.py`
+- `src/weight_calibrator.py`, `src/massaniello_persistence.py`
+- `src/kelly_sizer.py`, `src/diversification_enforcer.py`, `src/alerter.py`
+- `src/scanner.py`, `src/executor.py`, `src/consolidation_bot.py`, `src/config.py`
+- `src/trade_journal.py`, `src/massaniello_risk.py`
+- `specs/strategy_reversal_swing/`, `specs/strategy_order_block/`, `specs/backtesting_engine/`
+- `specs/dynamic_weight_calibration/`, `specs/massaniello_persistence/`
+- `specs/kelly_criterion_sizing/`, `specs/diversification_enforcer/`, `specs/telegram_alerts/`
+- `tests/` — 9 nuevos archivos de test (+116 tests nuevos)
+- `feature_list.json` (#7–#15 → done, 22/22)
+- `agent/` — todos los archivos
+- `progress/` — history.md, current.md
+- `docs/ROADMAP.md`, `docs/ROADMAP_STRAT_A.md`
+- `CHECKPOINTS.md`, `PROJECT_STATE.md`

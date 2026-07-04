@@ -26,12 +26,16 @@ from pyquotex.stable_api import Quotex  # type: ignore
 
 import config as _config
 from config import *  # noqa: F401,F403 — re-export para main.py
+from alerter import alerter
 from candle_cache import CandleCache
+from config import MAX_SIMULTANEOUS_TRADES, MIN_ASSET_SPREAD, MAX_ENTRIES_PER_ASSET
 from connection import ConnectionManager, connect_with_retry, get_open_assets, looks_like_connection_issue
+from diversification_enforcer import DiversificationEnforcer
 from htf_scanner import HTFScanner
 from errors import BotError
 from executor import TradeExecutor
 from loop_utils import seconds_until_next_scan, sleep_with_inline_countdown
+from massaniello_persistence import MassanielloPersistence
 from massaniello_risk import MassanielloRiskManager
 from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
@@ -86,6 +90,7 @@ class ConsolidationBot:
             "martin_wins": 0,
             "martin_losses": 0,
             "rejected_same_asset_limit": 0,
+            "rejected_diversification": 0,
         }
         self.compensation_pending = False
         self.last_closed_amount = 0.0
@@ -135,6 +140,11 @@ class ConsolidationBot:
         self._hub_scanner: Any = None
         self.executor = TradeExecutor(client, self)
         self.scanner = AssetScanner(self, self.executor)
+        self.diversification_enforcer = DiversificationEnforcer(
+            max_simultaneous_trades=MAX_SIMULTANEOUS_TRADES,
+            min_asset_spread=MIN_ASSET_SPREAD,
+            max_entries_per_asset=MAX_ENTRIES_PER_ASSET,
+        )
 
     def _on_htf_asset_refresh(
         self,
@@ -271,6 +281,55 @@ async def main(
     if start_balance is not None:
         bot.set_session_start_balance(start_balance)
 
+    # ── Persistencia Massaniello ──────────────────────────────────────────────
+    bot.massaniello_persistence = MassanielloPersistence()
+    if RISK_MANAGER == "massaniello":
+        state = bot.massaniello_persistence.load()
+        if state:
+            bot.massaniello_persistence.apply(bot.massaniello, state)
+        else:
+            log.info("Sin estado Massaniello previo — arrancando con defaults")
+    else:
+        log.debug("Risk manager no es Massaniello — persistencia omitida")
+
+    # ── Carga de pesos calibrados del entry_scorer ──────────────────────────
+    try:
+        from weight_calibrator import WeightCalibrator
+        _weights_path = Path(__file__).resolve().parent.parent / "data" / "exports" / "calibrated_weights.json"
+        if _weights_path.exists():
+            _weights_data = WeightCalibrator.load_weights(_weights_path)
+            if _weights_data:
+                from entry_scorer import WEIGHTS_REBOUND as _WR, WEIGHTS_BREAKOUT as _WB
+                _reb = _weights_data.get("default", {}).get("rebound", {})
+                _brk = _weights_data.get("default", {}).get("breakout", {})
+                if _reb and _brk:
+                    _WR.clear()
+                    _WR.update(_reb)
+                    _WB.clear()
+                    _WB.update(_brk)
+                    log.info("✅ Pesos calibrados cargados desde %s", _weights_path)
+    except Exception as exc:
+        log.warning("⚠️ No se pudieron cargar pesos calibrados: %s", exc)
+
+    # ── Kelly Criterion Sizing ──────────────────────────────────────────────
+    try:
+        from kelly_sizer import KellySizer
+        _kelly = KellySizer()
+        _kelly_factor = _kelly.calculate()
+        if _kelly_factor > 0.0:
+            if bot.massaniello._initial_capital is not None:
+                _old = bot.massaniello._initial_capital
+                bot.massaniello._initial_capital *= _kelly_factor
+                log.info(
+                    "✅ Kelly sizing aplicado: capital %.2f → %.2f (factor=%.4f)",
+                    _old, bot.massaniello._initial_capital, _kelly_factor,
+                )
+        else:
+            log.info("⏸️ Kelly factor %.4f — sin ajuste", _kelly_factor)
+        _kelly.close()
+    except Exception as exc:
+        log.warning("⚠️ No se pudo aplicar Kelly sizing: %s", exc)
+
     bot._htf_task = asyncio.create_task(bot.htf_scanner.run_forever())
     log.info("[HTF] Scanner 15m iniciado en background")
 
@@ -308,6 +367,7 @@ async def main(
             cycle_start = time.time()
             try:
                 if loop_forever and not await bot.ensure_connection():
+                    alerter.alert_connection_lost()
                     await asyncio.sleep(5.0)
                     continue
                 await bot.scan_all()

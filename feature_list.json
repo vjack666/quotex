@@ -3,7 +3,7 @@
   "description": "Bot de trading de alta frecuencia para opciones binarias en Quotex. Estrategias: consolidación, Wyckoff Spring/Sweep, momentum, reversión, order blocks. Gestión de riesgo: Massaniello.",
   "roadmap": {
     "version": "2026-06-30",
-    "progress": { "done": 14, "total": 22 },
+    "progress": { "done": 22, "total": 22 },
     "next_recommended": "strategy_reversal_swing",
     "doc": "docs/ROADMAP.md",
     "priority_track": "strat_a",
@@ -132,13 +132,14 @@
       "priority": 2,
       "description": "Implementar estrategia que opera reversiones en niveles swing calculados en tiempo real (soportes y resistencias dinámicas).",
       "acceptance": [
-        "Existe src/strat_swing_reversal.py",
-        "Detecta niveles swing en velas de 5m y 15m",
+        "Existe src/strat_reversal_swing.py con detect_reversal_swing()",
+        "Detecta niveles swing en velas 1m con confirmación left/right",
         "Entra CALL en toque de soporte con mecha + PUT en toque de resistencia",
-        "Tests cubren detección de niveles y señales válidas/inválidas"
+        "Tests cubren detección de niveles y señales válidas/inválidas",
+        "init.ps1 termina en verde"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [5]
     },
     {
@@ -156,7 +157,7 @@
         "Tests cubren detección, mitigación e invalidación"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [5]
     },
     {
@@ -173,7 +174,7 @@
         "Tests con datos sintéticos verifican resultados conocidos"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [6, 7, 8]
     },
     {
@@ -191,7 +192,7 @@
         "Tests con datos sintéticos verifican la calibración"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [9]
     },
     {
@@ -208,7 +209,7 @@
         "Tests cubren guardado, recuperación y corrupción de datos"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [16],
       "supersedes": "martingale_persistence"
     },
@@ -246,7 +247,7 @@
         "Tests cubren cálculo, límites y casos extremos"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [10]
     },
     {
@@ -263,7 +264,7 @@
         "Tests cubren todos los límites"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [10]
     },
     {
@@ -280,7 +281,7 @@
         "Los tests usan mocks para no depender de Telegram real"
       ],
       "sdd": true,
-      "status": "pending",
+      "status": "done",
       "depends_on": [10]
     },
     {

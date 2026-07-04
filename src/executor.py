@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from math import ceil
 from typing import TYPE_CHECKING, Any, Deque, List, Optional, Tuple
 
+from alerter import alerter
 from config import (
     ADAPTIVE_THRESHOLD_BASE,
     ADAPTIVE_THRESHOLD_HIGH,
@@ -635,6 +636,7 @@ class TradeExecutor:
                 self.bot.session_start_balance,
                 bal,
             )
+            alerter.alert_stop_loss(drawdown * 100, bal)
             return True
         return False
     async def reconcile_pending_candidates(self, max_age_minutes: Optional[float] = None) -> None:
@@ -916,6 +918,8 @@ class TradeExecutor:
             self.bot.pending_martin.pop(sym, None)
             self.bot.massaniello.register_win(trade.amount, trade.payout)
             self._sync_massaniello_session_start()
+            if self._uses_massaniello() and hasattr(self.bot, "massaniello_persistence"):
+                self.bot.massaniello_persistence.save(self.bot.massaniello)
             log.info("✅ WIN registrado — próxima entrada usará stake Massaniello")
             self._maybe_stop_massaniello_session()
         elif outcome == "LOSS":
@@ -925,6 +929,8 @@ class TradeExecutor:
             self.bot.last_closed_outcome  = "LOSS"
             _, loss_status = self.bot.massaniello.register_loss(trade.amount)
             self._sync_massaniello_session_start()
+            if self._uses_massaniello() and hasattr(self.bot, "massaniello_persistence"):
+                self.bot.massaniello_persistence.save(self.bot.massaniello)
             log.info(
                 "💔 LOSS registrado ($%.2f) — próxima entrada usará stake Massaniello (%s)",
                 trade.amount,

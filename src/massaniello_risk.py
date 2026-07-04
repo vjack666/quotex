@@ -6,6 +6,7 @@ import time
 from math import ceil
 from typing import Any, Optional, Tuple
 
+from alerter import alerter
 from config import (
     MASSANIELLO_EXPECTED_WINS,
     MASSANIELLO_OPERATIONS,
@@ -135,6 +136,7 @@ class MassanielloRiskManager:
                 self.wins,
                 self.expected_wins,
             )
+            alerter.alert_session_complete(self.wins, self.current_balance or 0.0)
         return self.current_balance, status
 
     def register_loss(self, amount: float) -> Tuple[float, str]:
@@ -149,6 +151,7 @@ class MassanielloRiskManager:
         status = "LOSS"
         if self.is_session_failed():
             status = "SESSION_FAILED"
+            alerter.alert_losing_streak(self.losses, self.current_balance or 0.0)
         elif self.is_session_exhausted():
             status = "SESSION_EXHAUSTED"
         return self.current_balance, status
