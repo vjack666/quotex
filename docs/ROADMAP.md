@@ -84,6 +84,33 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 | `hub/static/index.html` | **REESCRITO** a panel STRAT-F (#7) |
 | `scanner.py` | acumula `record_strat_f` y lo empuja al HUB (#7) |
 
+### Fase 4 — Documentación de ingeniería (SRS/ADR/ERD/API/ATDD)
+| ID | Feature | Estado | Depende de |
+|----|---------|--------|------------|
+| 8 | `engineering_docs` | ✅ done | #1–#7 |
+
+> **Documentación de ingeniería completa** (2026-07-11). En `docs/engineering/`:
+> `SRS.md` (objetivo 5 entradas/2h + NFR), `adr/` (3 ADR: evaluador puro,
+> SQLite diario, no borrar hub_models), `erd_trade_journal.md`, `api_spec.md`,
+> `glosario.md`. Test ATDD `tests/test_window_2h.py` fija el contrato de
+> volumen (N1). pytest **282 passed**.
+
+---
+
+## Módulos de documentación (Fase 4)
+
+| Archivo | Contenido |
+|---------|-----------|
+| `docs/engineering/SRS.md` | Requisitos funcionales (F1–F12) y no funcionales (N1–N9) |
+| `docs/engineering/adr/001_evaluador_puro.md` | STRAT-F como evaluador puro (no opera) |
+| `docs/engineering/adr/002_sqlite_diario.md` | Diario en SQLite local |
+| `docs/engineering/adr/003_no_borrar_hub_models.md` | No borrar hub_models al reemplazar dashboard |
+| `docs/engineering/adr/README.md` | Índice de ADR |
+| `docs/engineering/erd_trade_journal.md` | Diagrama de tablas del diario |
+| `docs/engineering/api_spec.md` | Contrato de hub/server.py (/api/state, /api/strat_f, /ws) |
+| `docs/engineering/glosario.md` | Acrónimos SRS/FRS/NFR, SDD/SAD, ADR/RFC, TDD/BDD/ATDD, MCP/RAG/DSPy... |
+| `tests/test_window_2h.py` | ATDD: ventana 2h produce >= 5 entradas STRAT-F |
+
 ---
 
 ## Changelog
@@ -93,3 +120,4 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 | 2026-07-11 | Borrado de `feature_list.json` viejo y `docs/ROADMAP*.md` (mintieron sobre strat_b) |
 | 2026-07-11 | Creación de roadmap STRAT-F (feature #1 en curso) |
 | 2026-07-11 | Reemplazo del dashboard por panel STRAT-F (#7): `hub/strat_f_state.py`, `hub/strat_f_panel.py`, `hub/parser.py`, `hub/render.py`, `hub/server.py` + `index.html` reescrito |
+| 2026-07-11 | Documentación de ingeniería (#8): `docs/engineering/` (SRS, 3 ADR, ERD, API Spec, glosario) + `tests/test_window_2h.py` (ATDD ventana 2h). pytest 282 passed |

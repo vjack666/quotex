@@ -494,3 +494,55 @@ STRAT-F y launcher .bat que escanea en vivo y alimenta el diario.
 ### Relevant Files
 - `src/trade_journal.py`, `src/scanner.py`, `progress/diag_strat_f_live.py`
 - `run_strat_f_panel.bat`, `tests/test_strat_f_journal.py`
+
+---
+
+## 2026-07-11 (noche) — Documentación de ingeniería + calibrración + ATDD
+
+**Contexto:** El usuario pidió explicar acrónimos de ingeniería (SRS/FRS/NFR,
+SDD/SAD/ADR, TDD/BDD/ATDD, MCP/RAG/DSPy...) y cómo implementarlos en el
+sistema de binarias con objetivo: **5 entradas en ventana de 2h** en los pares
+del escaneo. Luego pidió crear toda la documentación ordenada, sin preguntar.
+
+**Qué se hizo:**
+1. `calibration_report.py` (ya commiteado en 2752463): lee el diario STRAT-F y
+   agrupa rechazos por filtro (R1/R2/R3/R4/R6), sugiere apretar/aflojar.
+2. `docs/engineering/SRS.md` — requisitos: F1–F12 (funcionales) y N1–N9 (no
+   funcionales, incl. N1 = >=5 entradas/2h, N4 = <=5 entradas/ventana).
+3. `docs/engineering/adr/` — 3 ADR (evaluador puro, SQLite diario, no borrar
+   hub_models) + índice README.
+4. `docs/engineering/erd_trade_journal.md` — diagrama de tablas del diario
+   (candidates, scan_sessions, shadow_decision_audit, expired_zones) con DDL real.
+5. `docs/engineering/api_spec.md` — contrato de hub/server.py (endpoints reales
+   /api/state, /api/strat_f, /ws, /health, /).
+6. `docs/engineering/glosario.md` — tabla de todos los acrónimos mapeados a QUOTEX.
+7. `tests/test_window_2h.py` — **ATDD N1**: simula ventana 2h (24 ciclos × 5 min,
+   10 pares) con velas ideales que pasan STRAT-F y afirma >=5 entradas. También
+   verifica el cap de riesgo (N4) y que M15 roto rechaza.
+
+**Archivos creados/modificados:**
+- `src/calibration_report.py`, `run_calibration.bat`, `tests/test_calibration_report.py`
+- `docs/engineering/SRS.md`, `docs/engineering/adr/*`, `docs/engineering/erd_trade_journal.md`,
+  `docs/engineering/api_spec.md`, `docs/engineering/glosario.md`
+- `tests/test_window_2h.py`
+- `docs/ROADMAP.md` (Fase 4 + changelog)
+
+**Verificación:**
+- `pytest tests/test_calibration_report.py` → 3 passed.
+- `pytest tests/test_window_2h.py` → 3 passed.
+- `pytest tests/` → **282 passed** (279 + 3 ATDD).
+- `python -m src.calibration_report 90` sobre la BD real: Evaluados=14,
+  Aceptadas=1, Rechazadas=13; dominante R4 banda M1 (76.9%).
+
+**Decisión:** la calibración solo tiene sentido cuando el sistema corre COMPLETO
+y el diario acumula trades resueltos (WIN/LOSS). No se corrió el panel aislado
+para llenar el diario (el usuario lo aclaró). `run_calibration.bat` queda listo
+para cuando Ruben opere el bot en demo.
+
+**Estado final:** documentación de ingeniería completa y verificada. Commiteado
+y pusheado (el usuario ya había autorizado el push en el paso anterior).
+
+### Relevant Files
+- `docs/engineering/*`, `tests/test_window_2h.py`, `tests/test_calibration_report.py`
+- `src/calibration_report.py`, `run_calibration.bat`
+- `docs/ROADMAP.md`, `progress/history.md`
