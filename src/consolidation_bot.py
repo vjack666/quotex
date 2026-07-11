@@ -356,12 +356,16 @@ async def main(
                 if bot.current_balance is not None:
                     hs.state.known_balance = bot.current_balance
                 hs.state.total_scans = bot.stats["scans"]
-                hs.update_masaniello_state(
-                    cycle_num=bot.cycle_id,
-                    trades_in_cycle=bot.cycle_ops,
-                    wins_in_cycle=bot.cycle_wins,
-                    losses_in_cycle=bot.cycle_losses,
-                )
+                # El HUB viejo de Masaniello podía no tener este método en la
+                # versión con panel STRAT-F; lo salteamos si no existe (el panel
+                # nuevo no depende de él).
+                if hasattr(hs, "update_masaniello_state"):
+                    hs.update_masaniello_state(
+                        cycle_num=bot.cycle_id,
+                        trades_in_cycle=bot.cycle_ops,
+                        wins_in_cycle=bot.cycle_wins,
+                        losses_in_cycle=bot.cycle_losses,
+                    )
 
         asyncio.create_task(_hub_sync(), name="hub-sync")
 
