@@ -546,3 +546,55 @@ y pusheado (el usuario ya había autorizado el push en el paso anterior).
 - `docs/engineering/*`, `tests/test_window_2h.py`, `tests/test_calibration_report.py`
 - `src/calibration_report.py`, `run_calibration.bat`
 - `docs/ROADMAP.md`, `progress/history.md`
+
+---
+
+## 2026-07-11 (noche 3) — Auditoría go-live STRAT-F: cierre GAPs G1+G2
+
+**Contexto:** El usuario pidió auditoría para la meta "arrancar el sistema con
+buena pinta en el dashboard + 1er trade STRAT-F en demo real". La auditoría
+(`progress/audit_strat_f_go_live.md`) reveló que el panel STRAT-F solo se veía
+en `--hub-readonly` (G1) y que STRAT-F competía por score con STRAT-A sin modo
+propio (G2). Autorizado en modo plan: actualizar grafo, leer doc, armar plan y
+ejecutar (TDD + pytest + commit).
+
+**Qué se hizo (cierre G1+G2):**
+1. **G1 — Panel STRAT-F en vivo:** `scanner.scan_all` ahora llama
+   `self._flush_strat_f_panel()` tras `_scan_phase_evaluate_assets`. El método
+   `_flush_strat_f_panel()` (extraído de `_scan_phase_select_execute`) mapea
+   `_strat_f_batch` → `StratFRow`/`StratFReject` y lo registra en
+   `bot.strat_f_panel`. `ConsolidationBot.__init__` crea `StratFPanel()` y
+   `hub/server.init()` lo usa para exponer `strat_f` por WS en el bot REAL.
+2. **G2 — Modo STRAT_F_ONLY:** `config.STRAT_F_ONLY = False` (default). En
+   `_scan_phase_select_execute` (ANTES del bucle de scoring) se filtran los
+   `candidates` a solo origen `STRAT-F`, de modo que `select_best` solo ve
+   STRAT-F y el 1er trade queda garantizado sin competir con STRAT-A.
+3. **Enchufe HUB:** `consolidation_bot.main()` llama `server.init(hub_scanner,
+   bot=bot)` tras crear el bot, para que el panel del bot sea el que el server
+   expone.
+4. **G4 (enter_trade STRAT-F):** ya soportado vía `strategy_origin`; el test de
+   integración corrobora que `enter_trade` recibe `strategy_origin="STRAT-F"`.
+
+**Tests (TDD, `tests/test_strat_f_golive.py`, 4 nuevos):**
+- `test_flush_fills_bot_panel`: el scanner llena `bot.strat_f_panel` desde batch.
+- `test_flush_no_batch_is_noop`: sin batch no rompe.
+- `test_strat_f_only_filters_candidates`: el filtro deja solo STRAT-F.
+- `test_scan_all_respects_strat_f_only`: `scan_all` con STRAT_F_ONLY opera SOLO
+  STRAT-F (no STRAT-A) y llena el panel (end-to-end sin red, 1 trade garantizado).
+
+**Verificación:**
+- `pytest tests/test_strat_f_golive.py` → 4 passed.
+- `pytest tests/` → **286 passed** (282 + 4).
+- Grafo actualizado (`graphify . --update --code-only`): 2103 nodos, 126 comunidades.
+
+**GAP pendiente (G3):** verificación end-to-end en la máquina de Ruben. El host
+me mata el bot completo, así que falta correr `main.py` en demo y confirmar que
+el panel STRAT-F aparece y que un trade STRAT-F se coloca/cierra. Para activar
+modo solo-STRAT-F: `STRAT_F_ONLY=True` en `src/config.py`.
+
+**Archivos tocados:** `src/config.py`, `src/consolidation_bot.py`, `src/scanner.py`,
+`hub/server.py`, `tests/test_strat_f_golive.py`, `progress/audit_strat_f_go_live.md`,
+`docs/ROADMAP.md`.
+
+**Estado final:** G1+G2 cerrados por código y test. Sin commit aún (cambios sin
+commitear para revisión de Ruben, según costumbre del proyecto).

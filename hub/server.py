@@ -45,7 +45,10 @@ def init(scanner: HubScanner, bot: Any = None) -> None:
     global _scanner, _bot_ref, _panel
     _scanner = scanner
     _bot_ref = bot
-    if _panel is None:
+    # El bot real llena su propio StratFPanel; el server lo usa para el WS.
+    if bot is not None and getattr(bot, "strat_f_panel", None) is not None:
+        _panel = bot.strat_f_panel
+    elif _panel is None:
         _panel = StratFPanel()
 
 

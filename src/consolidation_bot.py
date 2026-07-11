@@ -39,6 +39,7 @@ from massaniello_persistence import MassanielloPersistence
 from massaniello_risk import MassanielloRiskManager
 from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
+from hub.strat_f_panel import StratFPanel
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -123,6 +124,7 @@ class ConsolidationBot:
         self.ma_state_by_asset: dict = {}
         self.radar_watchlist: dict[str, Any] = {}
         self._trade_tasks: set[asyncio.Task[Any]] = set()
+        self.strat_f_panel = StratFPanel()
         self.greylist_assets = set(GREYLIST_ASSETS)
         if greylist_assets is not None:
             self.greylist_assets = {a.strip() for a in greylist_assets if a and a.strip()}
@@ -278,6 +280,15 @@ async def main(
     )
     if start_balance is not None:
         bot.set_session_start_balance(start_balance)
+
+    # ── Enchufar panel STRAT-F al HUB (go-live G1) ───────────────────────────
+    if hub_scanner is not None:
+        try:
+            from hub import server as _hub_server
+            _hub_server.init(hub_scanner, bot=bot)
+            log.info("HUB STRAT-F panel conectado al bot")
+        except Exception as _hub_err:
+            log.warning("No se pudo conectar panel STRAT-F al HUB: %s", _hub_err)
 
     # ── Persistencia Massaniello ──────────────────────────────────────────────
     bot.massaniello_persistence = MassanielloPersistence()

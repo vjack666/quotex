@@ -1523,37 +1523,13 @@ class AssetScanner:
         if not candidates and not self.bot.pending_reversals:
             return False
 
-        # Empujar el estado STRAT-F al HUB (panel nuevo) y al journal (diario).
+        # Empujar el estado STRAT-F al journal (diario) y a la calibración.
         _batch = getattr(self, "_strat_f_batch", None)
         if _batch is not None:
             try:
                 from hub.strat_f_state import StratFReject, StratFRow
                 from hub.strat_f_panel import StratFPanel
                 from trade_journal import get_journal as _get_journal
-
-                panel = getattr(self.bot, "_strat_f_panel", None)
-                if panel is None:
-                    panel = StratFPanel()
-                    self.bot._strat_f_panel = panel
-                acc = [
-                    StratFRow(
-                        asset=a["asset"], direction=a["direction"],
-                        strength=int(a["strength"]), payout=a["payout"],
-                        ctx=a.get("ctx", ""), event=a.get("event", ""),
-                    )
-                    for a in _batch[0]
-                ]
-                rej = [
-                    StratFReject(
-                        asset=r["asset"], payout=r["payout"],
-                        skip_reason=r["skip_reason"],
-                    )
-                    for r in _batch[1]
-                ]
-                total_assets = len(_batch[0]) + len(_batch[1])
-                panel.record_strat_f(
-                    accepted=acc, rejected=rej, total_assets=total_assets
-                )
 
                 # Diario + calibración: grabar cada decisión STRAT-F en la BD.
                 journal = _get_journal()
@@ -1621,6 +1597,42 @@ class AssetScanner:
         await self._scan_phase_select_execute(eval_result, list(assets_map.items()))
         return self.bot.stats.get("entries", 0) > entries_before
 
+    def _flush_strat_f_panel(self) -> None:
+        """Vuelca el batch STRAT-F al panel del HUB (go-live G1).
+
+        Mapea las decisiones aceptadas/rechazadas a StratFRow/StratFReject y
+        las registra en ``bot.strat_f_panel`` (que el server expone por WS).
+        """
+        from hub.strat_f_panel import StratFPanel
+        from hub.strat_f_state import StratFReject, StratFRow
+
+        _batch = getattr(self, "_strat_f_batch", None)
+        if not _batch:
+            return
+        panel = getattr(self.bot, "strat_f_panel", None)
+        if panel is None:
+            panel = StratFPanel()
+            self.bot.strat_f_panel = panel
+        acc = [
+            StratFRow(
+                asset=a["asset"], direction=a["direction"],
+                strength=int(a["strength"]), payout=a["payout"],
+                ctx=a.get("ctx", ""), event=a.get("event", ""),
+            )
+            for a in _batch[0]
+        ]
+        rej = [
+            StratFReject(
+                asset=r["asset"], payout=r["payout"],
+                skip_reason=r["skip_reason"],
+            )
+            for r in _batch[1]
+        ]
+        panel.record_strat_f(
+            accepted=acc, rejected=rej,
+            total_assets=len(_batch[0]) + len(_batch[1]),
+        )
+
     async def _scan_phase_select_execute(
         self,
         eval_result: dict[str, Any],
@@ -1678,6 +1690,25 @@ class AssetScanner:
             log.info("  Sin señales este ciclo.")
             self.executor._record_scan_acceptances(0)
             return
+
+        # Go-live G2: modo STRAT_F_ONLY aísla la ejecución de STRAT-F
+        # (no compite por score con STRAT-A/MOMENTUM/SWING/OB), de modo que
+        # el primer trade STRAT-F queda garantizado cuando hay señal aceptada.
+        from config import STRAT_F_ONLY
+        if STRAT_F_ONLY:
+            _pre = len(candidates)
+            candidates = [
+                c for c in candidates
+                if getattr(c, "_strategy_origin", "STRAT-A") == "STRAT-F"
+            ]
+            log.info(
+                "[STRAT_F_ONLY] candidatos filtrados a STRAT-F: %d/%d",
+                len(candidates), _pre,
+            )
+            if not candidates:
+                log.info("  [STRAT_F_ONLY] Sin señales STRAT-F este ciclo.")
+                self.executor._record_scan_acceptances(0)
+                return
 
         log.info(
             "[SCORE] Umbral dinámico sesión=%d (ventana=%d scans, accepted=%d)",
@@ -1919,5 +1950,8 @@ class AssetScanner:
         cycle = await self._scan_phase_prefetch(assets)
         eval_result = await self._scan_phase_evaluate_assets(cycle)
         self.bot.last_scan_candidates = eval_result.get("candidates", [])
+        # Go-live G1: empujar el estado STRAT-F al panel del HUB (que el server
+        # expone por WS) tras evaluar, en cualquier modo de corrida.
+        self._flush_strat_f_panel()
         await self._scan_phase_select_execute(eval_result, assets)
 

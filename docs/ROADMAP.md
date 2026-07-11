@@ -16,7 +16,7 @@
 | Nueva estrategia en construcción | **STRAT-F** (fractal M15/M5/M1) |
 | Strategy B | **ELIMINADA** (2026-07-11) |
 | Gestión de riesgo | Massaniello (5 ops / 3 ITM / 60 min / PRACTICE) |
-| Tests actuales | 246 passing |
+| Tests actuales | 286 passing |
 
 ---
 
@@ -113,6 +113,22 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 
 ---
 
+## Fase 5 — Go-Live STRAT-F (GAPs G1+G2 de la auditoría)
+
+| ID | Feature | Estado | Depende de |
+|----|---------|--------|------------|
+| 9 | `strat_f_panel_live` (G1) | ✅ done | #7 |
+| 10 | `strat_f_only_mode` (G2) | ✅ done | #4, #9 |
+
+> **G1+G2 cerrados** (2026-07-11). El panel STRAT-F se muestra en el bot REAL
+> (no solo `--hub-readonly`) y `STRAT_F_ONLY=True` aisla la ejecución a STRAT-F
+> para garantizar el 1er trade demo. `tests/test_strat_f_golive.py` (4 tests,
+> TDD). pytest **286 passed**. Auditoría: `progress/audit_strat_f_go_live.md`.
+> **G3 (end-to-end en máquina de Ruben) PENDIENTE**: falta correr `main.py` en
+> demo y confirmar panel + 1er trade cerrado.
+
+---
+
 ## Changelog
 
 | Fecha | Cambio |
@@ -121,3 +137,4 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 | 2026-07-11 | Creación de roadmap STRAT-F (feature #1 en curso) |
 | 2026-07-11 | Reemplazo del dashboard por panel STRAT-F (#7): `hub/strat_f_state.py`, `hub/strat_f_panel.py`, `hub/parser.py`, `hub/render.py`, `hub/server.py` + `index.html` reescrito |
 | 2026-07-11 | Documentación de ingeniería (#8): `docs/engineering/` (SRS, 3 ADR, ERD, API Spec, glosario) + `tests/test_window_2h.py` (ATDD ventana 2h). pytest 282 passed |
+| 2026-07-11 | **Go-Live GAPs G1+G2 cerrados**: panel STRAT-F cableado al bot real (`_flush_strat_f_panel` en `scan_all` + `StratFPanel` en `ConsolidationBot` + `server.init` lo usa por WS) y modo `STRAT_F_ONLY` que aísla la ejecución STRAT-F. `tests/test_strat_f_golive.py` (4 tests). pytest **286 passed**. Falta G3 (end-to-end en máquina de Ruben). |
