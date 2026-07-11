@@ -137,7 +137,7 @@ STRAT_MOMENTUM_ENABLED = True
 
 # STRAT-F (Fractal / Wyckoff) — marco M15/M5/M1
 STRAT_F_ENABLED = True
-STRAT_F_ONLY = False  # go-live: opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
+STRAT_F_ONLY = True  # go-live: opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
 STRAT_F_MIN_PAYOUT = 80
 STRAT_F_MIN_SCORE = 60
 STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona antes de operar

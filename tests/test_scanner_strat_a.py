@@ -365,6 +365,11 @@ async def test_strat_a_e2e_pending_hint_enqueues_reversal(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_strat_a_e2e_select_best_only_above_threshold(monkeypatch):
+    # Este test valida el comportamiento de STRAT-A en modo mixto; aislarlo
+    # de la config global STRAT_F_ONLY (que puede ir en True para go-live).
+    import config as _cfg
+    monkeypatch.setattr(_cfg, "STRAT_F_ONLY", False)
+
     sym_hi = "EURUSD_otc"
     sym_lo = "GBPUSD_otc"
     bot, executor, scanner = _make_strat_a_scanner(
