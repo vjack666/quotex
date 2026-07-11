@@ -1,4 +1,4 @@
-"""Modelos del HUB para datos reales de STRAT-A y STRAT-B."""
+"""Modelos del HUB para datos reales de STRAT-A."""
 
 from __future__ import annotations
 
@@ -81,8 +81,6 @@ class CandidateData:
     @property
     def rank_value(self) -> float:
         """Valor único para ordenar candidatos en el HUB."""
-        if self.strategy == "STRAT-B" and self.confidence is not None:
-            return self.confidence * 100.0
         return self.score
 
     @classmethod
@@ -104,28 +102,6 @@ class CandidateData:
             raw_reason=str(data.get("reason") or "") or None,
         )
 
-    @classmethod
-    def from_strat_b(cls, data: dict[str, Any]) -> "CandidateData":
-        """Construye candidato STRAT-B desde señal real del bot."""
-        confidence = float(data.get("confidence", 0.0))
-        return cls(
-            strategy="STRAT-B",
-            asset=str(data.get("asset") or data.get("symbol") or ""),
-            direction=str(data.get("direction") or ""),
-            score=confidence * 100.0,
-            payout=int(data.get("payout", 0)),
-            zone_ceiling=float(data.get("zone_ceiling", data.get("top", 0.0))),
-            zone_floor=float(data.get("zone_floor", data.get("bottom", 0.0))),
-            zone_age_min=float(data.get("zone_age_min", data.get("age_min", 0.0))),
-            pattern=str(data.get("pattern") or data.get("signal_name") or "none"),
-            pattern_strength=float(data.get("pattern_strength", confidence)),
-            entry_mode=str(data.get("entry_mode") or data.get("signal_type") or "spring"),
-            detected_at=data.get("detected_at") or _utc_now(),
-            confidence=confidence,
-            signal_type=str(data.get("signal_type") or "") or None,
-            raw_reason=str(data.get("reason") or "") or None,
-        )
-
 
 @dataclass
 class HubScanSnapshot:
@@ -135,9 +111,7 @@ class HubScanSnapshot:
     timestamp: datetime
     total_assets_scanned: int
     strat_a_candidates: List[CandidateData] = field(default_factory=list)
-    strat_b_candidates: List[CandidateData] = field(default_factory=list)
     strat_a_entered: Optional[str] = None
-    strat_b_entered: Optional[str] = None
     balance: Optional[float] = None
     cycle_id: int = 0
     cycle_ops: int = 0
@@ -266,7 +240,6 @@ class HubState:
 
     last_scan: Optional[HubScanSnapshot] = None
     strat_a_watching: List[CandidateData] = field(default_factory=list)
-    strat_b_watching: List[CandidateData] = field(default_factory=list)
     active_trade_asset: Optional[str] = None
     active_trade_direction: Optional[str] = None
     active_trade_time_remaining_sec: Optional[float] = None

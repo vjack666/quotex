@@ -62,7 +62,7 @@ SCORE_THRESHOLD = 65
 
 # Modos de estrategia → modo de scoring
 REBOUND_ORIGINS = {"STRAT-REVERSAL-SWING", "STRAT-ORDER-BLOCK", "STRAT-A"}
-BREAKOUT_ORIGINS = {"STRAT-MOMENTUM", "STRAT-B"}
+BREAKOUT_ORIGINS = {"STRAT-MOMENTUM"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

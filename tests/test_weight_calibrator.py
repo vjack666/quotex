@@ -128,7 +128,7 @@ def calibrator_with_trades() -> WeightCalibrator:
     rows: list[dict[str, Any]] = []
     vol_factors = [0.5, 1.0, 2.0, 0.3, 0.8, 1.5, 2.5, 0.6, 1.2, 1.8]
     strategies = ["STRAT-A", "STRAT-MOMENTUM", "STRAT-REVERSAL-SWING",
-                  "STRAT-B", "STRAT-ORDER-BLOCK"]
+                  "STRAT-ORDER-BLOCK", "STRAT-ORDER-BLOCK"]
 
     for i in range(30):
         vf = vol_factors[i % len(vol_factors)]

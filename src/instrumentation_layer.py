@@ -55,10 +55,7 @@ class PipelineMetrics:
         # TIER 3: Signal Detection
         self.strat_a_consolidation_detected = 0
         self.strat_a_no_consolidation = 0
-        self.strat_b_spring_detected = 0
-        self.strat_b_no_signal = 0
-        self.strat_b_insufficient_candles = 0
-        
+
         # TIER 4: Candidates
         self.candidates_created = 0
         self.candidates_rejected_pre_scoring = 0
@@ -117,11 +114,6 @@ class PipelineMetrics:
                 "strat_a": {
                     "consolidation_detected": self.strat_a_consolidation_detected,
                     "no_signal": self.strat_a_no_consolidation,
-                },
-                "strat_b": {
-                    "spring_detected": self.strat_b_spring_detected,
-                    "no_signal": self.strat_b_no_signal,
-                    "insufficient_candles": self.strat_b_insufficient_candles,
                 },
             },
             "candidates": {

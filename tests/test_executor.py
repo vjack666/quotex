@@ -24,7 +24,6 @@ class FakeBot:
             "martin_attempts_session": 0,
             "entries": 0,
             "strat_a_signals": 0,
-            "strat_b_signals": 0,
             "rejected_same_asset_limit": 0,
             "martins": 0,
         }

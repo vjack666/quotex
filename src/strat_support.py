@@ -1,4 +1,9 @@
-"""Estrategia B: Spring / Upthrust (Wyckoff) en 1m."""
+"""Utilidades compartidas de análisis de velas (soporte fuerte 2m, conversión a DataFrame).
+
+Originalmente vivían en strat_b.py (estrategia Wyckoff Spring, ya eliminada); se
+reasignan aquí para que las estrategias que las reusaban (p.ej. STRAT-MOMENTUM)
+sigan funcionando sin importar código de B.
+"""
 from __future__ import annotations
 
 from statistics import mean
@@ -6,9 +11,7 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 
-from config import STRAT_B_ALLOW_WYCKOFF_EARLY, STRAT_B_MIN_CONFIDENCE
 from models import Candle
-from strategy_spring_sweep import detect_spring_or_upthrust
 
 
 def candles_to_dataframe(candles: list[Candle]) -> pd.DataFrame:
@@ -20,31 +23,6 @@ def candles_to_dataframe(candles: list[Candle]) -> pd.DataFrame:
             "close": [c.close for c in candles],
         }
     )
-
-
-def evaluate_strat_b(
-    candles_1m: list[Candle],
-    min_confidence: float = STRAT_B_MIN_CONFIDENCE,
-    *,
-    allow_early: bool = STRAT_B_ALLOW_WYCKOFF_EARLY,
-) -> dict[str, Any] | None:
-    if len(candles_1m) < 20:
-        return None
-
-    spring_df = candles_to_dataframe(candles_1m)
-    signal, info = detect_spring_or_upthrust(spring_df, allow_early=allow_early)
-    conf = float(info.get("confidence", 0.0) or 0.0)
-    if not signal and conf < min_confidence:
-        return None
-
-    return {
-        "signal": bool(signal),
-        "confidence": conf,
-        "reason": str(info.get("reason", "")),
-        "signal_type": info.get("signal_type"),
-        "direction": str(info.get("direction") or "call"),
-        "info": info,
-    }
 
 
 def find_strong_support_2m(

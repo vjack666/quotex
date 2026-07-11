@@ -18,7 +18,6 @@ def _default_config() -> RouterConfig:
     return RouterConfig(
         strategy_priority={
             StrategyName.BOB: 80.0,
-            StrategyName.STRAT_B: 70.0,
         },
         phase_boost={
             SignalPhase.SETUP: 3.0,
@@ -82,7 +81,6 @@ class SignalRouter:
             generated_at=datetime.now(tz=timezone.utc),
             total_signals=len(signals_list),
             routed_signals=len(routed_list),
-            strat_b=int(strategy_counter.get(StrategyName.STRAT_B, 0)),
             bob=int(strategy_counter.get(StrategyName.BOB, 0)),
             setup=int(phase_counter.get(SignalPhase.SETUP, 0)),
             retest=int(phase_counter.get(SignalPhase.RETEST, 0)),

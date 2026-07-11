@@ -101,15 +101,11 @@ def test_apply_runtime_config_mutates_constants():
             cycle_profit_pct=0.05,
             min_payout=75,
             scan_lead_sec=20.0,
-            strat_b_live=True,
-            strat_b_duration=90,
-            strat_b_min_confidence=0.55,
             strat_a_only=False,
             hub_readonly=False,
         )
         main_mod._apply_runtime_config(args)
         assert cb.MIN_PAYOUT == 75
-        assert cb.STRAT_B_CAN_TRADE is True
         assert cb.AMOUNT_INITIAL == 2.5
 
 

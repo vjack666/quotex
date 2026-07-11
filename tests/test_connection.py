@@ -18,7 +18,20 @@ from connection import (
     fetch_candles_with_retry,
     looks_like_connection_issue,
     place_order,
+    raw_to_candle,
 )
+
+
+def test_raw_to_candle_maps_ticks():
+    c = raw_to_candle({"time": 100, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05, "ticks": 495})
+    assert c is not None
+    assert c.ticks == 495
+
+
+def test_raw_to_candle_defaults_ticks_when_absent():
+    c = raw_to_candle({"time": 100, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05})
+    assert c is not None
+    assert c.ticks == 0
 
 
 def test_looks_like_connection_issue_websocket():

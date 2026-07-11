@@ -64,7 +64,6 @@ class FakeBot:
             "skipped": 0,
             "expired_zones": 0,
             "filtered_sensor": 0,
-            "strat_b_signals": 0,
             "rejected_young_zone": 0,
             "score_rejected_age": 0,
             "score_rejected_score": 0,
@@ -663,31 +662,6 @@ def test_strat_a_select_best_uses_fixed_threshold_75():
 
     assert selected == []
     assert candidate in rejected
-
-
-def test_select_best_non_strat_a_keeps_session_threshold():
-    _, detected = _consolidation_candles_5m_at_ceiling()
-    zone = _mature_zone("GBPUSD_otc", detected)
-    strat_b = CandidateEntry(
-        asset="GBPUSD_otc",
-        payout=88,
-        zone=zone,
-        direction="put",
-        candles=[],
-        score=72.0,
-        score_breakdown={"compression": 18, "bounce": 18, "trend": 18, "payout": 18},
-    )
-    setattr(strat_b, "_strategy_origin", "STRAT-B")
-
-    selected, rejected = select_best(
-        [strat_b],
-        threshold=65,
-        threshold_for=lambda c: 75 if getattr(c, "_strategy_origin", "") == "STRAT-A" else 65,
-    )
-
-    assert len(selected) == 1
-    assert selected[0] is strat_b
-    assert rejected == []
 
 
 @pytest.mark.asyncio

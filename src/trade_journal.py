@@ -449,7 +449,7 @@ class Journal:
 
         # Serializar velas (últimas 20 para no inflar la BD)
         candles_data = []
-        for c in entry.candles[-20:]:
+        for c in (entry.candles or [])[-20:]:
             candles_data.append({
                 "ts": c.ts,
                 "open": c.open,
@@ -458,19 +458,27 @@ class Journal:
                 "close": c.close,
             })
 
+        z = entry.zone
+        zone_ceiling = getattr(z, "ceiling", 0.0) or 0.0
+        zone_floor = getattr(z, "floor", 0.0) or 0.0
+        zone_range = getattr(z, "range_pct", 0.0) or 0.0
+        zone_bars = getattr(z, "bars_inside", 0) or 0
+        zone_age = getattr(z, "age_minutes", 0.0) or 0.0
+
         cur = self.conn.execute(
             """INSERT INTO candidates (
                 scanned_at, asset, direction, payout, amount, stage,
                 score, score_compression, score_bounce, score_trend, score_payout,
                 reversal_pattern, reversal_strength,
                 zone_ceiling, zone_floor, zone_range_pct, zone_bars_inside, zone_age_min,
-                decision, reject_reason, order_id, outcome, candles_json, strategy_json
+                decision, reject_reason, order_id, outcome, candles_json, strategy_json,
+                strategy_origin
             ) VALUES (
                 ?,?,?,?,?,?,
                 ?,?,?,?,?,
                 ?,?,
                 ?,?,?,?,?,
-                ?,?,?,?,?,?
+                ?,?,?,?,?,?,?
             )""",
             (
                 _now(),
@@ -482,12 +490,11 @@ class Journal:
                 bd.get("payout", 0.0),
                 getattr(entry, "_reversal_pattern", getattr(entry, "reversal_pattern", "none")),
                 float(getattr(entry, "_reversal_strength", getattr(entry, "reversal_strength", 0.0)) or 0.0),
-                entry.zone.ceiling, entry.zone.floor,
-                entry.zone.range_pct, entry.zone.bars_inside,
-                entry.zone.age_minutes,
+                zone_ceiling, zone_floor, zone_range, zone_bars, zone_age,
                 decision, reject_reason, order_id, outcome,
                 json.dumps(candles_data),
                 json.dumps(strategy_payload, ensure_ascii=False),
+                getattr(entry, "_strategy_origin", "STRAT-A"),
             ),
         )
         self.conn.commit()
@@ -1116,6 +1123,51 @@ class Journal:
         print(f"✅ Exportado {len(rows)} registros → {path}")
         return path
 
+    # ── Reporte STRAT-F (diario + calibración) ────────────────────────────────
+    def query_strat_f(self, days: int = 90) -> List[sqlite3.Row]:
+        """Devuelve los candidatos con strategy_origin='STRAT-F'."""
+        since = (datetime.now(tz=BROKER_TZ) - timedelta(days=days)).isoformat()
+        return self.conn.execute(
+            "SELECT * FROM candidates WHERE strategy_origin='STRAT-F' "
+            "AND scanned_at >= ? ORDER BY id",
+            (since,),
+        ).fetchall()
+
+    def print_strat_f_report(self, days: int = 90) -> None:
+        """Imprime diario + métricas de calibración de STRAT-F."""
+        from collections import Counter
+
+        rows = self.query_strat_f(days)
+        print(f"\n{'═'*70}")
+        print(f"  STRAT-F — DIARIO Y CALIBRACIÓN (últimos {days} días)")
+        print(f"{'═'*70}")
+        if not rows:
+            print("  (sin operaciones STRAT-F registradas)")
+            print()
+            return
+        total = len(rows)
+        accepted = [r for r in rows if r["decision"] == "ACCEPTED"]
+        rejected = [r for r in rows if r["decision"] != "ACCEPTED"]
+        wins = [r for r in accepted if r["outcome"] == "WIN"]
+        losses = [r for r in accepted if r["outcome"] == "LOSS"]
+        pending = [r for r in accepted if r["outcome"] in ("PENDING", "DRY_RUN")]
+        print(f"  Evaluados : {total}")
+        print(f"  Aceptadas : {len(accepted)}  |  Rechazadas: {len(rejected)}")
+        print(f"  Resultado de aceptadas: WIN={len(wins)} LOSS={len(losses)} "
+              f"PENDIENTE={len(pending)}")
+        if accepted:
+            wr = (len(wins) / len(accepted) * 100.0) if (len(wins) + len(losses)) else 0.0
+            print(f"  Win rate (resueltas): {wr:.1f}%")
+        reasons = Counter()
+        for r in rejected:
+            rr = (r["reject_reason"] or "sin motivo").split("|")[0].strip()
+            reasons[rr] += 1
+        print(f"\n  Motivos de rechazo (top para calibrar):")
+        for motive, cnt in reasons.most_common(10):
+            pct = cnt / max(len(rejected), 1) * 100.0
+            print(f"    {cnt:>4}  ({pct:5.1f}%)  {motive[:50]}")
+        print()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Singleton (uso desde consolidation_bot)
@@ -1144,7 +1196,10 @@ if __name__ == "__main__":
     import sys as _sys
 
     j = Journal()
-    if len(_sys.argv) > 2 and _sys.argv[1] == "--ticket":
+    if len(_sys.argv) > 1 and _sys.argv[1] == "--strat-f":
+        days_arg = int(_sys.argv[2]) if len(_sys.argv) > 2 else 90
+        j.print_strat_f_report(days=days_arg)
+    elif len(_sys.argv) > 2 and _sys.argv[1] == "--ticket":
         j.print_ticket_audit(_sys.argv[2])
     else:
         days_arg = int(_sys.argv[1]) if len(_sys.argv) > 1 else 30

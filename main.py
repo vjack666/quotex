@@ -69,28 +69,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-payout", type=int, default=80, help="Payout mínimo permitido")
     p.add_argument("--scan-lead-sec", type=float, default=35.0, help="Anticipación del scan antes del open")
 
-    # STRAT-B (Spring Sweep)
-    p.add_argument(
-        "--strat-b-live",
-        action="store_true",
-        help="Permitir que STRAT-B abra operaciones (default: solo aviso en terminal)",
-    )
-    p.add_argument(
-        "--strat-b-duration",
-        type=int,
-        default=120,
-        help="Duración en segundos para entradas STRAT-B",
-    )
-    p.add_argument(
-        "--strat-b-min-confidence",
-        type=float,
-        default=0.70,
-        help="Confianza mínima [0.0-1.0] para habilitar entrada STRAT-B",
-    )
     p.add_argument(
         "--strat-a-only",
         action="store_true",
-        help="Solo STRAT-A: deshabilita STRAT-B trades y candidatos STRAT-MOMENTUM",
+        help="Solo STRAT-A: deshabilita STRAT-MOMENTUM",
     )
     return p
 
@@ -109,13 +91,8 @@ def _apply_runtime_config(args: argparse.Namespace) -> None:
     cb.MIN_PAYOUT = int(args.min_payout)
     cb.SCAN_LEAD_SEC = float(args.scan_lead_sec)
 
-    cb.STRAT_B_CAN_TRADE = bool(args.strat_b_live)
-    cb.STRAT_B_DURATION_SEC = max(30, int(args.strat_b_duration))
-    cb.STRAT_B_MIN_CONFIDENCE = max(0.0, min(1.0, float(args.strat_b_min_confidence)))
-
     if bool(args.strat_a_only):
         cb.STRAT_A_ONLY = True
-        cb.STRAT_B_CAN_TRADE = False
         cb.STRAT_MOMENTUM_ENABLED = False
         import config as _cfg_flags
 
@@ -126,25 +103,39 @@ def _apply_runtime_config(args: argparse.Namespace) -> None:
 
     # Modo HUB (solo lectura): fuerza escaneo por minuto y deshabilita trading.
     if bool(args.hub_readonly):
-        cb.STRAT_B_CAN_TRADE = False
         cb.SCAN_INTERVAL_SEC = 60
         cb.ALIGN_SCAN_TO_CANDLE = False
 
 
 async def _render_hub_once() -> None:
-    """Parsea el log y dibuja el panel HUB en la terminal."""
+    """Parsea el log y dibuja el panel HUB STRAT-F en la terminal.
+
+    El panel nuevo muestra aceptadas vs rechazadas con la razón de
+    cada rechazo (la "manera de trabajar nueva" de STRAT-F).
+    """
     import os
     try:
         from hub.parser import HubLogParser
         from hub.render import render_dashboard
-        log_path = ROOT / "consolidation_bot.log"
+        from hub.strat_f_panel import StratFPanel
+        from pathlib import Path
+
+        # 1) Si el bot dejó un estado STRAT-F en vivo, usarlo.
+        panel = StratFPanel()
+        # 2) Fallback: parsear el log del diagnóstico (formato estable).
+        candidates = [
+            ROOT / "progress" / "diag_strat_f_filters.log",
+            ROOT / "progress" / "diag_strat_f_live.log",
+            ROOT / "consolidation_bot.log",
+        ]
+        log_path = next((p for p in candidates if p.exists()), candidates[-1])
         parser = HubLogParser()
         with open(log_path, encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
-        snap = parser.parse_lines(lines[-600:])
-        panel = render_dashboard(snap)
+        snap = parser.parse_lines(lines)
+        out = render_dashboard(snap)
         os.system("cls" if os.name == "nt" else "clear")
-        print(panel)
+        print(out)
     except Exception as exc:
         print(f"[HUB] Error al renderizar el panel: {exc}")
 

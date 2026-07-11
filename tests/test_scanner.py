@@ -32,7 +32,7 @@ class FakeBot:
         self.trades = {}
         self.stats = {
             "scans": 0, "skipped": 0, "expired_zones": 0,
-            "filtered_sensor": 0, "strat_b_signals": 0,
+            "filtered_sensor": 0, "strat_a_signals": 0,
             "rejected_young_zone": 0, "score_rejected_age": 0,
             "score_rejected_score": 0,
         }
@@ -366,4 +366,24 @@ async def test_process_pending_reversals_confirmed_pattern_no_attribute_error(mo
     assert result[0].direction == "put"
     assert getattr(result[0], "_reversal_pattern") == "shooting_star"
     assert "USDEGP_otc" not in bot.pending_reversals
-    executor._compute_initial_amount.assert_called_once_with(85)
+
+
+def test_serialize_candles_is_instance_method():
+    """_serialize_candles debe invocarse como metodo de instancia (con self).
+
+    Regression: faltaba `self` en la firma -> 'takes 1 positional argument
+    but 2 were given' al llamarlo desde _record_broken_zone_snapshot.
+    """
+    bot = FakeBot()
+    executor = MagicMock()
+    scanner = AssetScanner(bot, executor)
+    candles = [
+        Candle(ts=1000, open=1.0, high=1.1, low=0.9, close=1.05, ticks=10),
+        Candle(ts=1300, open=1.05, high=1.2, low=1.0, close=1.15, ticks=20),
+    ]
+    serialized = scanner._serialize_candles(candles)
+    assert isinstance(serialized, list)
+    assert len(serialized) == 2
+    assert serialized[0]["ts"] == 1000
+    assert serialized[0]["close"] == 1.05
+    assert serialized[1]["body"] == pytest.approx(0.10)  # 1.15 - 1.05

@@ -1,424 +1,142 @@
 {
   "project": "quotex-hft-bot",
-  "description": "Bot de trading de alta frecuencia para opciones binarias en Quotex. Estrategias: consolidación, Wyckoff Spring/Sweep, momentum, reversión, order blocks. Gestión de riesgo: Massaniello.",
+  "description": "Bot de opciones binarias en Quotex. Estrategias vivas: consolidación (STRAT-A), momentum 1m, reversal swing, order block. NUEVA: STRAT-F (Fractal/Wyckoff, marco M15/M5/M1). Gestión Massaniello.",
+  "note": "Strategy B (Wyckoff Spring/Sweep) fue ELIMINADA físicamente el 2026-07-11. Este roadmap reemplaza al anterior (feature_list.json viejo + docs/ROADMAP*.md borrados).",
   "roadmap": {
-    "version": "2026-06-30",
-    "progress": { "done": 22, "total": 22 },
-    "next_recommended": "strategy_reversal_swing",
-    "doc": "docs/ROADMAP.md",
-    "priority_track": "strat_a",
-    "strat_a_track": {
-      "doc": "docs/ROADMAP_STRAT_A.md",
-      "progress": { "done": 6, "total": 6 },
-      "next_recommended": null,
-      "feature_ids": [17, 18, 19, 20, 21, 22]
-    },
-    "blockers": []
+    "version": "2026-07-11",
+    "strategy_focus": "strat_f",
+    "next_recommended": "none (STRAT-F + dashboard cerrados)"
   },
   "rules": {
     "one_feature_at_a_time": true,
-    "require_tests_to_close": true,
-    "require_approved_spec_to_implement": true,
-    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked", "superseded"],
-    "sdd_required_when": "feature has \"sdd\": true"
+    "require_tests_to_close": true
   },
   "features": [
     {
       "id": 1,
-      "name": "refactor_monolith",
-      "title": "Refactor: extraer módulos del monolito",
-      "phase": "foundation",
+      "name": "scanner_multi_tf_prefetch",
+      "title": "Prefetch de 15m en el ciclo del scanner",
+      "phase": "scanner_accommodation",
       "priority": 1,
-      "description": "Dividir consolidation_bot.py en módulos: connection.py, scanner.py, executor.py, strat_a.py, strat_b.py. Facade ≤500 líneas.",
+      "description": "Hacer que scan_prefetch traiga velas de 15m además de 5m/1m y exponerlas en ScanCycleData.candles_15m, para que STRAT-F tenga contexto M15 sin I/O en el hot path.",
       "acceptance": [
-        "consolidation_bot.py no supera las 500 líneas",
-        "Existen src/connection.py, src/scanner.py, src/executor.py, src/strat_a.py, src/strat_b.py",
-        "main.py importa los nuevos módulos y el flujo completo funciona",
-        "tests/test_connection.py, tests/test_scanner.py, tests/test_executor.py existen y pasan",
-        "init.ps1 termina en verde"
+        "ScanCycleData expone candles_15m: dict[str, list[Candle]]",
+        "prefetch_primary_candles baja TF_15M junto a TF_5M/TF_1M",
+        "El scan sigue sin I/O bloqueante por activo en la fase de evaluación",
+        "tests cubren que candles_15m llega poblado para los activos del ciclo",
+        "pytest tests/ en verde"
       ],
-      "sdd": true,
       "status": "done"
     },
     {
       "id": 2,
-      "name": "implement_missing_modules",
-      "title": "Implementar módulos SMC y filter_sell",
-      "phase": "foundation",
+      "name": "strat_f_baseline",
+      "title": "STRAT-F: evaluador puro (fractal M5 + contexto M15 + rechazo M1)",
+      "phase": "strat_f",
       "priority": 2,
-      "description": "Crear módulos referenciados en imports pero ausentes en disco: smc_auto_trader.py, smc_decision_engine.py, smc_analysis.py, filter_and_sell_otc.py. Nota: config.py ya existe desde #1.",
+      "description": "Crear src/strat_fractal.py con evaluate_strat_f(candles_15m, candles_5m, candles_1m, payout) -> StratFEvaluation (sin I/O). Detecta fractal Bill Williams de 5 velas en M5 dentro de una banda/zona, valida que M15 esté en rango (no roto) y que M1 rechace la banda. Devuelve direction CALL/PUT, zona, strength, confirms.",
       "acceptance": [
-        "Existen src/smc_auto_trader.py, src/smc_decision_engine.py, src/smc_analysis.py",
-        "Existe src/filter_and_sell_otc.py",
-        "Cada módulo nuevo tiene tests unitarios",
-        "init.ps1 termina en verde"
+        "Existe src/strat_fractal.py con evaluate_strat_f()",
+        "Detecta fractal arriba/abajo de 5 velas en M5",
+        "Usa M15 para contexto (rango vs tendencia rota) y lo aplica como filtro",
+        "Usa M1 para confirmar rechazo (vela toca banda y no cierra fuera)",
+        "Devuelve StratFEvaluation con has_signal/direction/zone/strength/confirms",
+        "tests/test_strat_fractal.py >= 8 casos (fractal up/down, M15 roto, sin rechazo M1, etc.)",
+        "pytest en verde"
       ],
-      "sdd": true,
-      "status": "done"
+      "status": "done",
+      "depends_on": [
+        1
+      ]
     },
     {
       "id": 3,
-      "name": "parallel_asset_scan",
-      "title": "Escaneo paralelo de activos OTC",
-      "phase": "performance",
-      "priority": 1,
-      "description": "Reemplazar escaneo secuencial por asyncio.gather sobre todos los OTC abiertos simultáneamente, con semáforo de concurrencia configurable.",
+      "name": "strat_f_scanner_wiring",
+      "title": "Cablear STRAT-F en el scanner",
+      "phase": "strat_f",
+      "priority": 3,
+      "description": "En _scan_phase_evaluate_assets, añadir bloque STRAT-F que llame evaluate_strat_f con candles_15m/5m/1m y cree CandidateEntry con _strategy_origin='STRAT-F', _signal_ts_1m y stats strat_f_signals. Respetar STRAT_A_ONLY y STRAT_F_ENABLED.",
       "acceptance": [
-        "El scanner obtiene todos los activos OTC abiertos en una sola llamada",
-        "Las velas se descargan en paralelo con un semáforo (CANDLE_FETCH_CONCURRENCY)",
-        "El tiempo total de escaneo se reduce significativamente vs secuencial",
-        "Los tests cubren el nuevo flujo paralelo"
+        "scanner.py importa evaluate_strat_f y lo invoca en el ciclo",
+        "CandidateEntry de STRAT-F lleva _strategy_origin='STRAT-F'",
+        "stats['strat_f_signals'] se incrementa y se loguea [STRAT-F]",
+        "Bajo STRAT_A_ONLY no se evalua STRAT-F",
+        "tests/test_scanner_strat_f.py cubre el cableado (mock candles)",
+        "pytest en verde"
       ],
-      "sdd": true,
       "status": "done",
-      "depends_on": [2]
+      "depends_on": [
+        2
+      ]
     },
     {
       "id": 4,
-      "name": "candle_cache",
-      "title": "Caché local de velas con actualización incremental",
-      "phase": "performance",
-      "priority": 2,
-      "description": "Implementar caché en memoria que solo pide las velas nuevas al broker (diferencial), en lugar de descargar 55 velas en cada ciclo de escaneo.",
+      "name": "strat_f_filters",
+      "title": "STRAT-F: filtros de calidad (alineación + payout + edad)",
+      "phase": "strat_f",
+      "priority": 4,
+      "description": "Endurecer STRAT-F: payout >= STRAT_F_MIN_PAYOUT, alineacion M15/M5 obligatoria, edad minima de la zona/banda, y reject-first con log explicito cuando falta alineacion.",
       "acceptance": [
-        "El caché almacena velas por activo y timeframe",
-        "En cada ciclo solo se piden las velas nuevas desde el último timestamp conocido",
-        "El caché es thread-safe (asyncio)",
-        "Los tests cubren el caso de primera carga, actualización y expiración"
+        "Config: STRAT_F_MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE",
+        "Sin alineacion M15/M5 -> rechazo con razon logueada",
+        "Payout < minimo -> activo excluido del scan STRAT-F",
+        "tests verifican cada veto por separado",
+        "pytest en verde"
       ],
-      "sdd": true,
       "status": "done",
-      "depends_on": [3]
+      "depends_on": [
+        3
+      ]
     },
     {
       "id": 5,
-      "name": "entry_sync_precision",
-      "title": "Sincronización precisa con apertura de vela",
-      "phase": "performance",
-      "priority": 3,
-      "description": "Mejorar la precisión del envío de órdenes para alinearse con la apertura de vela en <300ms (hoy 1.5s de tolerancia).",
+      "name": "strat_f_backtest",
+      "title": "STRAT-F: reconocimiento en backtester",
+      "phase": "validation",
+      "priority": 5,
+      "description": "Hacer que src/backtester.py reconozca origen 'STRAT-F' y simule sus señales sobre datos historicos.",
       "acceptance": [
-        "El tiempo de lag entre detección y envío es <300ms en promedio",
-        "El sistema rechaza órdenes que llegarían tarde (timing guard)",
-        "Existe logging de timing por cada orden (time_since_open, secs_to_close)",
-        "Tests cubren el nuevo sincronizador"
+        "Backtester admite 'STRAT-F' en STRATEGY_MAP / rama de origen",
+        "Reporte diferencia win rate y profit de STRAT-F vs otras",
+        "pytest en verde"
       ],
-      "sdd": true,
       "status": "done",
-      "depends_on": [4]
+      "depends_on": [
+        3
+      ]
     },
     {
       "id": 6,
-      "name": "strategy_momentum_1m",
-      "title": "Estrategia: Momentum 1m",
-      "phase": "strategies",
-      "priority": 1,
-      "description": "Implementar estrategia de momentum en timeframe de 1 minuto: CALL/PUT en dirección de velas con cuerpo grande + cierre en tercio superior/inferior.",
+      "name": "strat_f_live_validation",
+      "title": "STRAT-F: validación demo en vivo",
+      "phase": "validation",
+      "priority": 6,
+      "description": "Validar STRAT-F en PRACTICE con Massaniello: sesion 60min, meta 5 entradas / 3 ITM o evidencia de reject-first correcto.",
       "acceptance": [
-        "Existe src/strat_momentum.py con la lógica de detección",
-        "Se integra con el sistema de scoring existente",
-        "Se respeta la gestión Massaniello (massaniello_risk.py)",
-        "Los tests cubren casos de momentum alcista, bajista y falso"
+        "Bot ejecutado solo STRAT-F (otras off) >=60 min en PRACTICE",
+        "Log documenta señales, rechazos y entradas STRAT-F",
+        "Resumen en progress/history.md"
       ],
-      "sdd": true,
       "status": "done",
-      "depends_on": [5]
+      "depends_on": [
+        4,
+        5
+      ]
     },
     {
       "id": 7,
-      "name": "strategy_reversal_swing",
-      "title": "Estrategia: Reversión en soporte/resistencia dinámica",
-      "phase": "strategies",
-      "priority": 2,
-      "description": "Implementar estrategia que opera reversiones en niveles swing calculados en tiempo real (soportes y resistencias dinámicas).",
-      "acceptance": [
-        "Existe src/strat_reversal_swing.py con detect_reversal_swing()",
-        "Detecta niveles swing en velas 1m con confirmación left/right",
-        "Entra CALL en toque de soporte con mecha + PUT en toque de resistencia",
-        "Tests cubren detección de niveles y señales válidas/inválidas",
-        "init.ps1 termina en verde"
-      ],
+      "title": "Reemplazo del dashboard por panel STRAT-F (aceptadas vs rechazadas con razón)",
+      "spec": "hub_strat_f_replacement",
+      "status": "done",
       "sdd": true,
-      "status": "done",
-      "depends_on": [5]
-    },
-    {
-      "id": 8,
-      "name": "strategy_order_block",
-      "title": "Estrategia: Order Block institucional",
-      "phase": "strategies",
-      "priority": 3,
-      "description": "Completar y activar la detección de Order Blocks. Extraer lógica parcial legacy a src/strat_order_block.py. Operar en dirección del OB.",
-      "acceptance": [
-        "Existe src/strat_order_block.py con lógica de detección",
-        "Detecta OB alcistas y bajistas con los criterios definidos",
-        "Entra CALL en OB alcista, PUT en OB bajista",
-        "OB se invalida si precio cruza completamente del lado opuesto",
-        "Tests cubren detección, mitigación e invalidación"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [5]
-    },
-    {
-      "id": 9,
-      "name": "backtesting_engine",
-      "title": "Motor de backtesting offline",
-      "phase": "intelligence",
-      "priority": 1,
-      "description": "Construir motor que reproduce trades históricos usando datos de trade_journal.db + velas guardadas para validar estrategias sin conexión al broker.",
-      "acceptance": [
-        "Existe src/backtester.py que carga datos históricos desde la BD",
-        "Simula señales de todas las estrategias activas sobre datos pasados",
-        "Genera reporte de rendimiento (win rate, profit, drawdown, sharpe)",
-        "Tests con datos sintéticos verifican resultados conocidos"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [6, 7, 8]
-    },
-    {
-      "id": 10,
-      "name": "dynamic_weight_calibration",
-      "title": "Calibración dinámica de pesos del scorer",
-      "phase": "intelligence",
-      "priority": 2,
-      "description": "Implementar sistema que ajusta automáticamente los pesos del entry_scorer según condiciones de mercado (volatilidad, hora, sesión, rendimiento reciente).",
-      "acceptance": [
-        "Existe src/weight_calibrator.py",
-        "Lee historial de trades de la BD para calcular pesos óptimos",
-        "Exporta pesos calibrados a un archivo JSON",
-        "El bot carga pesos calibrados al inicio",
-        "Tests con datos sintéticos verifican la calibración"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [9]
-    },
-    {
-      "id": 11,
-      "name": "massaniello_persistence",
-      "title": "Persistencia de estado Massaniello en SQLite",
-      "phase": "operations",
-      "priority": 1,
-      "description": "Guardar y recuperar el estado de la sesión Massaniello (wins, losses, ops, capital, session_start) en trade_journal.db para sobrevivir a reinicios del bot.",
-      "acceptance": [
-        "El estado Massaniello se guarda en trade_journal.db tras cada operación",
-        "Al iniciar, el bot recupera el último estado guardado",
-        "Si no hay estado previo, arranca con valores por defecto (5 ops / 3 ITM)",
-        "Tests cubren guardado, recuperación y corrupción de datos"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [16],
-      "supersedes": "martingale_persistence"
-    },
-    {
-      "id": 12,
-      "name": "hub_live_websocket",
-      "title": "Hub en vivo vía WebSocket",
-      "phase": "operations",
-      "priority": 2,
-      "description": "Reemplazar el hub basado en log-parser por un sistema en vivo: el bot emite eventos por WebSocket interno y el hub los consume en tiempo real.",
-      "acceptance": [
-        "Servidor FastAPI+WS inicia como tarea asyncio sin bloquear el bot",
-        "WebSocket emite state_update con HubState completo cada 0.8s",
-        "Dashboard HTML cyberpunk-coqueto se abre automáticamente en Edge",
-        "El bot notifica entradas, resultados y temporizadores al hub en vivo",
-        "Puerto auto-resuelve si 8080 está ocupado",
-        "135 tests pasan, init.ps1 verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [11]
-    },
-    {
-      "id": 13,
-      "name": "kelly_criterion_sizing",
-      "title": "Kelly Criterion como complemento de sizing",
-      "phase": "operations",
-      "priority": 3,
-      "description": "Complementar Massaniello con Kelly Criterion: ajustar el capital base de la sesión según win rate y payout históricos por activo/estrategia.",
-      "acceptance": [
-        "Existe src/kelly_sizer.py que calcula el porcentaje óptimo de Kelly",
-        "Usa datos históricos de la BD para estimar win rate por activo/estrategia",
-        "Aplica fracción de Kelly (por defecto 25%) para sizing conservador",
-        "No reemplaza Massaniello; actúa sobre el capital inicial de sesión",
-        "Tests cubren cálculo, límites y casos extremos"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [10]
-    },
-    {
-      "id": 14,
-      "name": "diversification_enforcer",
-      "title": "Diversificación forzada de activos",
-      "phase": "operations",
-      "priority": 4,
-      "description": "Implementar lógica que evite sobre-exposición a un solo activo: máximo N operaciones simultáneas, mínimo spread, rotación forzada.",
-      "acceptance": [
-        "Configurable: max_simultaneous_trades, min_asset_spread, max_entries_per_asset",
-        "El sistema rechaza entradas si exceden los límites",
-        "Logging claro de cada rechazo por diversificación",
-        "Tests cubren todos los límites"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [10]
-    },
-    {
-      "id": 15,
-      "name": "telegram_alerts",
-      "title": "Alertas por Telegram",
-      "phase": "operations",
-      "priority": 5,
-      "description": "Enviar notificaciones a Telegram para eventos críticos: sesión Massaniello cumplida, racha de pérdidas, conexión caída, stop-loss activado.",
-      "acceptance": [
-        "Existe src/alerter.py que envía mensajes vía Bot API de Telegram",
-        "Se configura con variables de entorno (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)",
-        "Eventos: sesion_cumplida, racha_perdidas, conexion_caida, stop_loss",
-        "Los tests usan mocks para no depender de Telegram real"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [10]
-    },
-    {
-      "id": 16,
-      "name": "massaniello_risk",
-      "title": "Gestión de riesgo Massaniello (reemplaza martingala)",
-      "phase": "foundation",
-      "priority": 3,
-      "description": "Reemplazar MartingaleCalculator por motor Massaniello: 5 operaciones por sesión de 1h, objetivo 3 ITM, solo demo PRACTICE.",
-      "acceptance": [
-        "Existen src/massaniello_engine.py y src/massaniello_risk.py",
-        "executor.py usa MassanielloRiskManager en lugar de MartingaleCalculator",
-        "Config: MASSANIELLO_OPERATIONS=5, MASSANIELLO_EXPECTED_WINS=3, SESSION_MAX_MIN=60",
-        "Sesión demo forzada a PRACTICE",
-        "Log de sesión cumplida cuando 3W en 5 ops",
-        "tests/test_massaniello_engine.py y tests/test_massaniello_risk.py pasan",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "supersedes": "martingale_calculator (runtime)"
-    },
-    {
-      "id": 17,
-      "name": "strat_a_evaluate",
-      "title": "STRAT-A: extraer evaluate_strat_a()",
-      "phase": "strat_a",
-      "priority": 1,
-      "track": "strat_a",
-      "description": "Extraer la lógica STRAT-A inline de scanner.py (~400 líneas) a evaluate_strat_a() en strat_a.py, siguiendo el patrón de evaluate_strat_b(). Sin I/O de red en strat_a.",
-      "acceptance": [
-        "Existe evaluate_strat_a() en src/strat_a.py con tipado StratAEvaluation",
-        "scanner.py delega a evaluate_strat_a(); rama STRAT-A ≤150 líneas de orquestación",
-        "Comportamiento idéntico: rebound, breakout, pending_reversals, H1 filter",
-        "tests/test_strat_a.py cubre evaluate_strat_a (mín. 8 casos)",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [1, 5]
-    },
-    {
-      "id": 18,
-      "name": "strat_a_test_suite",
-      "title": "STRAT-A: suite de tests completa",
-      "phase": "strat_a",
-      "priority": 2,
-      "track": "strat_a",
-      "description": "Ampliar cobertura STRAT-A: unitarios de evaluate_strat_a, patrones 1m, pending_reversals, E2E scanner→scorer, integración executor.",
-      "acceptance": [
-        "tests/test_strat_a.py ≥15 casos unitarios",
-        "tests/test_scanner_strat_a.py o equivalente con E2E mock (≥5 casos)",
-        "Cobertura: rebound ceiling/floor, breakout, zona joven, patrón blacklist, pending reversal",
-        "Trazabilidad R<n> en requirements.md ↔ test",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [17]
-    },
-    {
-      "id": 19,
-      "name": "strat_a_quality_filters",
-      "title": "STRAT-A: filtros de calidad reject-first",
-      "phase": "strat_a",
-      "priority": 3,
-      "track": "strat_a",
-      "description": "Endurecer filtros según PLAN MAESTRO: payout ≥87%, score ≥75, zona ≥30min rebotes, patrón 1m obligatorio en rebotes, bloqueo HTF contradictorio.",
-      "acceptance": [
-        "Config: STRAT_A_MIN_PAYOUT=87, STRAT_A_MIN_SCORE=75, STRAT_A_ZONE_MIN_AGE_REBOUND=30",
-        "Rebotes sin patrón 1m confirmado → rechazo con log explícito",
-        "Candidatos score <75 → no entran a select_best para STRAT-A",
-        "Payout <87% → activo excluido del scan STRAT-A",
-        "Tests verifican cada veto por separado",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [18]
-    },
-    {
-      "id": 20,
-      "name": "strat_a_htf_zone_wiring",
-      "title": "STRAT-A: cablear HTFScanner y zone_memory",
-      "phase": "strat_a",
-      "priority": 4,
-      "track": "strat_a",
-      "description": "Integrar htf_scanner.py (15m background) y zone_memory.py en el pipeline STRAT-A. Poblar candidate.zone_memory y usar tendencia 15m para bloqueo.",
-      "acceptance": [
-        "HTFScanner arranca como tarea asyncio en el bot",
-        "scanner usa htf.get_candles_15m(sym) sin fetch bloqueante por activo",
-        "candidate.zone_memory poblado vía query_nearby_zones",
-        "Entrada contra tendencia 15m → rechazo (0 entradas sin HTF alineado)",
-        "Tests con mocks de HTF y journal",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [19]
-    },
-    {
-      "id": 21,
-      "name": "strat_a_ob_prefetch",
-      "title": "STRAT-A: prefetch paralelo de Order Blocks",
-      "phase": "strat_a",
-      "priority": 5,
-      "track": "strat_a",
-      "description": "Mover fetch OB 3m al prefetch paralelo (parallel_fetch + candle_cache). evaluate_strat_a recibe blocks precalculados.",
-      "acceptance": [
-        "Velas OB 3m se prefetchan en paralelo con 5m/1m",
-        "Sin await fetch_candles OB dentro del bucle por activo en hot path",
-        "Cache OB por activo con TTL coherente con candle_cache",
-        "Tests verifican que blocks llegan a evaluate_strat_a",
-        "init.ps1 termina en verde"
-      ],
-      "sdd": true,
-      "status": "done",
-      "depends_on": [20]
-    },
-    {
-      "id": 22,
-      "name": "strat_a_live_validation",
-      "title": "STRAT-A: validación demo en vivo",
-      "phase": "strat_a",
-      "priority": 6,
-      "track": "strat_a",
-      "description": "Validar STRAT-A en demo PRACTICE con Massaniello: sesión 60min, meta 5 entradas / 3 ITM o evidencia de reject-first correcto.",
-      "acceptance": [
-        "Credenciales Quotex demo válidas en .env",
-        "Bot ejecutado solo STRAT-A (B/MOMENTUM off) ≥60 min",
-        "Log documenta señales, rechazos y entradas STRAT-A",
-        "Resumen en progress/history.md con métricas de sesión",
-        "Criterio: sesión Massaniello cumplida O ≥10 rechazos logged con razón válida"
-      ],
-      "sdd": false,
-      "status": "done",
-      "depends_on": [21]
+      "depends_on": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
     }
   ]
 }

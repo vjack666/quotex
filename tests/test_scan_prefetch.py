@@ -39,13 +39,18 @@ async def test_prefetch_primary_returns_both_timeframes(monkeypatch):
 
     async def fake_fetch(client, symbol, tf, count, timeout_sec, retries=2):
         calls.append((symbol, tf))
-        n = 20 if tf == 300 else 25
+        if tf == 300:
+            n = 20
+        elif tf == 900:
+            n = 30
+        else:
+            n = 25
         return [_candle(i * tf, 1.1) for i in range(n)]
 
     monkeypatch.setattr(scan_prefetch, "fetch_candles_with_retry", fake_fetch)
     monkeypatch.setattr(scan_prefetch, "SCAN_WS_INTER_ASSET_DELAY_SEC", 0)
 
-    candles_5m, candles_1m = await scan_prefetch.prefetch_primary_candles(
+    candles_5m, candles_1m, candles_15m = await scan_prefetch.prefetch_primary_candles(
         MagicMock(),
         ["A_otc", "B_otc"],
         None,
@@ -54,11 +59,13 @@ async def test_prefetch_primary_returns_both_timeframes(monkeypatch):
 
     assert set(candles_5m.keys()) == {"A_otc", "B_otc"}
     assert set(candles_1m.keys()) == {"A_otc", "B_otc"}
+    assert set(candles_15m.keys()) == {"A_otc", "B_otc"}
     assert len(candles_5m["A_otc"]) == 20
     assert len(candles_1m["B_otc"]) == 25
-    assert len(calls) == 4
+    assert len(candles_15m["A_otc"]) == 30
+    assert len(calls) == 6
     tfs = {tf for _, tf in calls}
-    assert tfs == {300, 60}
+    assert tfs == {300, 60, 900}
 
 
 def test_filter_scan_assets_excludes_blacklisted_greylist_trades():

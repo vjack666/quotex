@@ -374,3 +374,123 @@ Completadas las 9 features restantes del backlog global (fases 2–4) en una tan
 
 ### Próximo paso recomendado
 Validación live del sistema completo en PRACTICE, o planificar próxima fase de features.
+
+---
+
+## Sesión 2026-07-11 (tarde) — STRAT-F: calidad + validación (SDD strat_f_quality_validation)
+
+### Goal
+Cerrar STRAT-F sin preguntar: filtros de calidad (#4), reconocimiento en
+backtester (#5) y validación demo en vivo (#6). SDD en
+`specs/strat_f_quality_validation/`.
+
+### Hecho
+- **#4 Filtros de calidad** en `src/strat_fractal.py`:
+  - R2 payout mínimo (`STRAT_F_MIN_PAYOUT`), R3 edad mínima de zona
+    (`STRAT_F_ZONE_MIN_AGE=3` velas M5), R6 score mínimo (`STRAT_F_MIN_SCORE`).
+  - R1 alineación M15/M5 y R4 rechazo M1 ya existían; se conservan y loguean.
+  - Firma con kwargs `min_payout`/`min_score`/`zone_min_age` (fallback a config).
+  - Scanner pasa `payout` real a `evaluate_strat_f` (activa R2 en vivo).
+- **#5 Backtester** (`src/backtester.py`): rama `_reevaluate_strat_f`, STRAT-F
+  añadido a `origins` de `load_from_db` y reconocido en `reevaluate`. Reporte
+  diferenciado por origen (R7/R8).
+- **#6 Validación demo** vía `progress/diag_strat_f_live.py` (el bot completo lo
+  mata el host en prefetch secundario; el diag ligero completa EXIT=0).
+  Corrida `progress/diag_strat_f_filters.log`: 31 activos payout≥80%, los 6
+  filtros en acción — zona joven (AUDUSD/ETCUSD/EURAUD), CALL contra tendencia
+  (USCrude), M15 roto (EURJPY/CADJPY/GBPCAD), M1 no rechaza (varios). 1 señal
+  limpia: **USDPKR_otc CALL strength=70 payout=92%**.
+- **Libro** `boblioteca/formacion_velas/08_calidad_filtros.md` (R10): por qué
+  rechazar es ganar, los 6 filtros, no-una-sola-vela, Fase A como refuerzo.
+- **Tests**: +8 casos (4 filtros STRAT-F + 3 backtester STRAT-F + regresión
+  `_serialize_candles`). **pytest 267 passed**.
+
+### Discoveries
+- El fractal Bill Williams se busca en rango `[2, len-3]`; la edad de la zona =
+  `(len(candles_5m)-1) - fractal_idx`. Con 8 velas y fractal central en idx 4 la
+  edad es 3 (pasa el filtro por defecto).
+- `load_from_db` filtra por lista blanca de orígenes: cualquier estrategia nueva
+  debe añadirse ahí o el backtester la ignora silenciosamente.
+- El host sigue matando el bot completo en prefetch secundario; el diag ligero es
+  la vía fiable para validación en vivo.
+
+### Relevant Files
+- `src/strat_fractal.py`, `src/config.py`, `src/backtester.py`, `src/scanner.py`
+- `tests/test_strat_fractal.py`, `tests/test_backtester.py`
+- `boblioteca/formacion_velas/08_calidad_filtros.md`
+- `progress/diag_strat_f_filters.log`
+- `specs/strat_f_quality_validation/{requirements,design,tasks}.md`
+
+---
+
+## Sesión 2026-07-11 (noche) — Reemplazo del dashboard por panel STRAT-F
+
+### Goal
+Reemplazar el dashboard viejo (STRAT-A / Masaniello) por uno nuevo que
+muestre STRAT-F: aceptadas vs rechazadas con la razón de cada rechazo.
+Autorizado sin preguntar.
+
+### Instructions
+- El panel visible es STRAT-F; Masaniello sigue en el bot (additive).
+- No borrar `hub_models.py` (lección 340597f): convive con el panel nuevo.
+
+### Discoveries
+- `server.py` ya tenía FastAPI+WS; solo faltaba empujar `strat_f`.
+- Rich NO está en el venv -> render cae a texto plano (fallback OK).
+- El batch en `scanner.py` debe ser lista mutable `[[], [], 0]`, no tupla,
+  si no `_batch[2] += 1` rompe en runtime.
+
+### Accomplished
+- SDD: `specs/hub_strat_f_replacement/{requirements,design,tasks}.md`.
+- `hub/strat_f_state.py` modelo `StratFHubState`.
+- `hub/parser.py` reescrito a `StratFHubState`; `hub/render.py` Rich+plano.
+- `hub/strat_f_panel.py` `StratFPanel.record_strat_f`.
+- `hub/server.py` `_build_snapshot` incluye `strat_f` + `/api/strat_f`.
+- `hub/static/index.html` REESCRITO a panel STRAT-F (WS+fetch).
+- `scanner.py` acumula `_strat_f_batch` y empuja `record_strat_f`.
+- `main.py::_render_hub_once` usa panel/parser/render nuevo.
+- `tests/test_hub_strat_f.py` 6 tests. `boblioteca/.../09_dashboard_stratf.md`.
+- `feature_list.json` #7 done; `docs/ROADMAP.md` Fase 3.
+- **pytest 273 passed.**
+
+### Relevant Files
+- `hub/strat_f_state.py`, `hub/strat_f_panel.py`, `hub/parser.py`, `hub/render.py`
+- `hub/server.py`, `hub/static/index.html`, `hub/__init__.py`
+- `src/scanner.py`, `main.py`, `tests/test_hub_strat_f.py`
+
+---
+
+## Sesión 2026-07-11 (noche 2) — Caja negra STRAT-F: diario + calibración
+
+### Goal
+Cablear STRAT-F al trade_journal (diario/calibración), reporte filtrado por
+STRAT-F y launcher .bat que escanea en vivo y alimenta el diario.
+
+### Discoveries
+- `trade_journal.py` ya guardaba 1725 candidatos STRAT-A; STRAT-F NO se grababa.
+- `log_candidate` accedía a `entry.zone.ceiling` -> rompía con zone=None (rechazos
+  STRAT-F sin zona). Hecho tolerante con `getattr(z, 'ceiling', 0.0) or 0.0`.
+- `log_candidate` no tenía columna `strategy_origin`; la BD SÍ la tiene (la ignoro
+  antes). Ahora se escribe `getattr(entry, '_strategy_origin', 'STRAT-A')`.
+- El escaneo en vivo con `--journal` SÍ termina (proceso corto, no lo mata el host).
+
+### Accomplished
+- `trade_journal.py`: `log_candidate` tolerante a zone=None + graba `strategy_origin`.
+- `trade_journal.py`: `query_strat_f()` + `print_strat_f_report()` (win rate, % de
+  cada motivo de rechazo para calibrar umbrales) + CLI `python -m trade_journal --strat-f`.
+- `scanner.py`: `_strat_f_batch` ahora es `[[], []]` de dicts completos (con velas
+  M15/M5/M1 y zone); al final del ciclo graba cada decisión STRAT-F en el journal
+  vía `journal.log_candidate(..., strategy={...velas...})` (diario + replay).
+- `progress/diag_strat_f_live.py`: opción `--journal` graba el escaneo en vivo en
+  el diario (sin esperar al bot completo).
+- `run_strat_f_panel.bat`: escanea en vivo con `--journal` y abre el panel.
+- `tests/test_strat_f_journal.py`: 3 tests (aceptada, rechazada zona None, reporte).
+- **pytest 276 passed** (273 + 3 nuevos).
+- Verificación real end-to-end: diag --journal grabó 14 decisiones STRAT-F en
+  `trade_journal.db`; `python -m trade_journal --strat-f` muestra
+  Evaluados=14, Aceptadas=1, Rechazadas=13, y motivos (M1 no rebota 76.9%,
+  zona joven 15.4%, contra tendencia M15 7.7%) -> datos listos para calibrar.
+
+### Relevant Files
+- `src/trade_journal.py`, `src/scanner.py`, `progress/diag_strat_f_live.py`
+- `run_strat_f_panel.bat`, `tests/test_strat_f_journal.py`

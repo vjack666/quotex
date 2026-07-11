@@ -33,7 +33,7 @@ STRATEGY_MAP: dict[str, Any] = {
     "STRAT-MOMENTUM": detect_momentum_1m,
     "STRAT-REVERSAL-SWING": detect_reversal_swing,
     "STRAT-ORDER-BLOCK": detect_order_block_entry,
-    # STRAT-A and STRAT-B are handled separately (they need more params).
+    # STRAT-A is handled separately (needs more params).
 }
 
 
@@ -94,14 +94,14 @@ class Backtester:
             "STRAT-REVERSAL-SWING",
             "STRAT-ORDER-BLOCK",
             "STRAT-A",
-            "STRAT-B",
+            "STRAT-F",
         )
         rows = self.conn.execute(
-            """SELECT *
+            f"""SELECT *
                  FROM candidates
                 WHERE scanned_at >= ?
                   AND candles_json IS NOT NULL
-                  AND strategy_origin IN (?, ?, ?, ?, ?)
+                  AND strategy_origin IN ({", ".join("?" for _ in origins)})
                 ORDER BY scanned_at""",
             (since, *origins),
         ).fetchall()
@@ -157,8 +157,8 @@ class Backtester:
 
             if origin == "STRAT-A":
                 self._reevaluate_strat_a(c)
-            elif origin == "STRAT-B":
-                self._reevaluate_strat_b(c)
+            elif origin == "STRAT-F":
+                self._reevaluate_strat_f(c)
             elif origin in STRATEGY_MAP:
                 fn = STRATEGY_MAP[origin]
                 try:
@@ -174,6 +174,23 @@ class Backtester:
                     )
             else:
                 log.warning("Backtester: unknown strategy_origin '%s'", origin)
+
+    # ── STRAT-F: reconocido por origen para reporte diferenciado ──────────
+
+    def _reevaluate_strat_f(self, c: dict[str, Any]) -> None:
+        """Marca un candidato STRAT-F como re-evaluado.
+
+        STRAT-F necesita 3 temporalidades (15m/5m/1m) que no se guardan en el
+        journal, así que no se re-simula desde velas: se usa el outcome real ya
+        registrado en ``trade_journal.db`` (profit del trade) y se cuenta para
+        el reporte diferenciado por origen (R7/R8).
+        """
+        try:
+            strategy = json.loads(c["strategy_json"]) if c.get("strategy_json") else {}
+        except (json.JSONDecodeError, TypeError):
+            strategy = {}
+        c["reevaluated_signal"] = strategy.get("direction", "unknown")
+        c["reevaluated_strength"] = float(strategy.get("strength", 0.0))
 
     # ── STRAT-A: needs zone reconstruction from strategy_json ────────────
 
@@ -232,23 +249,6 @@ class Backtester:
         except Exception as exc:
             log.warning(
                 "STRAT-A candidate %d: evaluate_strat_a raised %s",
-                c["id"], exc,
-            )
-
-    # ── STRAT-B ─────────────────────────────────────────────────────────
-
-    def _reevaluate_strat_b(self, c: dict[str, Any]) -> None:
-        """Re-evaluate a STRAT-B candidate."""
-        from strat_b import evaluate_strat_b  # noqa: PLC0415
-
-        try:
-            result = evaluate_strat_b(c["candles"])
-            if result and result.get("signal"):
-                c["reevaluated_signal"] = result["direction"]
-                c["reevaluated_strength"] = float(result.get("confidence", 0.0))
-        except Exception as exc:
-            log.warning(
-                "STRAT-B candidate %d: evaluate_strat_b raised %s",
                 c["id"], exc,
             )
 

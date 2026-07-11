@@ -798,9 +798,6 @@ class TradeExecutor:
             "cycle_wins": self.bot.cycle_wins,
             "cycle_losses": self.bot.cycle_losses,
             "cycle_profit": self.bot.cycle_profit,
-            "strat_b_can_trade": STRAT_B_CAN_TRADE,
-            "strat_b_duration_sec": STRAT_B_DURATION_SEC,
-            "strat_b_min_confidence": STRAT_B_MIN_CONFIDENCE,
             "last_entry_asset": self.bot.last_entry_asset,
             "last_entry_asset_streak": self.bot.last_entry_asset_streak,
             "greylist_assets": sorted(self.greylist_assets),
@@ -895,17 +892,11 @@ class TradeExecutor:
             hub.close_active_trade()
 
         if outcome == "WIN":
-            if trade.strategy_origin == "STRAT-B":
-                self.bot.stats["strat_b_wins"] += 1
-            else:
-                self.bot.stats["strat_a_wins"] += 1
+            self.bot.stats["strat_a_wins"] += 1
             if trade.stage == "martin":
                 self.bot.stats["martin_wins"] += 1
         elif outcome == "LOSS":
-            if trade.strategy_origin == "STRAT-B":
-                self.bot.stats["strat_b_losses"] += 1
-            else:
-                self.bot.stats["strat_a_losses"] += 1
+            self.bot.stats["strat_a_losses"] += 1
             if trade.stage == "martin":
                 self.bot.stats["martin_losses"] += 1
 
@@ -1180,10 +1171,7 @@ class TradeExecutor:
                 _j._conn.commit()
 
         self.bot.stats["entries"] += 1
-        if strategy_origin == "STRAT-B":
-            self.bot.stats["strat_b_signals"] += 1
-        else:
-            self.bot.stats["strat_a_signals"] += 1
+        self.bot.stats["strat_a_signals"] += 1
 
         if oid:
             log.info("  ✓ Orden aceptada  id=%s  open=%.5f  ref=%s", oid, open_price, order_ref)

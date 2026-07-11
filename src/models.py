@@ -17,6 +17,7 @@ class Candle:
     high: float
     low: float
     close: float
+    ticks: int = 0  # número de ticks/operaciones que formaron la vela (Quotex lo envía; 0 si no disponible)
 
     @property
     def body(self) -> float:

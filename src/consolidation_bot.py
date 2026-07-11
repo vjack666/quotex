@@ -80,9 +80,8 @@ class ConsolidationBot:
         self.stats = {
             "scans": 0, "entries": 0, "martins": 0,
             "expired_zones": 0, "skipped": 0, "filtered_sensor": 0,
-            "strat_a_signals": 0, "strat_b_signals": 0,
+            "strat_a_signals": 0,
             "strat_a_wins": 0, "strat_a_losses": 0,
-            "strat_b_wins": 0, "strat_b_losses": 0,
             "score_rejected_age": 0,
             "score_rejected_score": 0,
             "rejected_young_zone": 0,
@@ -206,12 +205,11 @@ class ConsolidationBot:
         )
         log.info(
             "📊 STATS | Scans:%d  Entradas:%d  Martingalas:%d  "
-            "Zonas expiradas:%d  Sin señal:%d  Sensor filtradas:%d%s%s  [A]:%dW/%dL  [B]:%dW/%dL",
+            "Zonas expiradas:%d  Sin señal:%d  Sensor filtradas:%d%s%s  [A]:%dW/%dL",
             self.stats["scans"], self.stats["entries"], self.stats["martins"],
             self.stats["expired_zones"], self.stats["skipped"], self.stats["filtered_sensor"],
             risk_txt, cycle_txt,
             self.stats["strat_a_wins"], self.stats["strat_a_losses"],
-            self.stats["strat_b_wins"], self.stats["strat_b_losses"],
         )
         if RISK_MANAGER == "massaniello":
             ms = self.massaniello.session_status()
@@ -342,8 +340,8 @@ async def main(
                 hs = bot._hub_scanner
                 if hs is None:
                     continue
-                hs.state.live_wins = bot.stats["strat_a_wins"] + bot.stats["strat_b_wins"]
-                hs.state.live_losses = bot.stats["strat_a_losses"] + bot.stats["strat_b_losses"]
+                hs.state.live_wins = bot.stats["strat_a_wins"]
+                hs.state.live_losses = bot.stats["strat_a_losses"]
                 if bot.current_balance is not None:
                     hs.state.known_balance = bot.current_balance
                 hs.state.total_scans = bot.stats["scans"]
@@ -374,11 +372,10 @@ async def main(
 
                 hub = bot._hub_scanner
                 if hub is not None:
-                    strat_a_payload, strat_b_payload = _extract_candidates_for_hub(bot)
+                    strat_a_payload = _extract_candidates_for_hub(bot)
                     hub.record_scan_cycle(
                         total_assets=max(0, bot.stats.get("total_assets_scanned", 0)),
                         strat_a_candidates=strat_a_payload,
-                        strat_b_candidates=strat_b_payload,
                         balance=bot.current_balance,
                         cycle_id=bot.cycle_id,
                         cycle_ops=bot.cycle_ops,
@@ -475,14 +472,13 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _extract_candidates_for_hub(bot: Any) -> tuple[list[dict], list[dict]]:
+def _extract_candidates_for_hub(bot: Any) -> list[dict]:
     """Convierte last_scan_candidates del bot a payloads para el hub."""
     raw: list[CandidateEntry] | None = getattr(bot, "last_scan_candidates", None)
     if not raw:
-        return [], []
+        return []
 
     strat_a: list[dict] = []
-    strat_b: list[dict] = []
     for c in raw:
         payload = {
             "asset": c.asset,
@@ -496,14 +492,9 @@ def _extract_candidates_for_hub(bot: Any) -> tuple[list[dict], list[dict]]:
             "pattern_strength": getattr(c, "_reversal_strength", 0.0),
             "entry_mode": getattr(c, "_entry_mode", "none"),
         }
-        origin = getattr(c, "_strategy_origin", "STRAT-A")
-        if origin == "STRAT-B":
-            payload["confidence"] = c.score / 100.0
-            strat_b.append(payload)
-        else:
-            strat_a.append(payload)
+        strat_a.append(payload)
 
-    return strat_a, strat_b
+    return strat_a
 
 
 if __name__ == "__main__":

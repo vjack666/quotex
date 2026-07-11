@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 
 
 class StrategyName(str, Enum):
-    STRAT_B = "STRAT-B"
     BOB = "BOB"
 
 
@@ -43,7 +42,6 @@ class RouterSnapshot:
     generated_at: datetime
     total_signals: int
     routed_signals: int
-    strat_b: int
     bob: int
     setup: int
     retest: int

@@ -31,6 +31,7 @@ def raw_to_candle(raw: dict) -> Optional[Candle]:
             high=float(raw["high"]),
             low=float(raw["low"]),
             close=float(raw["close"]),
+            ticks=int(raw.get("ticks", 0) or 0),
         )
     except (KeyError, TypeError, ValueError):
         return None

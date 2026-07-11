@@ -18,7 +18,7 @@ def render_control_center(snapshot: RouterSnapshot) -> str:
                 "[CONTROL-CENTER] Quant Signal Router",
                 f"  UTC: {ts}",
                 f"  Signals: total={snapshot.total_signals} routed={snapshot.routed_signals}",
-                f"  Strategies: STRAT-B={snapshot.strat_b} BOB={snapshot.bob}",
+                f"  Strategies: BOB={snapshot.bob}",
                 f"  Market phase: SETUP={snapshot.setup} RETEST={snapshot.retest} CONFIRMED={snapshot.confirmed}",
                 f"  Top signal: {top}",
             ]

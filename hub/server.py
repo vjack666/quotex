@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .events import event_bus
 from .hub_models import HubState
+from .strat_f_panel import StratFPanel
 from .hub_scanner import HubScanner
 
 HERE = Path(__file__).resolve().parent
@@ -32,6 +33,7 @@ POLL_INTERVAL = float(os.environ.get("HUB_POLL_SEC", "0.8"))
 _PORT_RESOLVED: Optional[int] = None
 
 _scanner: Optional[HubScanner] = None
+_panel: Optional[StratFPanel] = None
 _bot_ref: Any = None
 _clients: set[WebSocket] = set()
 _server_task: Optional[asyncio.Task] = None
@@ -40,9 +42,11 @@ app = FastAPI(title="Quotex HUB", version="1.0.0", docs_url=None, redoc_url=None
 
 
 def init(scanner: HubScanner, bot: Any = None) -> None:
-    global _scanner, _bot_ref
+    global _scanner, _bot_ref, _panel
     _scanner = scanner
     _bot_ref = bot
+    if _panel is None:
+        _panel = StratFPanel()
 
 
 def _serialize(obj: Any) -> Any:
@@ -64,11 +68,16 @@ def _serialize(obj: Any) -> Any:
 
 def _build_snapshot() -> dict:
     if not _scanner:
-        return {"status": "waiting"}
-    state = _scanner.get_state()
-    raw = _serialize(state)
-    raw["status"] = "ok"
-    return raw
+        base = {"status": "waiting"}
+    else:
+        state = _scanner.get_state()
+        raw = _serialize(state)
+        raw["status"] = "ok"
+        base = raw
+    # Estado STRAT-F (panel nuevo, visible).
+    if _panel is not None:
+        base["strat_f"] = _serialize(_panel.get_state())
+    return base
 
 
 async def _broadcast(msg: str) -> None:
@@ -135,6 +144,13 @@ async def health():
 @app.get("/api/state")
 async def api_state():
     return _build_snapshot()
+
+
+@app.get("/api/strat_f")
+async def api_strat_f():
+    if _panel is None:
+        return {"status": "waiting"}
+    return _serialize(_panel.get_state())
 
 
 @app.websocket("/ws")

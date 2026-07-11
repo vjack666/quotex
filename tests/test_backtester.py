@@ -483,3 +483,57 @@ class TestNoBrokerIO:
         assert "pyquotex" not in mod_source
         assert "websocket" not in mod_source.lower()
         assert "quotex" not in mod_source.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Tests — STRAT-F recognition  (R7, R8)  SDD strat_f_quality_validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def db_strat_f(tmp_path: Path) -> Path:
+    """DB with a resolved STRAT-F trade for origin-recognition tests."""
+    _create_db(tmp_path / "stratf.db", [
+        {
+            "asset": "GBPUSD_otc", "direction": "call",
+            "outcome": "WIN", "profit": 0.91,
+            "strategy_origin": "STRAT-F",
+            "strategy_json": json.dumps({"direction": "call", "strength": 0.70}),
+        },
+        {
+            "asset": "BRLUSD_otc", "direction": "put",
+            "outcome": "LOSS", "profit": -1.0,
+            "strategy_origin": "STRAT-F",
+            "strategy_json": json.dumps({"direction": "put", "strength": 0.70}),
+        },
+    ])
+    return tmp_path / "stratf.db"
+
+
+class TestStratFRecognition:
+    def test_strat_f_in_strategy_map_or_branch(self):
+        """R7 — el backtester reconoce STRAT-F (rama dedicada)."""
+        from backtester import Backtester as _BT
+        assert hasattr(_BT, "_reevaluate_strat_f")
+
+    def test_reevaluate_strat_f_sets_signal_from_json(self, db_strat_f: Path):
+        """R7 — reevaluate procesa STRAT-F usando strategy_json."""
+        bt = Backtester(db_strat_f)
+        bt.load_from_db(days=365)
+        bt.reevaluate(strategies=["STRAT-F"])
+        sf = [c for c in bt.candidates if c["strategy_origin"] == "STRAT-F"]
+        assert len(sf) == 2
+        for c in sf:
+            assert c["reevaluated_signal"] in ("call", "put")
+            assert c["reevaluated_strength"] == 0.70
+
+    def test_strat_f_appears_in_report(self, db_strat_f: Path):
+        """R8 — el reporte incluye las metricas de las señales STRAT-F resueltas."""
+        bt = Backtester(db_strat_f)
+        bt.load_from_db(days=365)
+        bt.reevaluate()
+        report = bt.report()
+        # 1 WIN + 1 LOSS -> win rate 50%, total profit -0.09
+        assert "Win rate" in report
+        assert "50.00%" in report
+

@@ -250,12 +250,6 @@ from config import (
     SCAN_MAX_ASSETS_PER_CYCLE,
     SCAN_PROGRESS_EVERY,
     STRICT_PATTERN_CHECK,
-    STRAT_B_CAN_TRADE,
-    STRAT_B_DURATION_SEC,
-    STRAT_B_LOG_TOP_N,
-    STRAT_B_MIN_CONFIDENCE,
-    STRAT_B_MIN_CONFIDENCE_EARLY,
-    STRAT_B_PREVIEW_MIN_CONF,
     TF_5M,
     ZONE_AGE_BREAKOUT_MIN,
     ZONE_AGE_REBOUND_MIN,
@@ -282,7 +276,7 @@ from strat_a import (
     score_order_blocks,
     validate_rejection_candle,
 )
-from strat_b import evaluate_strat_b, find_strong_support_2m
+from strat_support import find_strong_support_2m
 from trade_journal import get_journal
 
 if TYPE_CHECKING:
@@ -361,17 +355,6 @@ scan_all = scan_all.replace(
                 if atr_pct > 0:
                     dynamic_touch_tolerance = _clamp(atr_pct * 0.12, 0.00015, 0.00080)""",
     "                dynamic_max_range, atr_pct, dynamic_touch_tolerance = compute_dynamic_range(candles)",
-)
-
-scan_all = re.sub(
-    r"spring_df = pd\.DataFrame\(\{[^}]+\}\)\s+strat_b_signal, strat_b_info = detect_spring_or_upthrust\([^)]+\)",
-    (
-        "strat_b_eval = evaluate_strat_b(candles_1m)\n"
-        "                strat_b_signal = bool(strat_b_eval and strat_b_eval.get('signal'))\n"
-        "                strat_b_info = strat_b_eval or {'confidence': 0.0, 'reason': 'Datos 1m insuficientes', 'signal_type': None, 'direction': None}"
-    ),
-    scan_all,
-    flags=re.DOTALL,
 )
 
 # ma_state helper inside scanner

@@ -18,6 +18,7 @@ from config import (
     ORDER_BLOCK_TF_SEC,
     SCAN_WS_INTER_ASSET_DELAY_SEC,
     TF_5M,
+    TF_15M,
 )
 from connection import fetch_candles_with_retry
 from models import Candle
@@ -36,6 +37,7 @@ class ScanCycleData:
     assets: list[tuple[str, int]]
     candles_5m: dict[str, list[Candle]] = field(default_factory=dict)
     candles_1m: dict[str, list[Candle]] = field(default_factory=dict)
+    candles_15m: dict[str, list[Candle]] = field(default_factory=dict)
     candles_ob: dict[str, list[Candle]] = field(default_factory=dict)
     candles_h1: dict[str, list[Candle]] = field(default_factory=dict)
     ob_tf_labels: dict[str, str] = field(default_factory=dict)
@@ -123,12 +125,12 @@ async def prefetch_primary_candles(
     symbols: list[str],
     cache: "CandleCache | None",
     concurrency: int,
-) -> tuple[dict[str, list[Candle]], dict[str, list[Candle]]]:
+) -> tuple[dict[str, list[Candle]], dict[str, list[Candle]], dict[str, list[Candle]]]:
     """
     Descarga velas 5m y 1m en un único asyncio.gather con semáforo compartido.
     """
     if not symbols:
-        return {}, {}
+        return {}, {}, {}
 
     sem = asyncio.Semaphore(max(1, int(concurrency)))
     tasks = []
@@ -155,16 +157,31 @@ async def prefetch_primary_candles(
                 cache=cache,
             )
         )
+        tasks.append(
+            _fetch_with_optional_stagger(
+                sem,
+                client,
+                sym,
+                TF_15M,
+                120,
+                timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
+                cache=cache,
+                retries=1,
+            )
+        )
 
     results = await asyncio.gather(*tasks)
     candles_5m: dict[str, list[Candle]] = {}
     candles_1m: dict[str, list[Candle]] = {}
+    candles_15m: dict[str, list[Candle]] = {}
     for sym, tf_sec, candles in results:
         if tf_sec == TF_5M:
             candles_5m[sym] = candles
+        elif tf_sec == TF_15M:
+            candles_15m[sym] = candles
         else:
             candles_1m[sym] = candles
-    return candles_5m, candles_1m
+    return candles_5m, candles_1m, candles_15m
 
 
 def _resolve_ob_candles(

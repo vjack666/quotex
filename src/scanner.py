@@ -46,15 +46,10 @@ from config import (
     STRAT_A_RADAR_ENABLED,
     STRAT_A_RADAR_MIN_READINESS,
     STRAT_A_ZONE_MIN_AGE_REBOUND,
-    STRAT_B_CAN_TRADE,
-    STRAT_B_DURATION_SEC,
     STRAT_MOMENTUM_ENABLED,
+    STRAT_F_ENABLED,
     STRAT_ORDER_BLOCK_ENABLED,
     STRAT_ORDER_BLOCK_MIN_STRENGTH,
-    STRAT_B_LOG_TOP_N,
-    STRAT_B_MIN_CONFIDENCE,
-    STRAT_B_MIN_CONFIDENCE_EARLY,
-    STRAT_B_PREVIEW_MIN_CONF,
     TF_1M,
     TF_5M,
     ZONE_AGE_BREAKOUT_MIN,
@@ -76,7 +71,7 @@ from scan_prefetch import (
 from loop_utils import sleep_with_inline_countdown
 from diversification_enforcer import DiversificationEnforcer
 from entry_scorer import CandidateEntry, explain_score, score_candidate, select_best
-from models import Candle, ConsolidationZone, PendingReversal
+from models import Candle, ConsolidationZone, PendingReversal, SignalMode
 from strat_a import (
     compute_dynamic_range,
     compute_ma_state,
@@ -97,8 +92,9 @@ from strat_a_radar import (
     rank_and_trim,
     should_watch,
 )
-from strat_b import evaluate_strat_b, find_strong_support_2m
+from strat_support import find_strong_support_2m
 from strat_momentum import detect_momentum_1m
+from strat_fractal import evaluate_strat_f
 from strat_order_block import detect_order_block_entry
 from strat_reversal_swing import detect_reversal_swing
 from trade_journal import get_journal
@@ -538,7 +534,7 @@ class AssetScanner:
             ev.ma_info,
         )
 
-    def _serialize_candles(candles: List[Candle]) -> list[dict[str, float | int]]:
+    def _serialize_candles(self, candles: List[Candle]) -> list[dict[str, float | int]]:
         return [
             {
                 "ts": int(c.ts),
@@ -951,9 +947,9 @@ class AssetScanner:
         symbols = [sym for sym, _ in assets]
         candle_cache = getattr(self.bot, "candle_cache", None)
 
-        self._phase_log("2/5", "Prefetch primario — 5m+1m paralelo")
+        self._phase_log("2/5", "Prefetch primario — 5m+1m+15m paralelo")
         fetch_t0 = time.monotonic()
-        candles_5m, candles_1m = await prefetch_primary_candles(
+        candles_5m, candles_1m, candles_15m = await prefetch_primary_candles(
             self.bot.client,
             symbols,
             candle_cache,
@@ -995,6 +991,7 @@ class AssetScanner:
             assets=assets,
             candles_5m=candles_5m,
             candles_1m=candles_1m,
+            candles_15m=candles_15m,
             candles_ob=candles_ob,
             candles_h1=candles_h1,
             ob_tf_labels=ob_tf_labels,
@@ -1005,25 +1002,21 @@ class AssetScanner:
         self,
         cycle: ScanCycleData,
     ) -> dict[str, Any]:
-        """FASE 3/5 — STRAT-B, MOMENTUM y STRAT-A sin I/O de red."""
-        self._phase_log("3/5", "Evaluación — STRAT-B/MOMENTUM/STRAT-A")
+        """FASE 3/5 — MOMENTUM y STRAT-A sin I/O de red."""
+        self._phase_log("3/5", "Evaluación — MOMENTUM/STRAT-A")
         if _runtime_config.STRAT_A_ONLY:
             log.info("[STRAT-A-ONLY] Modo activo — solo candidatos consolidación")
 
         candidates: list[CandidateEntry] = []
         cycle_ob_summary: dict[str, str] = {}
         cycle_ma_summary: dict[str, str] = {}
-        strat_b_total = 0
-        strat_b_insufficient = 0
-        strat_b_timeout = 0
-        strat_b_hits: list[tuple[str, int, float]] = []
-        strat_b_nearmiss: list[tuple[str, int, float, str]] = []
         candles_1m_collected: dict[str, list] = {}
         last_prices_collected: dict[str, float] = {}
         radar_entries_from_cycle: list[RadarWatchEntry] = []
 
         candles_5m_by_asset = cycle.candles_5m
         candles_1m_by_asset = cycle.candles_1m
+        candles_15m_by_asset = cycle.candles_15m
         assets = cycle.assets
 
         for idx, (sym, payout) in enumerate(assets, start=1):
@@ -1058,149 +1051,8 @@ class AssetScanner:
                 continue
 
             candles = candles_5m_by_asset.get(sym, [])
-            strat_b_total += 1
             candles_1m = candles_1m_by_asset.get(sym, [])
-            if len(candles_1m) < 20:
-                log.debug(
-                    "STRAT-B DEBUG: %s devolvió %d velas 1m (mínimo=20, timeout=%.0fs)",
-                    sym, len(candles_1m), CANDLE_FETCH_1M_TIMEOUT_SEC,
-                )
             candles_1m_collected[sym] = candles_1m
-            strat_b_signal = False
-            strat_b_info = {
-                "confidence": 0.0,
-                "reason": "Datos 1m insuficientes",
-                "signal_type": None,
-                "direction": None,
-            }
-            if len(candles_1m) >= 20:
-                strat_b_eval = evaluate_strat_b(candles_1m)
-                strat_b_signal = bool(strat_b_eval and strat_b_eval.get("signal"))
-                strat_b_info = strat_b_eval or {
-                    "confidence": 0.0,
-                    "reason": "Datos 1m insuficientes",
-                    "signal_type": None,
-                    "direction": None,
-                }
-            elif len(candles_1m) == 0:
-                strat_b_timeout += 1
-            else:
-                strat_b_insufficient += 1
-
-            strat_b_conf = float(strat_b_info.get("confidence", 0.0) or 0.0)
-            strat_b_signal_type = str(strat_b_info.get("signal_type") or "")
-            strat_b_direction = str(strat_b_info.get("direction") or "call")
-            strat_b_reason = str(
-                strat_b_info.get("reason", f"{strat_b_signal_type or 'Señal'} detectado")
-                or "Señal detectada"
-            )
-            is_early_wyckoff = strat_b_signal_type.startswith("wyckoff_early")
-            strat_b_required_conf = (
-                STRAT_B_MIN_CONFIDENCE_EARLY if is_early_wyckoff else STRAT_B_MIN_CONFIDENCE
-            )
-            if strat_b_signal:
-                self.bot.stats["strat_b_signals"] += 1
-                strat_b_hits.append((sym, payout, strat_b_conf, strat_b_direction, strat_b_signal_type))
-            else:
-                if strat_b_conf >= STRAT_B_PREVIEW_MIN_CONF:
-                    strat_b_nearmiss.append((sym, payout, strat_b_conf, strat_b_reason))
-
-            if (
-                not _runtime_config.STRAT_A_ONLY
-                and STRAT_B_CAN_TRADE
-                and strat_b_signal
-                and strat_b_conf >= strat_b_required_conf
-                and len(self.bot.trades) < MAX_CONCURRENT_TRADES
-            ):
-                # ── Diversification guard ─────────────────────────────
-                d_enforcer: DiversificationEnforcer | None = getattr(
-                    self.bot, "diversification_enforcer", None,
-                )
-                if d_enforcer is not None:
-                    d_ok, d_reason = d_enforcer.check(self.bot.trades, sym)
-                    if not d_ok:
-                        log.info(
-                            "⛔ [STRAT-B] %s: diversificación — %s", sym, d_reason,
-                        )
-                        self.bot.stats["rejected_diversification"] = (
-                            self.bot.stats.get("rejected_diversification", 0) + 1
-                        )
-                        continue
-
-                b_amount, _ = self.executor._compute_initial_amount(payout)
-                pseudo_zone = ConsolidationZone(
-                    asset=sym,
-                    ceiling=float(candles_1m[-1].high),
-                    floor=float(candles_1m[-1].low),
-                    bars_inside=0,
-                    detected_at=time.time(),
-                    range_pct=0.0,
-                )
-                if strat_b_signal_type == "upthrust":
-                    pattern_label = "Upthrust"
-                elif strat_b_signal_type == "spring":
-                    pattern_label = "Spring Sweep"
-                elif strat_b_signal_type == "wyckoff_early_upthrust":
-                    pattern_label = "Wyckoff Early M1+M2 (Upthrust)"
-                elif strat_b_signal_type == "wyckoff_early_spring":
-                    pattern_label = "Wyckoff Early M1+M2 (Spring)"
-                else:
-                    pattern_label = "Wyckoff"
-    
-                b_candidate = CandidateEntry(
-                    asset=sym,
-                    payout=payout,
-                    zone=pseudo_zone,
-                    direction=strat_b_direction,
-                    candles=candles_1m,
-                    score=round(strat_b_conf * 100.0, 1),
-                    score_breakdown={
-                        "compression": 0.0,
-                        "bounce": round(strat_b_conf * 35.0, 2),
-                        "trend": round(strat_b_conf * 25.0, 2),
-                        "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
-                    },
-                )
-                setattr(b_candidate, "_reversal_pattern", strat_b_signal_type or "none")
-                setattr(b_candidate, "_reversal_strength", strat_b_conf)
-    
-                b_strategy = self.executor._strategy_snapshot()
-                b_strategy.update(
-                    {
-                        "strategy_origin": "STRAT-B",
-                        "strat_b_signal_type": strat_b_signal_type,
-                        "strat_b_confidence": strat_b_conf,
-                        "strat_b_required_conf": strat_b_required_conf,
-                        "strat_b_reason": strat_b_reason,
-                    }
-                )
-    
-                b_outcome = "DRY_RUN" if self.bot.dry_run else "PENDING"
-                b_cid = get_journal().log_candidate(
-                    b_candidate,
-                    decision="ACCEPTED",
-                    amount=b_amount,
-                    stage="initial",
-                    outcome=b_outcome,
-                    strategy=b_strategy,
-                )
-    
-                await self.executor.enter_trade(
-                    sym,
-                    strat_b_direction,
-                    b_amount,
-                    pseudo_zone,
-                    f"{pattern_label} conf={strat_b_conf*100:.1f}% req={strat_b_required_conf*100:.1f}%",
-                    "initial",
-                    journal_cid=b_cid,
-                    signal_ts=candles_1m[-1].ts if candles_1m else None,
-                    strategy_origin="STRAT-B",
-                    duration_sec=STRAT_B_DURATION_SEC,
-                    payout=payout,
-                    score_original=round(strat_b_conf * 100.0, 1),
-                )
-                await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
-
             momentum_hit = (
                 detect_momentum_1m(candles_1m)
                 if not _runtime_config.STRAT_A_ONLY and _runtime_config.STRAT_MOMENTUM_ENABLED
@@ -1342,6 +1194,74 @@ class AssetScanner:
                     ob_high,
                 )
 
+            # ── STRAT-F (Fractal / Wyckoff, marco M15/M5/M1) ──
+            if (
+                not _runtime_config.STRAT_A_ONLY
+                and STRAT_F_ENABLED
+                and sym not in self.bot.trades
+            ):
+                candles_15m = candles_15m_by_asset.get(sym, [])
+                f_eval = evaluate_strat_f(candles_15m, candles, candles_1m, payout=payout)
+                _batch = getattr(self, "_strat_f_batch", None)
+                if _batch is None:
+                    _batch = [[], []]
+                    self._strat_f_batch = _batch
+                _rec = {
+                    "asset": sym,
+                    "payout": payout,
+                    "direction": f_eval.direction,
+                    "strength": round(f_eval.strength * 100.0, 1),
+                    "ctx": f_eval.m15_context,
+                    "event": f_eval.m5_event,
+                    "skip_reason": f_eval.skip_reason,
+                    "candles_5m": candles,
+                    "candles_1m": candles_1m,
+                    "candles_15m": candles_15m,
+                    "zone": f_eval.zone,
+                    "decision": None,
+                }
+                if f_eval.has_signal and f_eval.direction and f_eval.zone:
+                    f_amount, _ = self.executor._compute_initial_amount(payout)
+                    f_candidate = CandidateEntry(
+                        asset=sym,
+                        payout=payout,
+                        zone=f_eval.zone,
+                        direction=f_eval.direction,
+                        candles=candles_1m,
+                        score=round(f_eval.strength * 100.0, 1),
+                        mode=SignalMode.REBOUND,
+                        score_breakdown={
+                            "compression": 0.0,
+                            "fractal": round(f_eval.strength * 35.0, 2),
+                            "context": round(f_eval.strength * 25.0, 2),
+                            "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
+                        },
+                    )
+                    setattr(f_candidate, "_strategy_origin", "STRAT-F")
+                    setattr(f_candidate, "_reversal_pattern", f_eval.pattern_name)
+                    setattr(f_candidate, "_reversal_strength", f_eval.strength)
+                    setattr(f_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                    setattr(f_candidate, "_amount", f_amount)
+                    setattr(f_candidate, "_stage", "initial")
+                    score_candidate(f_candidate)
+                    candidates.append(f_candidate)
+                    self.bot.stats.setdefault("strat_f_signals", 0)
+                    self.bot.stats["strat_f_signals"] += 1
+                    _rec["decision"] = "ACCEPTED"
+                    _batch[0].append(_rec)
+                    log.info(
+                        "[STRAT-F] %s %s strength=%.2f ctx=%s event=%s",
+                        sym,
+                        f_eval.direction.upper(),
+                        f_eval.strength,
+                        f_eval.m15_context,
+                        f_eval.m5_event,
+                    )
+                elif f_eval.skip_reason:
+                    _rec["decision"] = "REJECTED_STRAT_F"
+                    _batch[1].append(_rec)
+                    log.info("[STRAT-F] %s skip: %s", sym, f_eval.skip_reason)
+
             if payout < STRAT_A_MIN_PAYOUT:
                 log.info(
                     "⛔ [STRAT-A] %s: payout=%d%% < %d%% — excluido del scan",
@@ -1458,62 +1378,6 @@ class AssetScanner:
             score_candidate(candidate)
             self._apply_score_adjustments(candidate, ev, ob_tf_label, sym)
             candidates.append(candidate)
-
-        log.info(
-            "[STRAT-B] Resumen ciclo: %d evaluados | señales=%d | "
-            "timeout_fetch=%d | datos_insuficientes=%d | sin_patrón=%d",
-            strat_b_total,
-            len(strat_b_hits),
-            strat_b_timeout,
-            strat_b_insufficient,
-            strat_b_total - len(strat_b_hits) - strat_b_timeout - strat_b_insufficient,
-        )
-        if strat_b_hits:
-            for sym, payout, conf, b_dir, b_type in sorted(strat_b_hits, key=lambda x: -x[2])[:STRAT_B_LOG_TOP_N]:
-                if b_type == "upthrust":
-                    pattern_label = "Upthrust"
-                elif b_type == "spring":
-                    pattern_label = "Spring Sweep"
-                elif b_type == "wyckoff_early_upthrust":
-                    pattern_label = "Wyckoff Early M1+M2 (Upthrust)"
-                elif b_type == "wyckoff_early_spring":
-                    pattern_label = "Wyckoff Early M1+M2 (Spring)"
-                else:
-                    pattern_label = "Wyckoff"
-                log.info(
-                    "[STRAT-B] ✅ %s [%d%%] %s | conf=%.1f | %s ✓",
-                    sym,
-                    payout,
-                    b_dir.upper(),
-                    conf * 100,
-                    pattern_label,
-                )
-                candles_2m = await fetch_candles_with_retry(
-                    self.bot.client,
-                    sym,
-                    120,
-                    90,
-                    timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
-                )
-                support_2m, touches = find_strong_support_2m(candles_2m)
-                if support_2m is not None:
-                    log.info(
-                        "[STRAT-B] 📍 %s soporte fuerte 2m=%.5f (toques=%d)",
-                        sym,
-                        support_2m,
-                        touches,
-                    )
-                else:
-                    log.info("[STRAT-B] 📍 %s sin soporte fuerte 2m detectable", sym)
-        elif strat_b_nearmiss:
-            for sym, payout, conf, reason in sorted(strat_b_nearmiss, key=lambda x: -x[2])[:STRAT_B_LOG_TOP_N]:
-                log.info(
-                    "[STRAT-B] ~ %s [%d%%] conf=%.1f | %s",
-                    sym,
-                    payout,
-                    conf * 100,
-                    reason,
-                )
 
         if radar_entries_from_cycle:
             self._update_radar_watchlist(radar_entries_from_cycle)
@@ -1658,6 +1522,94 @@ class AssetScanner:
 
         if not candidates and not self.bot.pending_reversals:
             return False
+
+        # Empujar el estado STRAT-F al HUB (panel nuevo) y al journal (diario).
+        _batch = getattr(self, "_strat_f_batch", None)
+        if _batch is not None:
+            try:
+                from hub.strat_f_state import StratFReject, StratFRow
+                from hub.strat_f_panel import StratFPanel
+                from trade_journal import get_journal as _get_journal
+
+                panel = getattr(self.bot, "_strat_f_panel", None)
+                if panel is None:
+                    panel = StratFPanel()
+                    self.bot._strat_f_panel = panel
+                acc = [
+                    StratFRow(
+                        asset=a["asset"], direction=a["direction"],
+                        strength=int(a["strength"]), payout=a["payout"],
+                        ctx=a.get("ctx", ""), event=a.get("event", ""),
+                    )
+                    for a in _batch[0]
+                ]
+                rej = [
+                    StratFReject(
+                        asset=r["asset"], payout=r["payout"],
+                        skip_reason=r["skip_reason"],
+                    )
+                    for r in _batch[1]
+                ]
+                total_assets = len(_batch[0]) + len(_batch[1])
+                panel.record_strat_f(
+                    accepted=acc, rejected=rej, total_assets=total_assets
+                )
+
+                # Diario + calibración: grabar cada decisión STRAT-F en la BD.
+                journal = _get_journal()
+                for rec in _batch[0] + _batch[1]:
+                    try:
+                        _entry = CandidateEntry(
+                            asset=rec["asset"],
+                            payout=rec["payout"],
+                            zone=rec.get("zone"),
+                            direction=rec.get("direction") or "call",
+                            candles=rec.get("candles_1m") or [],
+                            score=rec.get("strength", 0.0),
+                            mode=SignalMode.REBOUND,
+                            score_breakdown={
+                                "compression": 0.0,
+                                "fractal": rec.get("strength", 0.0) * 0.35,
+                                "context": rec.get("strength", 0.0) * 0.25,
+                                "payout": min(20.0, (rec.get("payout", 0) / 95.0) * 20.0),
+                            },
+                        )
+                        setattr(_entry, "_strategy_origin", "STRAT-F")
+                        setattr(_entry, "_reversal_pattern", "fractal_wyckoff")
+                        setattr(_entry, "_reversal_strength", rec.get("strength", 0.0) / 100.0)
+                        setattr(_entry, "_stage", "initial")
+                        journal.log_candidate(
+                            _entry,
+                            decision=rec["decision"],
+                            reject_reason=rec.get("skip_reason", "") or "",
+                            amount=getattr(self, "_last_f_amount", 0.0),
+                            strategy={
+                                "m15_context": rec.get("ctx", ""),
+                                "m5_event": rec.get("event", ""),
+                                "strength": rec.get("strength", 0.0),
+                                "candles_15m": [
+                                    {"ts": c.ts, "open": c.open, "high": c.high,
+                                     "low": c.low, "close": c.close}
+                                    for c in (rec.get("candles_15m") or [])[-20:]
+                                ],
+                                "candles_5m": [
+                                    {"ts": c.ts, "open": c.open, "high": c.high,
+                                     "low": c.low, "close": c.close}
+                                    for c in (rec.get("candles_5m") or [])[-20:]
+                                ],
+                                "candles_1m": [
+                                    {"ts": c.ts, "open": c.open, "high": c.high,
+                                     "low": c.low, "close": c.close}
+                                    for c in (rec.get("candles_1m") or [])[-20:]
+                                ],
+                            },
+                        )
+                    except Exception as _j_err:
+                        log.warning("[JOURNAL] STRAT-F no grabado (%s): %s", rec["asset"], _j_err)
+            except Exception as _hub_err:
+                log.warning("[HUB] No se pudo registrar STRAT-F: %s", _hub_err)
+            finally:
+                self._strat_f_batch = None
 
         eval_result = {
             "candidates": candidates,
