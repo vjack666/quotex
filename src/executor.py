@@ -55,6 +55,7 @@ from config import (
     SCAN_INTERVAL_SEC,
     COOLDOWN_BETWEEN_ENTRIES,
     VOLUME_MULTIPLIER,
+    VOLUME_LOOKBACK,
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets, place_order

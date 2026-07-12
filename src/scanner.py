@@ -1143,11 +1143,10 @@ class AssetScanner:
                 self.bot.stats.setdefault("strat_reversal_swing_signals", 0)
                 self.bot.stats["strat_reversal_swing_signals"] += 1
                 log.info(
-                    "[STRAT-MOMENTUM] %s %s strength=%.2f score=%.1f",
+                    "[STRAT-REVERSAL-SWING] %s %s strength=%.2f",
                     sym,
-                    mom_dir.upper(),
-                    mom_strength,
-                    mom_candidate.score,
+                    swing_dir.upper(),
+                    swing_strength,
                 )
 
             # ── Order Block (post-momentum, pre-STRAT-A) ──
