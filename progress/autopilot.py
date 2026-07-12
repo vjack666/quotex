@@ -71,13 +71,13 @@ def _save_state(s: dict) -> None:
 
 def _launch_main() -> subprocess.Popen:
     ts = datetime.now().strftime("%H%M%S")
-    log_path = ROOT / "progress" / f"run_main_{ts}.log"
+    log_path = ROOT / "progress" / f"run_trader_{ts}.log"
     f = open(log_path, "w", buffering=1)
-    # --once: un solo ciclo y salir (sin loop de WebSocket) -> sobrevive al
-    # host-kill del sandbox y opera 1 trade por ciclo. Reconcilia PENDING al
-    # relanzar, registrando WIN/LOSS en la DB.
+    # trader_short.py: ciclo COMPACTO (evalua ~10 activos, coloca 1 orden y
+    # SALE en <90s) -> sobrevive al host-kill del sandbox y opera de verdad.
+    # Al relanzar reconcilia la PENDING anterior (WIN/LOSS en la DB).
     p = subprocess.Popen(
-        [str(ROOT / ".venv" / "Scripts" / "python.exe"), "main.py", "--once"],
+        [str(ROOT / ".venv" / "Scripts" / "python.exe"), "progress/trader_short.py"],
         cwd=str(ROOT),
         stdout=f,
         stderr=subprocess.STDOUT,

@@ -246,10 +246,10 @@ async def place_order(
     try:
         status, info = await asyncio.wait_for(
             client.buy(amount=amount, asset=asset, direction=direction, duration=duration),
-            timeout=30.0,
+            timeout=120.0,
         )
     except asyncio.TimeoutError:
-        return False, "", 0.0, 0, "buy_timeout_30s"
+        return False, "", 0.0, 0, "buy_timeout_120s"
     except Exception as exc:
         first_reason = f"buy_exception:{exc}"
         if not looks_like_connection_issue(first_reason):
