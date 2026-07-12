@@ -34,6 +34,12 @@ MASSANIELLO_OPERATIONS = 5
 MASSANIELLO_EXPECTED_WINS = 3
 SESSION_MAX_MIN = 60
 RISK_MANAGER = "massaniello"
+# Saldo virtual de referencia para la calculadora Massaniello. Si > 0, el bot
+# IGNORA el saldo real de la cuenta para dimensionar los stakes y usa este
+# capital fijo, reiniciandolo a este valor al terminar cada secuencia 5/3.
+# Pensado para DEMO: la progresion Massaniello se calcula sobre $30 aunque la
+# cuenta tenga $1. En REAL debe ponerse en 0.0 para usar el saldo real.
+MASSANIELLO_VIRTUAL_CAPITAL = 30.0
 
 USE_DYNAMIC_ATR_RANGE = True
 ATR_PERIOD = 14

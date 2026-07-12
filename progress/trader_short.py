@@ -32,7 +32,7 @@ load_dotenv(ROOT / ".env")
 from config import (  # type: ignore
     MIN_PAYOUT, TF_5M, TF_15M, STRAT_F_MIN_SCORE, STRAT_F_MIN_PAYOUT,
     DURATION_SEC, MASSANIELLO_OPERATIONS, MASSANIELLO_EXPECTED_WINS,
-    SESSION_MAX_MIN,
+    MASSANIELLO_VIRTUAL_CAPITAL, SESSION_MAX_MIN,
 )
 from connection import (  # type: ignore
     connect_with_retry, fetch_candles_with_retry, get_open_assets, place_order,
@@ -142,11 +142,15 @@ async def main() -> None:
     # 1) reconciliar PENDING previas
     await _reconcile(client, journal)
 
-    # balance para Massaniello
-    try:
-        balance = float(await client.get_balance())
-    except Exception:
-        balance = 100.0
+    # balance para Massaniello (demo: usa saldo virtual fijo si esta activo)
+    vcap = float(MASSANIELLO_VIRTUAL_CAPITAL or 0.0)
+    if vcap > 0:
+        balance = vcap
+    else:
+        try:
+            balance = float(await client.get_balance())
+        except Exception:
+            balance = 100.0
 
     # 2) evaluar activos (pool grande filtrado, rotando la ventana cada
     #    ~45s para cubrir todo el mercado sin alargar un ciclo).

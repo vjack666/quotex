@@ -57,6 +57,7 @@ from config import (
     VOLUME_MULTIPLIER,
     VOLUME_LOOKBACK,
     ZONE_MIN_AGE_MIN,
+    MASSANIELLO_VIRTUAL_CAPITAL,
 )
 from connection import fetch_candles_with_retry, get_open_assets, place_order
 from entry_sync import EntrySynchronizer
@@ -106,16 +107,41 @@ class TradeExecutor:
             return
         blocked, reason = self._massaniello_session_blocks_entry()
         if blocked:
-            self.bot.session_stop_hit = True
-            log.info("🛑 Sesión Massaniello finalizada — %s", reason)
+            if self._massaniello_virtual() is not None:
+                # Demo: reinicia la secuencia en $30 y sigue operando (loop 5/3).
+                self._reset_massaniello_virtual()
+                log.info("🛑 Sesión Massaniello finalizada — %s (reiniciada en virtual)", reason)
+            else:
+                self.bot.session_stop_hit = True
+                log.info("🛑 Sesión Massaniello finalizada — %s", reason)
+
+    def _massaniello_virtual(self) -> Optional[float]:
+        """Capital virtual de referencia para Massaniello (demo). None si desactivado."""
+        v = float(MASSANIELLO_VIRTUAL_CAPITAL or 0.0)
+        return v if v > 0 else None
 
     def set_session_start_balance(self, balance: float) -> None:
+        vcap = self._massaniello_virtual()
+        if vcap is not None:
+            balance = vcap  # demo: usa saldo virtual fijo, ignora el real
         self.bot.session_start_balance = float(balance)
         self.bot.current_balance = float(balance)
         self.bot.massaniello.set_balance(float(balance))
         self._sync_massaniello_session_start()
         if self.bot.cycle_start_balance is None:
             self.bot.cycle_start_balance = float(balance)
+
+    def _reset_massaniello_virtual(self) -> None:
+        """Al terminar la secuencia 5/3 (demo), reinicia el capital virtual en
+        MASSANIELLO_VIRTUAL_CAPITAL y limpia el flag de paro para seguir operando."""
+        vcap = self._massaniello_virtual()
+        if vcap is None:
+            return
+        from massaniello_risk import MassanielloRiskManager
+        self.bot.massaniello = MassanielloRiskManager()
+        self.set_session_start_balance(vcap)
+        self.bot.session_stop_hit = False
+        log.info("🔄 Secuencia Massaniello reiniciada en $%.2f (virtual)", vcap)
 
     @staticmethod
     def _round_up_to_cents(value: float) -> float:
@@ -125,7 +151,11 @@ class TradeExecutor:
         Calcula monto de entrada usando MassanielloRiskManager.
         Retorna (monto, ganancia_esperada).
         """
-        if self.bot.current_balance is not None:
+        vcap = self._massaniello_virtual()
+        if vcap is not None:
+            self.bot.massaniello.set_balance(vcap)
+            self._sync_massaniello_session_start()
+        elif self.bot.current_balance is not None:
             self.bot.massaniello.set_balance(self.bot.current_balance)
             self._sync_massaniello_session_start()
 
@@ -612,6 +642,14 @@ class TradeExecutor:
     async def refresh_balance_and_risk(self) -> bool:
         """Actualiza balance y aplica stop-loss de sesión."""
         if self.bot.dry_run:
+            return False
+        vcap = self._massaniello_virtual()
+        if vcap is not None:
+            # Demo: usa saldo virtual fijo; NO aplica el saldo real de la cuenta
+            # al riesgo (la calculadora Massaniello trabaja sobre $30).
+            self.bot.current_balance = vcap
+            self.bot.massaniello.set_balance(vcap)
+            self._sync_massaniello_session_start()
             return False
         try:
             bal = float(await self.client.get_balance())
