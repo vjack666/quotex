@@ -301,7 +301,7 @@ def score_candidate(
         strength = float(getattr(entry, "_reversal_strength", 0.0) or 0.0)
         s_base = strength * 80.0
         s_payout = float(entry.score_breakdown.get("payout", 0.0))
-        age_adj = _age_adjustment(entry.zone)
+        age_adj = _age_adjustment(entry.zone) if entry.zone is not None else 0.0
         total = s_base + s_payout + age_adj
         entry.score = round(total, 1)
         entry.score_breakdown = {
