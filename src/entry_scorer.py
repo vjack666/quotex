@@ -289,7 +289,27 @@ def score_candidate(
     El score se almacena en `entry.score` y el desglose en `entry.score_breakdown`.
     """
     effective_mode = mode if mode is not None else entry.mode
-    entry.mode = effective_mode  # asegurar consistencia
+    entry.mode = effective_mode
+
+    # ── STRAT-F (Fractal / Wyckoff) ────────────────────────────────────────
+    # El evaluador ya asignó strength (0.55-1.0) y un score_breakdown con
+    # {fractal, context, payout}. NO recalculamos con los componentes de
+    # STRAT-A (compresión/rebote/tendencia) porque la zona STRAT-F es una
+    # banda de un solo precio (range_pct=0) y las velas son M1 — daría ~19.
+    # El score refleja la fuerza real de la señal fractal/Wyckoff.
+    if getattr(entry, "_strategy_origin", None) == "STRAT-F":
+        strength = float(getattr(entry, "_reversal_strength", 0.0) or 0.0)
+        s_base = strength * 80.0
+        s_payout = float(entry.score_breakdown.get("payout", 0.0))
+        age_adj = _age_adjustment(entry.zone)
+        total = s_base + s_payout + age_adj
+        entry.score = round(total, 1)
+        entry.score_breakdown = {
+            "strength_score": round(s_base, 1),
+            "payout": round(s_payout, 1),
+            "age_adjustment": round(age_adj, 1),
+        }
+        return entry.score
 
     if effective_mode == SignalMode.BREAKOUT:
         w = WEIGHTS_BREAKOUT

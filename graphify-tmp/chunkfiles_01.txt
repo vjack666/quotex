@@ -1,0 +1,20 @@
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\fase 2\FASE 2 — CHECKLIST OPERATIVO PARA COPILOT.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\EDGE_REAL.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\ESTADO_REAL_SISTEMA.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\FILTROS_CRITICOS.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\HALLAZGOS_OPERATIVOS.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\INDICE.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\MATRIZ_DE_CALIDAD.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\METRICAS_REALES.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\PLAN_MAESTRO.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\PLAN_MASANIELLO.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\QUANT_ENGINE_ARQUITECTURA.md
+C:\Users\v_jac\Desktop\QUOTEX\Documentos\files\ROADMAP_TECNICO.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\CHANGELOG.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\CONTEXT.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\DECISIONS.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\HANDOFF.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\PROJECT_STATE.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\SESSION_PROTOCOL.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\START.md
+C:\Users\v_jac\Desktop\QUOTEX\agent\TASKS.md

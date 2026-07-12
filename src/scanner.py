@@ -43,6 +43,7 @@ from config import (
 
     STRAT_A_MIN_PAYOUT,
     STRAT_A_MIN_SCORE,
+    STRAT_F_MIN_SCORE,
     STRAT_A_RADAR_ENABLED,
     STRAT_A_RADAR_MIN_READINESS,
     STRAT_A_ZONE_MIN_AGE_REBOUND,
@@ -136,8 +137,11 @@ class AssetScanner:
         candidate: CandidateEntry,
         session_threshold: int,
     ) -> int:
-        if getattr(candidate, "_strategy_origin", "STRAT-A") == "STRAT-A":
+        origin = getattr(candidate, "_strategy_origin", "STRAT-A")
+        if origin == "STRAT-A":
             return STRAT_A_MIN_SCORE
+        if origin == "STRAT-F":
+            return STRAT_F_MIN_SCORE
         return session_threshold
 
     @staticmethod

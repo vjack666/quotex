@@ -95,7 +95,7 @@ def _m15_context(candles_15m: List[Candle]) -> str:
     return "range"
 
 
-def _m1_rejects_band(candles_1m: List[Candle], band: float, direction: str, tolerance_pct: float = 0.0010) -> bool:
+def _m1_rejects_band(candles_1m: List[Candle], band: float, direction: str, tolerance_pct: float = 0.0015) -> bool:
     """M1 (menor) rechaza la banda: la mecha toca la banda pero el cierre NO queda fuera.
 
     Para CALL (banda = suelo): la vela debe tocar cerca del suelo (mecha inferior)
