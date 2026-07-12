@@ -642,6 +642,11 @@ class AssetScanner:
             except Exception:
                 pass
             log.warning("⚠ %s: no se pudo guardar follow-up 1m (%s)", asset, exc)
+    def _on_background_task_done(self, task: asyncio.Task[Any]) -> None:
+        # Callback de tareas en segundo plano (follow-up capture): limpia el
+        # set del bot para no acumular referencias muertas.
+        self.bot._followup_capture_tasks.discard(task)
+
     def _schedule_followup_capture(self, asset: str, capture_file: Path) -> None:
         task = asyncio.create_task(
             self._capture_followup_after_delay(asset, capture_file),
