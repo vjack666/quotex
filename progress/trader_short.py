@@ -148,12 +148,20 @@ async def main() -> None:
     except Exception:
         balance = 100.0
 
-    # 2) evaluar activos
+    # 2) evaluar activos (pool grande filtrado, rotando la ventana cada
+    #    ~45s para cubrir todo el mercado sin alargar un ciclo).
     assets = await get_open_assets(client, min_payout=MIN_PAYOUT)
-    assets = [a for a in assets if a[1] >= STRAT_F_MIN_PAYOUT][:N_ASSETS]
-    print(f"[trader] {len(assets)} activos evaluados (payout>={STRAT_F_MIN_PAYOUT}%)")
+    pool = [a for a in assets if a[1] >= STRAT_F_MIN_PAYOUT]
+    if not pool:
+        print("[trader] sin activos con payout suficiente")
+        await client.close()
+        return
+    offset = int(time.time() // 45) % max(1, len(pool) - N_ASSETS + 1)
+    window = pool[offset:offset + N_ASSETS]
+    print(f"[trader] {len(window)} activos evaluados (payout>={STRAT_F_MIN_PAYOUT}%, "
+          f"ventana {offset+1}-{offset+len(window)}/{len(pool)})")
     sem = asyncio.Semaphore(CONCURRENCY)
-    results = await asyncio.gather(*[_eval_one(client, s, p, sem) for s, p in assets])
+    results = await asyncio.gather(*[_eval_one(client, s, p, sem) for s, p in window])
     signals = [r for r in results if r is not None]
     if not signals:
         print("[trader] sin senales STRAT-F esta ronda")

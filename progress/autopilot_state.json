@@ -2,8 +2,8 @@
   "wins": 0,
   "losses": 0,
   "total": 0,
-  "relaunches": 29,
+  "relaunches": 41,
   "objective_met": false,
-  "last_check": "2026-07-12T01:43:55.944888+00:00",
-  "log": "sin trades cerrados tras 25 relanzamientos \u2014 revisar calibracion"
+  "last_check": "2026-07-12T01:50:36.917691+00:00",
+  "log": "sin trades cerrados tras 40 relanzamientos \u2014 revisar calibracion"
 }
