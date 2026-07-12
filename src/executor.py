@@ -57,6 +57,18 @@ from config import (
     VOLUME_MULTIPLIER,
     VOLUME_LOOKBACK,
     ZONE_MIN_AGE_MIN,
+    ZONE_AGE_REBOUND_MIN,
+    ZONE_AGE_BREAKOUT_MIN,
+    ALIGN_SCAN_TO_CANDLE,
+    SCAN_LEAD_SEC,
+    STRICT_PATTERN_CHECK,
+    BROKER_TZ_LABEL,
+    USE_DYNAMIC_ATR_RANGE,
+    ATR_PERIOD,
+    ATR_RANGE_FACTOR,
+    MIN_DYNAMIC_RANGE_PCT,
+    MAX_DYNAMIC_RANGE_PCT,
+    H1_CONFIRM_ENABLED,
     MASSANIELLO_VIRTUAL_CAPITAL,
 )
 from connection import fetch_candles_with_retry, get_open_assets, place_order
@@ -837,7 +849,7 @@ class TradeExecutor:
             "cycle_profit": self.bot.cycle_profit,
             "last_entry_asset": self.bot.last_entry_asset,
             "last_entry_asset_streak": self.bot.last_entry_asset_streak,
-            "greylist_assets": sorted(self.greylist_assets),
+            "greylist_assets": sorted(self.bot.greylist_assets),
         }
     async def _sync_to_next_candle_open(self, signal_ts: Optional[int] = None) -> EntryTimingInfo:
         """Delega sincronización y validación de timing al EntrySynchronizer."""
@@ -1159,7 +1171,8 @@ class TradeExecutor:
         if not ok:
             log.error("  ✗ Fallo al colocar orden en %s | reason=%s", sym, reject_reason)
             # Marcar activo para skip durante 2 ciclos consecutivos.
-            self.failed_assets[sym] = 2
+            # failed_assets vive en el bot (consolidation_bot.py:114), no en el executor.
+            self.bot.failed_assets[sym] = 2
             # Marcar en el journal que la orden fue rechazada por el broker
             if journal_cid:
                 _j = get_journal()

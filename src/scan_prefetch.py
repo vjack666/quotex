@@ -125,14 +125,19 @@ async def prefetch_primary_candles(
     symbols: list[str],
     cache: "CandleCache | None",
     concurrency: int,
+    ws_sem: "asyncio.Semaphore | None" = None,
 ) -> tuple[dict[str, list[Candle]], dict[str, list[Candle]], dict[str, list[Candle]]]:
     """
     Descarga velas 5m y 1m en un único asyncio.gather con semáforo compartido.
+
+    Si `ws_sem` se pasa, lo usa como semáforo de acceso al WebSocket COMPARTIDO
+    con el HTF scanner (evita que ambos consumidores saturen el socket a la vez).
+    Si no, crea uno nuevo con `concurrency` (retrocompatible).
     """
     if not symbols:
         return {}, {}, {}
 
-    sem = asyncio.Semaphore(max(1, int(concurrency)))
+    sem = ws_sem if ws_sem is not None else asyncio.Semaphore(max(1, int(concurrency)))
     tasks = []
     for sym in symbols:
         tasks.append(
@@ -200,6 +205,7 @@ async def prefetch_strat_a_secondary(
     candles_5m_fallback: dict[str, list[Candle]],
     cache: "CandleCache | None",
     concurrency: int,
+    ws_sem: "asyncio.Semaphore | None" = None,
 ) -> tuple[
     dict[str, list[Candle]],
     dict[str, list[Candle]],
@@ -215,7 +221,7 @@ async def prefetch_strat_a_secondary(
 
     from strat_a import detect_order_blocks
 
-    sem = asyncio.Semaphore(max(1, int(concurrency)))
+    sem = ws_sem if ws_sem is not None else asyncio.Semaphore(max(1, int(concurrency)))
     tasks = []
     for sym in symbols:
         tasks.append(

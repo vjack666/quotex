@@ -61,6 +61,7 @@ class HTFScanner:
         min_payout: int = 85,
         on_asset_refresh: Optional[Callable[[str, int, int, float, float, float], None]] = None,
         ttl_sec: float = HTF_CACHE_TTL_SEC,
+        ws_sem: "asyncio.Semaphore | None" = None,
     ) -> None:
         self._client    = client
         self._assets_fn = assets_fn
@@ -75,8 +76,10 @@ class HTFScanner:
         # Biblioteca dinámica de activos de calidad ("libros").
         self._library = QualityAssetLibrary(min_payout=self._min_payout)
 
-        # semáforo propio — no comparte con el scan loop 5m
-        self._sem = asyncio.Semaphore(2)
+        # Semáforo de acceso al WebSocket. Si se inyecta `ws_sem`, se COMPARTE
+        # con el scan loop (evita que HTF y prefetch saturen el socket a la vez).
+        # Si no, crea uno propio (retrocompatible).
+        self._sem = ws_sem if ws_sem is not None else asyncio.Semaphore(2)
 
     # ── API pública ────────────────────────────────────────────────────────
 

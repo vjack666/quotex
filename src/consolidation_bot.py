@@ -131,12 +131,10 @@ class ConsolidationBot:
 
         self.candle_cache = CandleCache()
         self.connection_mgr = ConnectionManager(client)
-        self.htf_scanner = HTFScanner(
-            client,
-            assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT),
-            min_payout=STRAT_A_MIN_PAYOUT,
-            on_asset_refresh=self._on_htf_asset_refresh,
-        )
+        # Semáforo COMPARTIDO del WebSocket: lo usan el prefetch del scan loop y
+        # el HTF en background, para no saturar el único socket de Quotex a la vez.
+        self._ws_sem = asyncio.Semaphore(CANDLE_FETCH_CONCURRENCY)
+        self.htf_scanner = HTFScanner(client, assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT), min_payout=STRAT_A_MIN_PAYOUT, on_asset_refresh=self._on_htf_asset_refresh, ws_sem=self._ws_sem)
         self._htf_task: asyncio.Task[Any] | None = None
         self._hub_scanner: Any = None
         self.executor = TradeExecutor(client, self)

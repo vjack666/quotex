@@ -73,3 +73,32 @@ class HubScanner:
     @property
     def last_state(self) -> StratFHubState:
         return self.state
+
+    # ── Stubs de compatibilidad (API vieja del HUB) ───────────────
+    # El HUB rediseñado se alimenta en vivo desde el bot vía
+    # server._enrich_with_bot (lee bot.trades, Massaniello, balance), por lo que
+    # estos eventos ya no actualizan estado propio. Se mantienen como NO-OP para
+    # no romper el executor/bot que todavía los llaman. Si se quiere telemetría
+    # fina, redirigir aquí al StratFPanel o al recorder.
+    def record_entry(self, *, strategy: str = "", asset: str = "", direction: str = "",
+                     duration_sec: int = 0, entry_price: float | None = None) -> None:
+        log.debug("[HUB] record_entry stub: %s %s %s @%s", strategy, asset, direction, entry_price)
+
+    def update_active_trade_timer(self, secs_left: float, price: float) -> None:
+        log.debug("[HUB] update_active_trade_timer stub: %.1fs @%.5f", secs_left, price)
+
+    def close_active_trade(self) -> None:
+        log.debug("[HUB] close_active_trade stub")
+
+    def record_trade_result(self, *, asset: str = "", outcome: str = "", profit: float = 0.0) -> None:
+        log.debug("[HUB] record_trade_result stub: %s %s %.2f", asset, outcome, profit)
+
+    def update_htf_status(self, *, asset: str = "", payout: int = 0, candles: int = 0,
+                          library_size: int = 0, cache_age_sec: float = 0.0,
+                          cache_ttl_sec: float = 0.0, refreshed_at_ts: float = 0.0) -> None:
+        log.debug("[HUB] update_htf_status stub: %s lib=%d", asset, library_size)
+
+    def record_scan_cycle(self, *, total_assets: int = 0, strat_a_candidates: Any = None,
+                          balance: float | None = None, cycle_id: int = 0, cycle_ops: int = 0,
+                          cycle_wins: int = 0, cycle_losses: int = 0, **kwargs: Any) -> None:
+        log.debug("[HUB] record_scan_cycle stub: cycle=%d assets=%d", cycle_id, total_assets)

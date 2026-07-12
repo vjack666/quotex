@@ -4,105 +4,435 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>QUOTEX HUB — STRAT-F</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;510;590&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; }
-  body { background:#0d1117; color:#e6edf3; font-family: ui-monospace, Menlo, Consolas, monospace; margin:0; padding:1.2rem; }
-  h1 { font-size:1.1rem; color:#58a6ff; margin:0 0 .4rem; letter-spacing:.5px; }
-  .sub { color:#8b949e; font-size:.8rem; margin-bottom:1rem; }
-  .stats { display:flex; gap:1.2rem; margin-bottom:1rem; }
-  .stat { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:.6rem 1rem; min-width:120px; }
-  .stat .num { font-size:1.5rem; font-weight:700; }
-  .stat .lbl { font-size:.7rem; color:#8b949e; text-transform:uppercase; letter-spacing:.5px; }
-  .green .num { color:#3fb950; }
-  .red .num { color:#f85149; }
-  .bar { height:8px; border-radius:4px; background:#21262d; overflow:hidden; margin-top:.3rem; }
-  .bar > i { display:block; height:100%; background:#3fb950; }
-  .bar.rej > i { background:#f85149; }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-  .panel { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:.8rem; }
-  .panel h2 { font-size:.85rem; margin:0 0 .5rem; }
-  .panel.ok h2 { color:#3fb950; }
-  .panel.bad h2 { color:#f85149; }
-  table { width:100%; border-collapse:collapse; font-size:.82rem; }
-  td { padding:.25rem .4rem; border-bottom:1px solid #21262d; }
-  .asset { color:#58a6ff; }
-  .dir-call { color:#3fb950; }
-  .dir-put { color:#f85149; }
-  .reason { color:#f0883e; }
-  .empty { color:#8b949e; font-style:italic; }
-  .principle { margin-top:1rem; color:#8b949e; font-size:.78rem; border-top:1px solid #30363d; padding-top:.6rem; }
+  :root {
+    color-scheme: dark;
+    --bg:        #08090a;
+    --panel:     #0f1011;
+    --surface:   rgba(255,255,255,0.02);
+    --surface-2: rgba(255,255,255,0.04);
+    --surface-3: rgba(255,255,255,0.05);
+    --border:    rgba(255,255,255,0.08);
+    --border-2:  rgba(255,255,255,0.05);
+    --text:      #f7f8f8;
+    --silver:    #d0d6e0;
+    --muted:     #8a8f98;
+    --faint:     #62666d;
+    --accent:    #5e6ad2;
+    --accent-2:  #7170ff;
+    --green:     #27a644;
+    --emerald:   #10b981;
+    --red:       #f85149;
+    --orange:    #f0883e;
+    --radius:    8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'cv01', 'ss03';
+    font-weight: 400;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: 20px 24px 48px;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* Header */
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding-bottom:16px; margin-bottom:20px;
+    border-bottom:1px solid var(--border-2);
+  }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo {
+    width:30px; height:30px; border-radius:7px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display:flex; align-items:center; justify-content:center;
+    font-weight:590; font-size:14px; color:#fff;
+  }
+  .brand h1 {
+    font-size:16px; font-weight:590; letter-spacing:-0.24px; margin:0;
+    color: var(--text);
+  }
+  .brand .tag { font-size:11px; color: var(--faint); font-weight:400; letter-spacing:.3px; }
+  .conn {
+    display:flex; align-items:center; gap:8px; font-size:12px; color: var(--muted);
+  }
+  .dot { width:8px; height:8px; border-radius:50%; background: var(--faint); transition: background .3s; }
+  .dot.live { background: var(--emerald); box-shadow: 0 0 8px var(--emerald); }
+  .dot.down { background: var(--red); }
+
+  /* Grid */
+  .grid {
+    display:grid; gap:16px;
+    grid-template-columns: repeat(12, 1fr);
+    max-width: 1280px; margin: 0 auto;
+  }
+  .card {
+    background: var(--surface);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    padding:16px 18px;
+  }
+  .card h2 {
+    font-size:13px; font-weight:590; letter-spacing:-0.13px;
+    color: var(--silver); margin:0 0 14px;
+    display:flex; align-items:center; justify-content:space-between;
+    text-transform: none;
+  }
+  .card h2 .sub2 { font-size:11px; color: var(--faint); font-weight:400; }
+
+  .col-3 { grid-column: span 3; }
+  .col-4 { grid-column: span 4; }
+  .col-5 { grid-column: span 5; }
+  .col-6 { grid-column: span 6; }
+  .col-7 { grid-column: span 7; }
+  .col-8 { grid-column: span 8; }
+  .col-12 { grid-column: span 12; }
+
+  /* KPI big number */
+  .kpi .val { font-size:30px; font-weight:510; letter-spacing:-0.6px; color: var(--text); line-height:1; }
+  .kpi .val.accent { color: var(--accent-2); }
+  .kpi .lbl { font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-top:8px; }
+  .kpi .delta { font-size:12px; margin-top:6px; }
+  .up { color: var(--green); } .down { color: var(--red); }
+
+  /* active trade highlight */
+  .trade-card { border-color: rgba(113,112,255,.35); background: linear-gradient(180deg, rgba(94,106,210,.10), var(--surface)); }
+  .trade-pair {
+    display:flex; align-items:baseline; gap:10px; margin-bottom:12px;
+  }
+  .trade-pair .asset { font-size:20px; font-weight:590; letter-spacing:-0.4px; }
+  .pill {
+    font-size:11px; font-weight:510; padding:2px 9px; border-radius:9999px;
+    border:1px solid var(--border); color: var(--silver);
+  }
+  .pill.call { color: var(--emerald); border-color: rgba(16,185,129,.4); background: rgba(16,185,129,.08); }
+  .pill.put  { color: var(--red);     border-color: rgba(248,81,73,.4);  background: rgba(248,81,73,.08); }
+  .timer { font-family:'JetBrains Mono', monospace; font-size:13px; color: var(--muted); margin-left:auto; }
+
+  .rows { display:flex; flex-direction:column; gap:9px; }
+  .row { display:flex; align-items:center; justify-content:space-between; font-size:13px; }
+  .row .k { color: var(--muted); }
+  .row .v { color: var(--text); font-family:'JetBrains Mono', monospace; font-weight:500; }
+
+  /* sequence W/L */
+  .seq { display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
+  .chip { width:20px; height:20px; border-radius:5px; display:flex; align-items:center; justify-content:center;
+          font-size:11px; font-weight:590; font-family:'JetBrains Mono', monospace; }
+  .chip.w { background: rgba(16,185,129,.15); color: var(--emerald); }
+  .chip.l { background: rgba(248,81,73,.15); color: var(--red); }
+
+  /* safety */
+  .safety { font-size:11px; font-weight:590; padding:2px 9px; border-radius:9999px; letter-spacing:.4px; }
+  .safety.OK { color: var(--emerald); background: rgba(16,185,129,.10); }
+  .safety.RIESGO { color: var(--orange); background: rgba(240,136,62,.12); }
+  .safety.LIMITE, .safety.ERROR { color: var(--red); background: rgba(248,81,73,.12); }
+
+  /* tables */
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  thead th {
+    text-align:left; font-weight:510; color: var(--faint); font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.5px; padding:0 8px 8px; border-bottom:1px solid var(--border-2);
+  }
+  tbody td { padding:7px 8px; border-bottom:1px solid var(--border-2); color: var(--silver); }
+  tbody tr:last-child td { border-bottom:none; }
+  .asset { color: var(--accent-2); font-weight:510; font-family:'JetBrains Mono', monospace; }
+  .d-call { color: var(--emerald); font-weight:590; }
+  .d-put  { color: var(--red); font-weight:590; }
+  .reason { color: var(--orange); }
+  .score { font-family:'JetBrains Mono', monospace; color: var(--text); }
+  .empty { color: var(--faint); font-style:italic; padding:14px 8px; }
+  .barwrap { height:6px; border-radius:3px; background: var(--surface-3); overflow:hidden; margin-top:10px; }
+  .barwrap > i { display:block; height:100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .4s; }
+  .barwrap.rej > i { background: linear-gradient(90deg, var(--orange), var(--red)); }
+
+  .principle {
+    margin-top:18px; color: var(--faint); font-size:12px; text-align:center;
+    border-top:1px solid var(--border-2); padding-top:14px; max-width:1280px; margin-left:auto; margin-right:auto;
+  }
+  .footnote { text-align:center; color: var(--faint); font-size:11px; margin-top:6px; }
+
+  @media (max-width: 1024px){
+    .col-3,.col-4,.col-5,.col-6,.col-7,.col-8 { grid-column: span 6; }
+  }
+  @media (max-width: 640px){
+    body { padding:14px; }
+    .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-12 { grid-column: span 12; }
+  }
 </style>
 </head>
 <body>
-  <h1>QUOTEX HUB — STRAT-F QUALITY</h1>
-  <div class="sub">El bot como portero: prefiere NO operar a entrar mal. Aceptadas vs rechazadas con razón.</div>
 
-  <div class="stats">
-    <div class="stat"><div class="num" id="total">–</div><div class="lbl">Activos</div></div>
-    <div class="stat green"><div class="num" id="accepted">–</div><div class="lbl">Aceptadas</div><div class="bar" id="bar-acc"><i style="width:0%"></i></div></div>
-    <div class="stat red"><div class="num" id="rejected">–</div><div class="lbl">Rechazadas</div><div class="bar rej" id="bar-rej"><i style="width:0%"></i></div></div>
-  </div>
-
-  <div class="cols">
-    <div class="panel ok">
-      <h2>✅ ACEPTADAS</h2>
-      <table><tbody id="acc-body"><tr><td class="empty">esperando…</td></tr></tbody></table>
-    </div>
-    <div class="panel bad">
-      <h2>❌ RECHAZADAS (y por qué)</h2>
-      <table><tbody id="rej-body"><tr><td class="empty">esperando…</td></tr></tbody></table>
+<header>
+  <div class="brand">
+    <div class="logo">Q</div>
+    <div>
+      <h1>QUOTEX HUB</h1>
+      <div class="tag">STRAT-F · Wyckoff + Fractal · cuenta DEMO/PRACTICE</div>
     </div>
   </div>
+  <div class="conn">
+    <span class="dot" id="conn-dot"></span>
+    <span id="conn-txt">conectando…</span>
+  </div>
+</header>
 
-  <div class="principle">Principio: nunca evaluar una señal en una sola vela. El mercado deja rastro; el filtro lo hace explícito.</div>
+<div class="grid">
+
+  <!-- BALANCE -->
+  <div class="card col-3 kpi">
+    <h2>Balance</h2>
+    <div class="val accent" id="balance">–</div>
+    <div class="lbl">USD · PRACTICE</div>
+    <div class="delta" id="balance-delta"></div>
+  </div>
+
+  <!-- OPERACIÓN ACTUAL -->
+  <div class="card col-5 trade-card" id="trade-card">
+    <h2>Operación en curso <span class="sub2" id="trade-sub">sin posición</span></h2>
+    <div class="trade-pair">
+      <span class="asset" id="t-asset">–</span>
+      <span class="pill" id="t-dir">–</span>
+      <span class="timer" id="t-timer"></span>
+    </div>
+    <div class="rows">
+      <div class="row"><span class="k">Entrada</span><span class="v" id="t-entry">–</span></div>
+      <div class="row"><span class="k">Precio actual</span><span class="v" id="t-cur">–</span></div>
+      <div class="row"><span class="k">Variación</span><span class="v" id="t-delta">–</span></div>
+      <div class="row"><span class="k">Monto / Payout</span><span class="v" id="t-amt">–</span></div>
+    </div>
+  </div>
+
+  <!-- ÚLTIMO RESULTADO -->
+  <div class="card col-4 kpi">
+    <h2>Última operación</h2>
+    <div class="val" id="last-outcome">–</div>
+    <div class="lbl" id="last-asset">sin datos</div>
+    <div class="delta" id="last-profit"></div>
+  </div>
+
+  <!-- MASSANIELLO -->
+  <div class="card col-7">
+    <h2>Gestión Masaniello <span class="safety OK" id="m-safety">OK</span></h2>
+    <div class="rows">
+      <div class="row"><span class="k">Ciclo #</span><span class="v" id="m-cycle">–</span></div>
+      <div class="row"><span class="k">Secuencia (W/L)</span><span class="v"><span class="seq" id="m-seq"></span></span></div>
+      <div class="row"><span class="k">P&L acumulado</span><span class="v" id="m-pnl">–</span></div>
+      <div class="row"><span class="k">Win rate</span><span class="v" id="m-wr">–</span></div>
+      <div class="row"><span class="k">Ops ciclo (aciertos/fallos)</span><span class="v" id="m-ops">–</span></div>
+      <div class="row"><span class="k">Próximo monto</span><span class="v" id="m-next">–</span></div>
+    </div>
+  </div>
+
+  <!-- ACTIVIDAD -->
+  <div class="card col-5">
+    <h2>Actividad del bot</h2>
+    <div class="rows">
+      <div class="row"><span class="k">Scans completados</span><span class="v" id="a-scans">–</span></div>
+      <div class="row"><span class="k">Aciertos en vivo</span><span class="v up" id="a-wins">–</span></div>
+      <div class="row"><span class="k">Fallos en vivo</span><span class="v down" id="a-losses">–</span></div>
+      <div class="row"><span class="k">Activos evaluados (último scan)</span><span class="v" id="a-assets">–</span></div>
+    </div>
+  </div>
+
+  <!-- ACEPTADAS -->
+  <div class="card col-6">
+    <h2>✅ Señales aceptadas <span class="sub2" id="acc-count">0</span></h2>
+    <table>
+      <thead><tr><th>Activo</th><th>Dir</th><th>Score</th><th>Payout</th><th>Contexto</th></tr></thead>
+      <tbody id="acc-body"><tr><td class="empty" colspan="5">esperando señales…</td></tr></tbody>
+    </table>
+    <div class="barwrap"><i id="bar-acc" style="width:0%"></i></div>
+  </div>
+
+  <!-- RECHAZADAS -->
+  <div class="card col-6">
+    <h2>❌ Rechazadas (y por qué) <span class="sub2" id="rej-count">0</span></h2>
+    <table>
+      <thead><tr><th>Activo</th><th>Motivo</th></tr></thead>
+      <tbody id="rej-body"><tr><td class="empty" colspan="2">ninguna rechazada</td></tr></tbody>
+    </table>
+    <div class="barwrap rej"><i id="bar-rej" style="width:0%"></i></div>
+  </div>
+
+</div>
+
+<div class="principle">
+  Principio del bot: nunca evaluar una señal en una sola vela. El mercado deja rastro; el filtro lo hace explícito.
+  <div class="footnote">STRAT-F opera solo velas CERRADAS · zona mínima 30 min · edad y contexto M15 validados</div>
+</div>
 
 <script>
-const shorten = {
+const SF = {
   "M1 no rechaza la banda (cierra fuera)": "M1 no rebota (cierre fuera)",
   "M15 rango roto: no operar rebotes": "Rango M15 roto",
-  "zona muy joven": "Zona muy joven",
+  "zona muy joven": "Zona muy joven (<3 velas)",
+  "zona demasiado joven": "Zona <30 min (muy joven)",
   "CALL contra tendencia M15": "CALL vs tendencia M15",
   "PUT contra tendencia M15": "PUT vs tendencia M15",
   "payout insuficiente": "Payout < mínimo",
   "score insuficiente": "Score < mínimo",
+  "✗ contradice": "Contradice dirección",
 };
-function reasonLabel(r){ for(const k in shorten){ if(r.startsWith(k)) return shorten[k]; } return r.slice(0,40); }
+function reasonLabel(r){
+  if(!r) return "—";
+  for(const k in SF){ if(r.startsWith(k)) return SF[k]; }
+  return r.slice(0,42);
+}
+function dirPill(d){
+  d = (d||"").toLowerCase();
+  if(d==="call") return '<span class="pill call">CALL</span>';
+  if(d==="put")  return '<span class="pill put">PUT</span>';
+  return '<span class="pill">–</span>';
+}
+function setText(id, v){ const e=document.getElementById(id); if(e) e.textContent = (v===null||v===undefined||v==="")?"–":v; }
 
+let lastBalance = null;
 function render(s){
   if(!s) return;
-  const total = (s.accepted?.length||0) + (s.rejected?.length||0);
-  const acc = s.accepted?.length||0, rej = s.rejected?.length||0;
-  document.getElementById('total').textContent = s.total_assets || total;
-  document.getElementById('accepted').textContent = acc;
-  document.getElementById('rejected').textContent = rej;
-  const pct = total ? Math.round(acc/total*100) : 0;
-  document.querySelector('#bar-acc > i').style.width = pct + '%';
-  document.querySelector('#bar-rej > i').style.width = (100-pct) + '%';
+  // Prioriza señales a nivel raíz del snapshot (lo que empuja el server en
+  // producción: scanner.get_state() => accepted/rejected). strat_f es fallback
+  // legacy. Evita elegir strat_f vacío cuando la raíz tiene datos.
+  const sf = (s.accepted || s.rejected) ? s : (s.strat_f || {});
 
-  const ab = document.getElementById('acc-body'); ab.innerHTML = '';
-  if(acc===0){ ab.innerHTML = '<tr><td class="empty">ninguna pasó los filtros</td></tr>'; }
-  else s.accepted.forEach(c=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML = `<td class="asset">${c.asset}</td>`+
-      `<td class="${c.direction==='call'?'dir-call':'dir-put'}">${c.direction.toUpperCase()}</td>`+
-      `<td>f=${c.strength}</td><td>${c.payout}%</td>`;
-    ab.appendChild(tr);
+  // ---- Balance ----
+  const bal = s.known_balance;
+  if(typeof bal === "number"){
+    setText("balance", bal.toFixed(2));
+    if(lastBalance!==null && bal!==lastBalance){
+      const d = bal - lastBalance;
+      const el = document.getElementById("balance-delta");
+      el.textContent = (d>=0?"▲ +":"▼ ") + d.toFixed(2);
+      el.className = "delta " + (d>=0?"up":"down");
+    }
+    lastBalance = bal;
+  }
+
+  // ---- Operación activa ----
+  const at = s.active_trade_asset;
+  if(at){
+    setText("t-asset", at);
+    document.getElementById("trade-sub").textContent = "en vivo";
+    const dirTd = document.getElementById("t-dir");
+    dirTd.outerHTML = (s.active_trade_direction||"").toLowerCase()==="call"
+      ? '<span class="pill call" id="t-dir">CALL</span>'
+      : '<span class="pill put" id="t-dir">PUT</span>';
+    setText("t-entry", s.active_trade_entry_price!=null ? (+s.active_trade_entry_price).toFixed(5) : "–");
+    setText("t-cur",   s.active_trade_current_price!=null ? (+s.active_trade_current_price).toFixed(5) : "–");
+    const dp = s.active_trade_delta_pct;
+    const de = document.getElementById("t-delta");
+    if(typeof dp === "number"){ de.textContent = (dp>=0?"+":"")+dp.toFixed(2)+"%"; de.className="v "+(dp>=0?"up":"down"); }
+    else { de.textContent="–"; de.className="v"; }
+    const rem = s.active_trade_time_remaining_sec;
+    document.getElementById("t-timer").textContent = (typeof rem==="number") ? Math.max(0,Math.round(rem))+"s" : "";
+  } else {
+    setText("t-asset","–");
+    document.getElementById("trade-sub").textContent = "sin posición";
+  }
+
+  // ---- Último resultado ----
+  const lo = s.last_trade_outcome;
+  const loEl = document.getElementById("last-outcome");
+  if(lo){
+    loEl.textContent = lo;
+    loEl.className = "val " + (lo==="WIN"?"up":(lo==="LOSS"?"down":""));
+    setText("last-asset", s.last_trade_asset || "");
+    const lp = s.last_trade_profit;
+    const lpe = document.getElementById("last-profit");
+    if(typeof lp === "number"){ lpe.textContent=(lp>=0?"+":"")+lp.toFixed(2)+" USD"; lpe.className="delta "+(lp>=0?"up":"down"); }
+  } else { loEl.textContent="–"; loEl.className="val"; }
+
+  // ---- Massaniello ----
+  const m = s.masaniello || {};
+  setText("m-cycle", m.cycle_num);
+  const seqEl = document.getElementById("m-seq"); seqEl.innerHTML="";
+  (m.sequence||"").split("").forEach(ch=>{
+    const c=document.createElement("span"); c.className="chip "+(ch==="W"?"w":"l"); c.textContent=ch; seqEl.appendChild(c);
+  });
+  const pnl = m.total_pnl;
+  const pe = document.getElementById("m-pnl");
+  if(typeof pnl==="number"){ pe.textContent=(pnl>=0?"+":"")+pnl.toFixed(2); pe.className="v "+(pnl>=0?"up":"down"); }
+  setText("m-wr", (typeof m.win_rate_pct==="number")? m.win_rate_pct.toFixed(0)+"%" : "–");
+  setText("m-ops", (m.wins_in_cycle!=null||m.losses_in_cycle!=null)? `${m.wins_in_cycle||0} / ${m.losses_in_cycle||0}` : "–");
+  setText("m-next", (typeof m.next_amount==="number" && m.next_amount>0)? m.next_amount.toFixed(2) : "–");
+  const saf = document.getElementById("m-safety");
+  const sv = m.safety_status || "OK";
+  saf.textContent = sv; saf.className = "safety " + sv;
+
+  // ---- Actividad ----
+  setText("a-scans", s.total_scans);
+  setText("a-wins", s.live_wins);
+  setText("a-losses", s.live_losses);
+  setText("a-assets", s.total_assets_scanned || sf.total_assets);
+
+  // ---- STRAT-F aceptadas ----
+  const acc = sf.accepted || [];
+  const accB = document.getElementById("acc-body"); accB.innerHTML="";
+  document.getElementById("acc-count").textContent = acc.length;
+  if(acc.length===0){ accB.innerHTML='<tr><td class="empty" colspan="5">ninguna pasó los filtros</td></tr>'; }
+  else acc.forEach(c=>{
+    const tr=document.createElement("tr");
+    const strength = (c.strength!=null) ? c.strength : (c.score!=null? c.score : null);
+    const ctx = [c.ctx, c.event].filter(Boolean).join(" · ");
+    tr.innerHTML = `<td class="asset">${c.asset||""}</td>`+
+      `<td class="${(c.direction||"")==="call"?"d-call":"d-put"}">${(c.direction||"").toUpperCase()}</td>`+
+      `<td class="score">${strength!=null? (typeof strength==="number"? strength.toFixed(1): strength) : "–"}</td>`+
+      `<td>${c.payout!=null?c.payout+"%":"–"}</td>`+
+      `<td>${ctx||"–"}</td>`;
+    accB.appendChild(tr);
   });
 
-  const rb = document.getElementById('rej-body'); rb.innerHTML = '';
-  if(rej===0){ rb.innerHTML = '<tr><td class="empty">ninguna rechazada</td></tr>'; }
-  else s.rejected.forEach(c=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML = `<td class="asset">${c.asset}</td><td class="reason">${reasonLabel(c.skip_reason)}</td>`;
-    rb.appendChild(tr);
+  // ---- STRAT-F rechazadas ----
+  const rej = sf.rejected || [];
+  const rejB = document.getElementById("rej-body"); rejB.innerHTML="";
+  document.getElementById("rej-count").textContent = rej.length;
+  if(rej.length===0){ rejB.innerHTML='<tr><td class="empty" colspan="2">ninguna rechazada</td></tr>'; }
+  else rej.forEach(c=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td class="asset">${c.asset||""}</td><td class="reason">${reasonLabel(c.skip_reason||"")}</td>`;
+    rejB.appendChild(tr);
   });
+
+  // ---- Barras aceptadas/rechazadas ----
+  const total = acc.length + rej.length;
+  const pct = total ? Math.round(acc.length/total*100) : 0;
+  document.getElementById("bar-acc").style.width = pct+"%";
+  document.getElementById("bar-rej").style.width = (100-pct)+"%";
+}
+
+const dot = document.getElementById("conn-dot");
+const txt = document.getElementById("conn-txt");
+function goLive(){ dot.className="dot live"; txt.textContent="en vivo · WS"; }
+function goDown(){ dot.className="dot down"; txt.textContent="reconectando…"; }
+
+function applyData(data){
+  if(!data) return;
+  // state_update / init llevan data = snapshot; tambien puede venir strat_f suelto
+  if(data.strat_f || data.known_balance!==undefined || data.masaniello!==undefined
+     || data.accepted || data.rejected){ render(data); }
+  else if(data.state && (data.state.strat_f || data.state.known_balance!==undefined || data.state.accepted)){ render(data.state); }
+  goLive();
 }
 
 const ws = new WebSocket(((location.protocol==='https:')?'wss://':'ws://')+location.host+'/ws');
-ws.onmessage = (e)=>{ try{ const m=JSON.parse(e.data); if(m.strat_f) render(m.strat_f); else if(m.state && m.state.strat_f) render(m.state.strat_f); }catch(_){} };
-ws.onclose = ()=> setTimeout(()=>location.reload(), 3000);
+ws.onmessage = (e)=>{ try{
+  const m = JSON.parse(e.data);
+  if(m.type==="init" || m.type==="state_update"){ applyData(m.data); }
+  else if(m.strat_f || m.known_balance!==undefined){ applyData(m); }
+}catch(_){} };
+ws.onopen = goLive;
+ws.onclose = ()=>{ goDown(); setTimeout(()=>location.reload(), 3000); };
+ws.onerror = goDown;
 
-fetch('/api/strat_f').then(r=>r.json()).then(render).catch(()=>{});
+// snapshot inicial por HTTP (por si el WS tarda)
+fetch('/api/state').then(r=>r.json()).then(applyData).catch(()=>{});
+fetch('/api/strat_f').then(r=>r.json()).then(d=>{ if(d && d.accepted) render({strat_f:d}); }).catch(()=>{});
 </script>
 </body>
 </html>

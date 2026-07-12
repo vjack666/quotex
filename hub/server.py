@@ -37,6 +37,7 @@ _panel: Optional[StratFPanel] = None
 _bot_ref: Any = None
 _clients: set[WebSocket] = set()
 _server_task: Optional[asyncio.Task] = None
+_browser_proc: Any = None  # Popen de la ventana Edge del HUB (para cerrarla al apagar)
 
 app = FastAPI(title="Quotex HUB", version="1.0.0", docs_url=None, redoc_url=None)
 
@@ -80,7 +81,70 @@ def _build_snapshot() -> dict:
     # Estado STRAT-F (panel nuevo, visible).
     if _panel is not None:
         base["strat_f"] = _serialize(_panel.get_state())
+    # Enriquecer con datos vivos del bot (balance, operación, Massaniello,
+    # actividad). El bot es la fuente de verdad; StratFHubState no tiene estos
+    # campos, así que se leen aquí directamente en vez de inyectarlos en el
+    # dataclass (donde _serialize los descartaría).
+    _enrich_with_bot(base)
     return base
+
+
+def _enrich_with_bot(base: dict) -> None:
+    bot = _bot_ref
+    if bot is None:
+        return
+    # ── Balance y actividad ──────────────────────────────
+    if getattr(bot, "current_balance", None) is not None:
+        base["known_balance"] = bot.current_balance
+    stats = getattr(bot, "stats", None) or {}
+    base["total_scans"] = stats.get("scans")
+    base["live_wins"] = stats.get("strat_a_wins")
+    base["live_losses"] = stats.get("strat_a_losses")
+    if stats.get("total_assets_scanned") is not None:
+        base["total_assets_scanned"] = stats.get("total_assets_scanned")
+
+    # ── Operación en curso (primer trade abierto sin resolver) ──
+    trades = getattr(bot, "trades", None) or {}
+    active = next((t for t in trades.values() if not getattr(t, "resolved", False)), None)
+    if active is not None:
+        base["active_trade_asset"] = active.asset
+        base["active_trade_direction"] = active.direction
+        base["active_trade_entry_price"] = active.entry_price
+        last_price = getattr(bot, "last_known_price", {}) or {}
+        cur = last_price.get(active.asset)
+        if cur is not None:
+            base["active_trade_current_price"] = cur
+            if active.entry_price:
+                base["active_trade_delta_pct"] = (cur - active.entry_price) / active.entry_price * 100.0
+        base["active_trade_amount"] = active.amount
+        base["active_trade_payout"] = active.payout
+        remaining = active.opened_at + active.duration_sec - time.time()
+        base["active_trade_time_remaining_sec"] = max(0.0, remaining)
+
+    # ── Gestión Massaniello ──────────────────────────────
+    mgr = getattr(bot, "massaniello", None)
+    if mgr is not None and hasattr(mgr, "session_status"):
+        st = mgr.session_status()
+        wins, losses = st["wins"], st["losses"]
+        total = wins + losses
+        safety = "OK"
+        if st.get("failed"):
+            safety = "FAIL"
+        elif st.get("timeout"):
+            safety = "TIMEOUT"
+        elif st.get("exhausted"):
+            safety = "EXHAUSTED"
+        base["masaniello"] = {
+            "cycle_num": getattr(bot, "cycle_id", None),
+            "sequence": "W" * wins + "L" * losses,
+            "total_pnl": (st["balance"] - st["initial_capital"])
+            if (st.get("balance") is not None and st.get("initial_capital") is not None)
+            else None,
+            "win_rate_pct": (wins / total * 100.0) if total else None,
+            "wins_in_cycle": wins,
+            "losses_in_cycle": losses,
+            "safety_status": safety,
+        }
 
 
 async def _broadcast(msg: str) -> None:
@@ -208,20 +272,49 @@ def used_port() -> Optional[int]:
 
 
 def _open_browser(url: str) -> None:
-    """Open Microsoft Edge to the dashboard URL."""
+    """Open Microsoft Edge to the dashboard URL.
+
+    Se lanza en modo app con un perfil dedicado (--user-data-dir) para que sea
+    un proceso propio y killable: así podemos cerrar la ventana al apagar el
+    server (Ctrl+C). Con --new-window Edge delega en una instancia existente y
+    el proceso muere al instante, dejando la ventana huérfana.
+    """
+    global _browser_proc
+    import tempfile
+    profile_dir = os.path.join(tempfile.gettempdir(), "quotex_hub_edge")
     edge_paths = [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
     ]
     for path in edge_paths:
         if Path(path).exists():
-            subprocess.Popen([path, "--new-window", url],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _browser_proc = subprocess.Popen(
+                [path, f"--app={url}", f"--user-data-dir={profile_dir}", "--no-first-run"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
-    # Fallback: let OS decide
+    # Fallback: let OS decide (no killable, no se cerrará automáticamente)
     try:
         import webbrowser
         webbrowser.open(url, new=0, autoraise=True)
+    except Exception:
+        pass
+
+
+def _close_browser() -> None:
+    """Cierra la ventana del HUB abierta por _open_browser (si sigue viva)."""
+    global _browser_proc
+    proc = _browser_proc
+    if proc is None:
+        return
+    _browser_proc = None
+    if proc.poll() is not None:
+        return  # ya terminó
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
     except Exception:
         pass
 
@@ -256,6 +349,7 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
     try:
         await server.serve()
     finally:
+        _close_browser()
         poller.cancel()
         relay.cancel()
         try:

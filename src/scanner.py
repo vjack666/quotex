@@ -963,6 +963,7 @@ class AssetScanner:
             symbols,
             candle_cache,
             CANDLE_FETCH_CONCURRENCY,
+            ws_sem=getattr(self.bot, "_ws_sem", None),
         )
         scan_fetch_elapsed_ms = int((time.monotonic() - fetch_t0) * 1000)
         log.info(
@@ -988,6 +989,7 @@ class AssetScanner:
             candles_5m,
             candle_cache,
             CANDLE_FETCH_CONCURRENCY,
+            ws_sem=getattr(self.bot, "_ws_sem", None),
         )
         log.info(
             "⚡ Prefetch OB: blocks_precalc=%d | símbolos=%d",

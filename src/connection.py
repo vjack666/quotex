@@ -22,6 +22,11 @@ from models import Candle
 
 log = logging.getLogger("connection")
 
+# Lock de reconexión compartido (RT-02): evita que el watchdog de main.py y el
+# loop de consolidation_bot.py reconecten el WebSocket a la vez y corrompan la
+# sesión. Toda ruta de reconexión (force_reconnect / ConnectionManager) lo toma.
+_RECONNECT_LOCK = asyncio.Lock()
+
 
 def raw_to_candle(raw: dict) -> Optional[Candle]:
     try:
@@ -170,6 +175,23 @@ async def force_reconnect(
     direction: str = "",
     amount: float = 0.0,
 ) -> Tuple[bool, str]:
+    # RT-02: una sola reconexión a la vez en todo el proceso.
+    async with _RECONNECT_LOCK:
+        return await _force_reconnect_locked(
+            client, account_type,
+            step_label=step_label, asset=asset, direction=direction, amount=amount,
+        )
+
+
+async def _force_reconnect_locked(
+    client: Quotex,
+    account_type: str,
+    *,
+    step_label: str = "reconnect",
+    asset: str = "",
+    direction: str = "",
+    amount: float = 0.0,
+) -> Tuple[bool, str]:
     log.info(
         "Reconexión %s: %s %s $%.2f",
         step_label, asset, direction.upper() if direction else "", amount,
@@ -236,20 +258,23 @@ async def place_order(
     if any(asset.upper().startswith(m) for m in _EQUITY_OTC_MARKERS):
         log.warning("  Activo equity OTC (%s) — puede tener restricciones de horario.", asset)
 
-    ok_reconnect, reconnect_reason = await force_reconnect(
-        client, account_type, step_label="pre-orden", asset=asset, direction=direction, amount=amount,
-    )
-    if not ok_reconnect:
-        return False, "", 0.0, 0, reconnect_reason
+    # Fix A: NO reconectar preventivamente antes de cada orden. pyquotex.connect()
+    # cierra el WebSocket siempre y _check_connect duerme 2s; hacerlo en cada
+    # buy() abre una ventana de socket muerto (~12-36s) que, con el prefetch
+    # paralelo saturando el socket, deja client.buy() colgado (buy_timeout).
+    # El buy() corre sobre la conexión ya abierta; los reintentos ante fallo
+    # REAL (abajo) siguen llamando force_reconnect() de forma condicional.
 
     t0 = time.time()
     try:
         status, info = await asyncio.wait_for(
             client.buy(amount=amount, asset=asset, direction=direction, duration=duration),
-            timeout=120.0,
+            # Fix C: >= duration+5 (timeout interno de pyquotex) para no matar
+            # órdenes legítimas prematuramente. 200s cubre duration=180s.
+            timeout=200.0,
         )
     except asyncio.TimeoutError:
-        return False, "", 0.0, 0, "buy_timeout_120s"
+        return False, "", 0.0, 0, "buy_timeout_200s"
     except Exception as exc:
         first_reason = f"buy_exception:{exc}"
         if not looks_like_connection_issue(first_reason):
@@ -350,6 +375,12 @@ class ConnectionManager:
         self.client = client
 
     async def ensure_connection(self, account_type: str) -> bool:
+        # RT-02: una sola reconexión a la vez en todo el proceso (watchdog y
+        # loop de trading comparten este lock con force_reconnect).
+        async with _RECONNECT_LOCK:
+            return await self._ensure_connection_locked(account_type)
+
+    async def _ensure_connection_locked(self, account_type: str) -> bool:
         try:
             if await asyncio.wait_for(self.client.check_connect(), timeout=3.0):
                 return True
