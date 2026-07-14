@@ -755,9 +755,12 @@
         <div class="value" id="sm-duration">–</div>
       </div>
     </div>
+    <p style="text-align:center;margin:12px 0;color:#8a8f98;font-size:13px;">
+      El bot se ha detenido. Pulsa <strong style="color:#f7f8f8;">Iniciar</strong> en la barra superior para abrir un nuevo ciclo.
+    </p>
     <div class="modal-actions">
-      <button class="modal-btn primary" onclick="sessionNewCycle()">Abrir nuevo ciclo</button>
-      <button class="modal-btn secondary" onclick="sessionStopBot()">Detener bot</button>
+      <button class="modal-btn primary" onclick="sessionCloseAndStart()">Iniciar nuevo ciclo</button>
+      <button class="modal-btn secondary" onclick="sessionCloseModal()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -1252,28 +1255,22 @@ function showCycleModal(data){
   document.getElementById("session-modal").classList.add("show");
 }
 
-function sessionNewCycle(){
+function sessionCloseAndStart(){
   document.getElementById("session-modal").classList.remove("show");
+  // Primero reseteamos (por si acaso) y luego iniciamos el runner
   fetch("/api/session/new-cycle", {method: "POST"})
+    .then(() => fetch("/api/bot/start", {method: "POST"}))
     .then(r => r.json())
     .then(d => {
-      if(d.error) console.warn("New cycle failed:", d.error);
-      else console.log("New cycle started:", d);
+      updateRunnerUI(d);
       pollRunnerStatus();
     })
     .catch(()=>{});
 }
 
-function sessionStopBot(){
+function sessionCloseModal(){
   document.getElementById("session-modal").classList.remove("show");
-  fetch("/api/session/reject-cycle", {method: "POST"})
-    .then(r => r.json())
-    .then(d => {
-      if(d.error) console.warn("Reject cycle failed:", d.error);
-      else console.log("Cycle rejected:", d);
-      pollRunnerStatus();
-    })
-    .catch(()=>{});
+}
 }
 
 // Listen for session_completed events via the main WS

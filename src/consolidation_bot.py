@@ -318,23 +318,15 @@ async def main(
         state = bot.massaniello_persistence.load()
         if state:
             bot.massaniello_persistence.apply(bot.massaniello, state)
-            # Session rollover: si apply() no reseteó (session_active=1 pero
-            # igual está completa), creamos uno nuevo como red de seguridad.
-            mgr = bot.massaniello
-            if mgr.is_session_complete() or mgr.is_session_failed() or mgr.is_session_exhausted():
-                log.info(
-                    "🔄 Session rollover — sesión previa %s, arrancando nueva",
-                    "completa" if mgr.is_session_complete() else "fallida" if mgr.is_session_failed() else "agotada",
-                )
-                from massaniello_risk import MassanielloRiskManager
-                bot.massaniello = MassanielloRiskManager()
-                vcap = bot.executor._massaniello_virtual()
-                if vcap is not None:
-                    bot.executor.set_session_start_balance(vcap)
-                elif bot.current_balance:
-                    bot.executor.set_session_start_balance(bot.current_balance)
-                # Guardar estado limpio en DB
-                bot.massaniello_persistence.save(bot.massaniello)
+            # apply() ya resetea a 0W/0L si la sesión anterior estaba completa.
+            # Aseguramos capital de referencia (virtual o real).
+            vcap = bot.executor._massaniello_virtual()
+            if vcap is not None:
+                bot.executor.set_session_start_balance(vcap)
+            elif bot.massaniello.current_balance is not None:
+                bot.executor.set_session_start_balance(bot.massaniello.current_balance)
+            elif bot.current_balance:
+                bot.executor.set_session_start_balance(bot.current_balance)
         else:
             log.info("Sin estado Massaniello previo — arrancando con defaults")
     else:
@@ -433,11 +425,18 @@ async def main(
                     has_open_trades=has_open_trades,
                 )
 
-                # If session is completed, wait for user confirmation (don't scan)
+                # Sesión completada → notificar y DETENER el bot por completo.
+                # El usuario debe pulsar "Iniciar" en el hub para un nuevo ciclo.
                 if current_state == SessionState.COMPLETED:
-                    log.info("⏸ Sesión completada — esperando confirmación del usuario para nuevo ciclo")
-                    await asyncio.sleep(5.0)
-                    continue
+                    log.info(
+                        "🎯 SESIÓN MASSANIELLO COMPLETADA — "
+                        "bot detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
+                    )
+                    # Dar tiempo a que el modal se muestre vía event_bus + WS
+                    await asyncio.sleep(2.0)
+                    # Forzar estado STOPPED para que el runner termine limpio
+                    sm.stop()
+                    break
 
                 # If session is stopped, break the loop
                 if current_state == SessionState.STOPPED:
