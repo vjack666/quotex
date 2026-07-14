@@ -405,6 +405,27 @@ async def main(
                     alerter.alert_connection_lost()
                     await asyncio.sleep(5.0)
                     continue
+
+                # Session lifecycle check BEFORE scanning
+                sm = bot.session_manager
+                has_open_trades = len(bot.trades) > 0
+                mgr = bot.massaniello
+                current_state = sm.tick(
+                    massaniello_is_complete=mgr.is_session_complete(),
+                    massaniello_is_failed=mgr.is_session_failed(),
+                    has_open_trades=has_open_trades,
+                )
+
+                # If session is completed, wait for user confirmation (don't scan)
+                if current_state == SessionState.COMPLETED:
+                    log.info("⏸ Sesión completada — esperando confirmación del usuario para nuevo ciclo")
+                    await asyncio.sleep(5.0)
+                    continue
+
+                # If session is stopped, break the loop
+                if current_state == SessionState.STOPPED:
+                    break
+
                 await bot.scan_all()
 
                 hub = bot._hub_scanner
@@ -459,26 +480,6 @@ async def main(
                                 "[RADAR] Próximo tick watchlist",
                             )
                 await bot.reconcile_pending_candidates(max_age_minutes=PENDING_RECONCILE_AGE_MIN)
-
-                # Session lifecycle check via SessionManager
-                sm = bot.session_manager
-                has_open_trades = len(bot.trades) > 0
-                mgr = bot.massaniello
-                current_state = sm.tick(
-                    massaniello_is_complete=mgr.is_session_complete(),
-                    massaniello_is_failed=mgr.is_session_failed(),
-                    has_open_trades=has_open_trades,
-                )
-
-                # If session is completed, wait for user confirmation (don't scan)
-                if current_state == SessionState.COMPLETED:
-                    log.info("⏸ Sesión completada — esperando confirmación del usuario para nuevo ciclo")
-                    await asyncio.sleep(5.0)
-                    continue
-
-                # If session is stopped, break the loop
-                if current_state == SessionState.STOPPED:
-                    break
             except asyncio.CancelledError:
                 break
             except BotError as exc:
