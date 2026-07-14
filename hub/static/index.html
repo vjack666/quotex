@@ -489,8 +489,6 @@
       <div class="cfg-grid" id="cfg-grid2">
         <div class="cfg-field"><label>Payout mínimo general (%)</label><input type="number" id="cfg-min-payout" min="50" max="98" step="1"></div>
         <div class="cfg-field"><label>STRAT-F payout mínimo (%)</label><input type="number" id="cfg-stratf-payout" min="50" max="98" step="1"></div>
-        <div class="cfg-field"><label>STRAT-F score mínimo</label><input type="number" id="cfg-stratf-score" min="0" max="100" step="1"></div>
-        <div class="cfg-field"><label>STRAT-F zona mín. edad (velas)</label><input type="number" id="cfg-stratf-age" min="1" max="20"></div>
       </div>
 
       <!-- Operación -->
@@ -867,8 +865,6 @@ function loadConfig(){
     // Payout / Scanner
     document.getElementById("cfg-min-payout").value = c.min_payout || 80;
     document.getElementById("cfg-stratf-payout").value = c.strat_f_min_payout || 80;
-    document.getElementById("cfg-stratf-score").value = c.strat_f_min_score || 60;
-    document.getElementById("cfg-stratf-age").value = c.strat_f_zone_min_age || 3;
     // Operación
     document.getElementById("cfg-expiry").value = c.duration_sec || 300;
     document.getElementById("cfg-base-amount").value = c.amount_initial || 1;
@@ -893,8 +889,6 @@ function saveConfig(){
     // Payout / Scanner
     min_payout: parseInt(document.getElementById("cfg-min-payout").value) || 80,
     strat_f_min_payout: parseInt(document.getElementById("cfg-stratf-payout").value) || 80,
-    strat_f_min_score: parseInt(document.getElementById("cfg-stratf-score").value) || 60,
-    strat_f_zone_min_age: parseInt(document.getElementById("cfg-stratf-age").value) || 3,
     // Operación
     duration_sec: parseInt(document.getElementById("cfg-expiry").value) || 300,
     amount_initial: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
