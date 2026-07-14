@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from models import Candle, ConsolidationZone
-from config import STRAT_F_MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE
+from config import MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE
 
 
 @dataclass
@@ -165,7 +165,7 @@ def evaluate_strat_f(
     candles_1m: List[Candle],
     payout: int = 80,
     *,
-    min_payout: int = STRAT_F_MIN_PAYOUT,
+    min_payout: int = MIN_PAYOUT,
     min_score: float = STRAT_F_MIN_SCORE,
     zone_min_age: int = STRAT_F_ZONE_MIN_AGE,
 ) -> StratFEvaluation:

@@ -488,7 +488,6 @@
       <div class="cfg-section">Payout y Scanner</div>
       <div class="cfg-grid" id="cfg-grid2">
         <div class="cfg-field"><label>Payout mínimo general (%)</label><input type="number" id="cfg-min-payout" min="50" max="98" step="1"></div>
-        <div class="cfg-field"><label>STRAT-F payout mínimo (%)</label><input type="number" id="cfg-stratf-payout" min="50" max="98" step="1"></div>
       </div>
 
       <!-- Operación -->
@@ -864,7 +863,6 @@ function loadConfig(){
     document.getElementById("cfg-mass-virtual").value = c.massaniello_virtual_capital || 30;
     // Payout / Scanner
     document.getElementById("cfg-min-payout").value = c.min_payout || 80;
-    document.getElementById("cfg-stratf-payout").value = c.strat_f_min_payout || 80;
     // Operación
     document.getElementById("cfg-expiry").value = c.duration_sec || 300;
     document.getElementById("cfg-base-amount").value = c.amount_initial || 1;
@@ -888,7 +886,6 @@ function saveConfig(){
     massaniello_virtual_capital: parseFloat(document.getElementById("cfg-mass-virtual").value) || 30,
     // Payout / Scanner
     min_payout: parseInt(document.getElementById("cfg-min-payout").value) || 80,
-    strat_f_min_payout: parseInt(document.getElementById("cfg-stratf-payout").value) || 80,
     // Operación
     duration_sec: parseInt(document.getElementById("cfg-expiry").value) || 300,
     amount_initial: parseFloat(document.getElementById("cfg-base-amount").value) || 1,

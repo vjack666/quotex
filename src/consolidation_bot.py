@@ -535,7 +535,6 @@ class BotRunner:
             "session_max_min": _config.SESSION_MAX_MIN,
             "massaniello_virtual_capital": _config.MASSANIELLO_VIRTUAL_CAPITAL,
             # Scanner payout
-            "strat_f_min_payout": _config.STRAT_F_MIN_PAYOUT,
             "strat_f_min_score": _config.STRAT_F_MIN_SCORE,
             "strat_f_zone_min_age": _config.STRAT_F_ZONE_MIN_AGE,
             # Duration
@@ -574,7 +573,6 @@ class BotRunner:
         _config.SESSION_MAX_MIN = int(c.get("session_max_min", 60))
         _config.MASSANIELLO_VIRTUAL_CAPITAL = float(c.get("massaniello_virtual_capital", 30.0))
         _config.MIN_PAYOUT = int(c.get("min_payout", 80))
-        _config.STRAT_F_MIN_PAYOUT = int(c.get("strat_f_min_payout", 80))
         _config.STRAT_F_MIN_SCORE = int(c.get("strat_f_min_score", 60))
         _config.STRAT_F_ZONE_MIN_AGE = int(c.get("strat_f_zone_min_age", 3))
         _config.DURATION_SEC = int(c.get("duration_sec", 300))
