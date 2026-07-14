@@ -183,6 +183,8 @@
   .ctrl-btn.start:hover:not(:disabled) { background: #0ea472; }
   .ctrl-btn.stop { background: var(--red); color:#fff; }
   .ctrl-btn.stop:hover:not(:disabled) { background: #d94040; }
+  .ctrl-btn.shutdown { background: #555; color:#fff; font-size:11px; padding:4px 10px; }
+  .ctrl-btn.shutdown:hover { background: #333; }
   .ctrl-spacer { flex:1; }
 
   /* Session Complete Modal */
@@ -342,6 +344,7 @@
   <button class="ctrl-btn start" id="btn-start" onclick="botStart()">Start</button>
   <button class="ctrl-btn stop" id="btn-stop" onclick="botStop()" disabled>Stop</button>
   <span class="ctrl-spacer"></span>
+  <button class="ctrl-btn shutdown" onclick="shutdownApp()">Finalizar</button>
   <span class="ctrl-label" id="ctrl-info" style="font-size:11px;"></span>
 </div>
 
@@ -845,6 +848,16 @@ function botStop(){
     updateRunnerUI(d);
     pollRunnerStatus();
   }).catch(()=>{ document.getElementById("btn-stop").disabled = false; });
+}
+
+function shutdownApp(){
+  if(!confirm("¿Finalizar operativa y cerrar el servidor?")) return;
+  fetch("/api/shutdown",{method:"POST"}).then(()=>{
+    window.close();
+    document.body.innerHTML = "<h2 style='color:#fff;text-align:center;margin-top:40vh'>Servidor apagado. Podés cerrar esta pestaña.</h2>";
+  }).catch(()=>{
+    document.body.innerHTML = "<h2 style='color:#fff;text-align:center;margin-top:40vh'>Servidor apagado. Podés cerrar esta pestaña.</h2>";
+  });
 }
 
 function pollRunnerStatus(){

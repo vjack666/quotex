@@ -259,6 +259,24 @@ async def bot_stop():
     return {"status": "stopped", "state": _runner.state}
 
 
+@_hub_app.post("/api/shutdown")
+async def shutdown_server():
+    """Stop bot + close browser + kill server."""
+    import signal, threading
+    # Stop bot if running
+    if _runner.state in ("running", "starting"):
+        await _runner.stop()
+    # Close browser window
+    from hub.server import _close_browser
+    _close_browser()
+    # Kill server after short delay (so response reaches client)
+    def _kill():
+        import time; time.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_kill, daemon=True).start()
+    return {"status": "shutting_down"}
+
+
 @_hub_app.get("/api/config")
 async def get_config():
     """Get current bot configuration."""
