@@ -52,8 +52,10 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 # ── Logging with ring buffer for WebSocket streaming ───────────────────────────
-# Ring buffer and subscribers live in hub/server.py; we re-export for _WebLogHandler.
-from hub.server import log_ring as _log_ring, log_subscribers as _log_subscribers
+from collections import deque
+LOG_RING_SIZE = 200
+_log_ring: deque[dict[str, Any]] = deque(maxlen=LOG_RING_SIZE)
+_log_subscribers: set[asyncio.Queue] = set()
 
 
 class _WebLogHandler(logging.Handler):
@@ -328,6 +330,33 @@ async def health():
         "uptime_sec": (time.time() - _runner._started_at) if _runner._started_at else None,
         "timestamp": time.time(),
     }
+
+
+# ── WebSocket for logs ────────────────────────────────────────────────────────
+
+@_hub_app.websocket("/ws/logs")
+async def ws_logs(ws: WebSocket):
+    """WebSocket endpoint for real-time log streaming."""
+    await ws.accept()
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _log_subscribers.add(q)
+    try:
+        # Send recent logs on connect
+        for entry in list(_log_ring)[-50:]:
+            await ws.send_json(entry)
+        # Stream new logs
+        while True:
+            try:
+                entry = await asyncio.wait_for(q.get(), timeout=30)
+                await ws.send_json(entry)
+            except asyncio.TimeoutError:
+                await ws.send_json({"type": "ping", "timestamp": time.time()})
+            except asyncio.CancelledError:
+                break
+    except Exception:
+        pass
+    finally:
+        _log_subscribers.discard(q)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

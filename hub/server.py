@@ -7,7 +7,6 @@ import os
 import socket
 import subprocess
 import time
-from collections import deque
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -268,35 +267,6 @@ async def websocket_endpoint(ws: WebSocket):
         pass
     finally:
         _clients.discard(ws)
-
-
-# ── Log ring buffer + WebSocket streaming ─────────────────────────────────────
-LOG_RING_SIZE = 200
-log_ring: deque[dict[str, Any]] = deque(maxlen=LOG_RING_SIZE)
-log_subscribers: set[asyncio.Queue] = set()
-
-
-@app.websocket("/ws/logs")
-async def ws_logs(ws: WebSocket):
-    """WebSocket endpoint for real-time log streaming."""
-    await ws.accept()
-    q: asyncio.Queue = asyncio.Queue(maxsize=100)
-    log_subscribers.add(q)
-    try:
-        for entry in list(log_ring)[-50:]:
-            await ws.send_json(entry)
-        while True:
-            try:
-                entry = await asyncio.wait_for(q.get(), timeout=30)
-                await ws.send_json(entry)
-            except asyncio.TimeoutError:
-                await ws.send_json({"type": "ping", "timestamp": time.time()})
-            except asyncio.CancelledError:
-                break
-    except Exception:
-        pass
-    finally:
-        log_subscribers.discard(q)
 
 
 def _resolve_port(requested: int, host: str = DEFAULT_HOST) -> int:
