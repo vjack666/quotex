@@ -142,7 +142,7 @@ class KellySizer:
         win_rate, total_trades = self._get_win_rate()
 
         if total_trades < MIN_TRADES or win_rate <= 0.0:
-            log.info(
+            log.debug(
                 "[KellySizer] Datos insuficientes (%d trades, WR=%.2f%%) "
                 "— devolviendo 0.0",
                 total_trades,
@@ -152,7 +152,7 @@ class KellySizer:
 
         payout_ratio = self._get_avg_payout()
         if payout_ratio <= 0.0:
-            log.info(
+            log.debug(
                 "[KellySizer] Payout inválido (%f) — devolviendo 0.0",
                 payout_ratio,
             )

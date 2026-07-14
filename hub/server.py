@@ -144,6 +144,17 @@ def _enrich_with_bot(base: dict) -> None:
             safety = "TIMEOUT"
         elif st.get("exhausted"):
             safety = "EXHAUSTED"
+        next_stake_amt = None
+        try:
+            from config import MASSANIELLO_VIRTUAL_CAPITAL
+            assigned = float(MASSANIELLO_VIRTUAL_CAPITAL or 0.0)
+        except Exception:
+            assigned = float(st.get("initial_capital") or 0.0)
+        try:
+            stake_amt, _st = mgr.next_stake(92)
+            next_stake_amt = float(stake_amt) if stake_amt else None
+        except Exception:
+            next_stake_amt = None
         base["masaniello"] = {
             "cycle_num": getattr(bot, "cycle_id", None),
             "sequence": "W" * wins + "L" * losses,
@@ -154,6 +165,13 @@ def _enrich_with_bot(base: dict) -> None:
             "wins_in_cycle": wins,
             "losses_in_cycle": losses,
             "safety_status": safety,
+            "assigned_capital": assigned,
+            "bankroll": st.get("balance"),
+            "initial_capital": st.get("initial_capital"),
+            "operations": st.get("operations"),
+            "expected_wins": st.get("expected_wins"),
+            "next_stake": next_stake_amt,
+            "can_enter": st.get("can_enter"),
         }
 
 

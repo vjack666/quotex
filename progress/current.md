@@ -1,28 +1,33 @@
-# Estado de sesión — lifecycle inteligente (Iniciar / resume / meta)
+# Estado de sesión — bankroll hub + resolve broker lag
 
 > Sesión: 2026-07-14 | Operador: Ruben | Agente: Grok
 
-## Problema
-Al pulsar **Iniciar** en el hub, el bot conectaba y se apagaba en ~4s.
-Causa: `SessionManager` nacía en `STOPPED` y el loop hacía `break` sin escanear.
-Además, `BotRunner.start()` intentaba `session_manager.start()` sobre un bot que
-aún no existía (`self._bot` nunca se asignaba).
+## Hecho esta sesión
 
-## Solución implementada
-Lifecycle inteligente:
+### 1. Lifecycle sesión (commit previo `a654fc0`)
+- Iniciar → SCANNING; resume incompleta; stop al cumplir meta.
 
-1. **Iniciar** → `bootstrap_for_run()` deja la sesión en `SCANNING`.
-2. **Sesión incompleta** (wins/losses > 0 y no terminal) → **reanuda** contadores.
-3. **Meta cumplida** (ITM / failed / timeout / exhausted) → `COMPLETED` y **para el scan**.
-4. Siguiente **Iniciar** tras meta → ciclo **fresh**.
-5. Al stop/salida → guarda Massaniello para poder reanudar.
+### 2. Log compacto
+- `BOT_LOG_VERBOSE=1` para detalle por activo.
+- Resúmenes de ciclo en INFO.
 
-## Archivos
-- `src/session_manager.py` — `bootstrap_for_run`, terminal helpers, tick ampliado
-- `src/consolidation_bot.py` — bootstrap al arrancar, bind_bot, save on exit
-- `src/executor.py` — `session_completed` antes de resetear Massaniello
-- `tests/test_session_lifecycle.py` — 12 tests nuevos
+### 3. Bankroll Massaniello en hub (Operación)
+- Card **Bankroll binarias**: capital, Ops/ITM, payout mín. %, próximo stake **en vivo**.
+- Guardar bankroll → aplica a `config` + log de auditoría.
+- Misma fórmula que `Desktop/massaniello` / `massaniello_engine`.
+- Payout mín. = piso del **escáner** + fórmula de stake.
+- Consola: sin bloque Massaniello duplicado.
+
+### 4. Resolve broker lag
+- No tratar `profitAmount==0` como LOSS.
+- Más grace/timeout; UNRESOLVED en vez de LOSS forzado.
+- Countdown se corta si la sesión ya terminó.
+
+## Cómo usar bankroll
+1. Bot detenido → editar capital / Ops / ITM / payout (stake se actualiza al tipear).
+2. **Guardar bankroll** → log: `HUB config aplicada → Massaniello …`
+3. **Iniciar**.
 
 ## Verificación
-- `pytest tests/test_session_lifecycle.py` → 12 passed
-- `pytest tests/` → **322 passed**
+- pytest: 339+ passed (última corrida completa verde).
+- Grafo: `graphify . --update --code-only` + `cluster-only` → **2434 nodos, 4949 edges, 152 comunidades**.

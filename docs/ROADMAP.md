@@ -133,6 +133,7 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 
 | Fecha | Cambio |
 |-------|--------|
+| 2026-07-14 | **Hub bankroll Massaniello**: capital/Ops/ITM/payout en Operación; stake en vivo; `GET /api/massaniello/preview`; min_payout unificado en escáner. **Resolve lag**: no forzar LOSS con profit=0; grace/timeout amplios. Lifecycle session bootstrap (Iniciar/resume). Log compacto (`BOT_LOG_VERBOSE`). |
 | 2026-07-11 | Borrado de `feature_list.json` viejo y `docs/ROADMAP*.md` (mintieron sobre strat_b) |
 | 2026-07-11 | Creación de roadmap STRAT-F (feature #1 en curso) |
 | 2026-07-11 | Reemplazo del dashboard por panel STRAT-F (#7): `hub/strat_f_state.py`, `hub/strat_f_panel.py`, `hub/parser.py`, `hub/render.py`, `hub/server.py` + `index.html` reescrito |

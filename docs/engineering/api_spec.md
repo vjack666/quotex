@@ -59,6 +59,47 @@ Solo el estado STRAT-F (atajo para el panel nuevo).
 ```
 
 ### GET `/`
+Sirve `hub/static/index.html` (panel web STRAT-F + bankroll Massaniello).
+
+### GET `/api/config` · POST `/api/config` (app.py)
+Config del `BotRunner`. **POST solo con bot detenido.**
+
+Campos Massaniello / riesgo (también desde card **Bankroll binarias** en Operación):
+
+| Campo | Tipo | Efecto |
+|-------|------|--------|
+| `massaniello_virtual_capital` | float | Capital de riesgo (no el balance completo de cuenta) |
+| `massaniello_ops` | int | Operaciones de la secuencia Massaniello |
+| `massaniello_wins` | int | ITM objetivo |
+| `min_payout` | int | Piso de payout del **escáner** y de la fórmula de stake (alinea `MIN_PAYOUT`, `STRAT_A_MIN_PAYOUT`, `STRAT_F_MIN_PAYOUT`) |
+
+Al guardar, `app.py` deja traza en log:
+`HUB config aplicada → Massaniello N ops / M ITM | capital=$… | min_payout=…%`.
+
+### GET `/api/massaniello/preview` (app.py)
+Preview de próximo stake con la misma fórmula que `massaniello_engine.calculate_stake`.
+
+**Query (opcionales, para tipado en vivo sin Guardar):**
+`capital`, `ops`, `itm`, `payout`, `form=1`
+
+**Response 200 (ejemplo)**
+```json
+{
+  "assigned_capital": 30.0,
+  "account_balance": 144.54,
+  "operations": 5,
+  "expected_wins": 3,
+  "payout_pct": 92,
+  "next_stake": 10.83,
+  "status": "Te quedan 2 OTM",
+  "can_enter": true,
+  "source": "form"
+}
+```
+
+El panel Operación también calcula el stake **en el navegador** (misma fórmula) para feedback instantáneo al cambiar Ops/ITM/capital/payout.
+
+### GET `/`
 Sirve `hub/static/index.html` (panel web STRAT-F).
 
 ### WS `/ws`

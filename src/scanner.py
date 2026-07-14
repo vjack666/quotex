@@ -5,11 +5,13 @@ import asyncio
 import json
 import logging
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
 
+from bot_logging import asset_detail, format_reject_summary, is_verbose, short_reason
 from candle_patterns import detect_reversal_pattern, explain_no_pattern_reason
 import config as _runtime_config
 from config import (
@@ -151,13 +153,15 @@ class AssetScanner:
     def _log_strat_a_pattern_veto(sym: str, ev: StratAEvaluation) -> None:
         side = "techo" if ev.entry_mode == "rebound_ceiling" else "piso"
         if ev.skip_reason == "pattern_missing":
-            log.info(
+            asset_detail(
+                log,
                 "⛔ [STRAT-A] %s: rebote %s — sin patrón 1m confirmado",
                 sym,
                 side,
             )
         elif ev.skip_reason == "pattern_insufficient":
-            log.info(
+            asset_detail(
+                log,
                 "⛔ [STRAT-A] %s: rebote %s — patrón 1m insuficiente (%s %.2f)",
                 sym,
                 side,
@@ -165,7 +169,8 @@ class AssetScanner:
                 ev.strength,
             )
         elif ev.skip_reason == "strict_pattern_veto":
-            log.info(
+            asset_detail(
+                log,
                 "⛔ [STRAT-A] %s: rebote %s — patrón contradictorio confirmado %s %.2f",
                 sym,
                 side,
@@ -186,7 +191,8 @@ class AssetScanner:
             return None
         if ev.direction is None or ev.has_signal:
             return None
-        if payout < STRAT_A_MIN_PAYOUT:
+        strat_a_floor = int(getattr(_runtime_config, "STRAT_A_MIN_PAYOUT", STRAT_A_MIN_PAYOUT))
+        if payout < strat_a_floor:
             return None
         if not should_watch(zone, price, ev.entry_mode, ev.stage, dynamic_touch_tolerance):
             return None
@@ -907,18 +913,20 @@ class AssetScanner:
         """FASE 1/5 — martin, assets, filtros iniciales."""
         self._phase_log("1/5", "Preparación — martin, assets, filtros")
 
-        assets = await get_open_assets(self.bot.client, MIN_PAYOUT)
+        min_payout = int(getattr(_runtime_config, "MIN_PAYOUT", MIN_PAYOUT))
+        assets = await get_open_assets(self.bot.client, min_payout)
         if not assets:
-            log.warning("No se obtuvieron activos OTC disponibles.")
+            log.warning("No se obtuvieron activos OTC disponibles (payout≥%d%%).", min_payout)
             return None
 
         total_assets_available = len(assets)
         if SCAN_MAX_ASSETS_PER_CYCLE > 0 and len(assets) > SCAN_MAX_ASSETS_PER_CYCLE:
             assets = assets[:SCAN_MAX_ASSETS_PER_CYCLE]
             log.info(
-                "⚡ Aceleración scan: %d/%d activos (top payout)",
+                "⚡ Aceleración scan: %d/%d activos (top payout≥%d%%)",
                 len(assets),
                 total_assets_available,
+                min_payout,
             )
 
         self.bot.stats["scans"] += 1
@@ -927,7 +935,7 @@ class AssetScanner:
             "═══ SCAN #%d | %d activos payout≥%d%% ═══",
             self.bot.stats["scans"],
             len(assets),
-            MIN_PAYOUT,
+            min_payout,
         )
 
         # ── GESTIÓN DE RIESGO: pausa total mientras hay trade abierto ──
@@ -969,12 +977,6 @@ class AssetScanner:
             ws_sem=getattr(self.bot, "_ws_sem", None),
         )
         scan_fetch_elapsed_ms = int((time.monotonic() - fetch_t0) * 1000)
-        log.info(
-            "⚡ Prefetch velas: scan_fetch_elapsed_ms=%d | activos=%d | concurrency=%d",
-            scan_fetch_elapsed_ms,
-            len(symbols),
-            CANDLE_FETCH_CONCURRENCY,
-        )
 
         strat_a_symbols = symbols_needing_strat_a_prefetch(
             assets,
@@ -995,7 +997,9 @@ class AssetScanner:
             ws_sem=getattr(self.bot, "_ws_sem", None),
         )
         log.info(
-            "⚡ Prefetch OB: blocks_precalc=%d | símbolos=%d",
+            "⚡ Prefetch | velas=%dms (n=%d) | OB blocks=%d (n=%d)",
+            scan_fetch_elapsed_ms,
+            len(symbols),
             len(blocks_by_symbol),
             len(strat_a_symbols),
         )
@@ -1027,6 +1031,8 @@ class AssetScanner:
         candles_1m_collected: dict[str, list] = {}
         last_prices_collected: dict[str, float] = {}
         radar_entries_from_cycle: list[RadarWatchEntry] = []
+        reject_counts: Counter[str] = Counter()
+        strat_f_accepts = 0
 
         candles_5m_by_asset = cycle.candles_5m
         candles_1m_by_asset = cycle.candles_1m
@@ -1047,27 +1053,34 @@ class AssetScanner:
             if SCAN_PROGRESS_EVERY > 0 and (
                 idx == 1 or idx % SCAN_PROGRESS_EVERY == 0 or idx == len(assets)
             ):
-                log.info("⏱ Progreso scan: %d/%d activos", idx, len(assets))
+                asset_detail(log, "⏱ Progreso scan: %d/%d activos", idx, len(assets))
 
             if sym in self.bot.trades:
                 continue
 
             if sym in self.bot.greylist_assets:
-                log.info("⏭ %s: en lista gris — skip", sym)
+                reject_counts["greylist"] += 1
+                asset_detail(log, "⏭ %s: en lista gris — skip", sym)
                 self.bot.stats["skipped"] += 1
                 continue
 
             if self.executor._is_asset_blacklisted(sym):
                 until_ts = self.bot.asset_blacklist_until.get(sym, time.time())
                 remain_min = max(0.0, (until_ts - time.time()) / 60.0)
-                log.warning(
-                    "⏭ %s: blacklist temporal activa (%.1f min restantes)", sym, remain_min,
+                reject_counts["blacklist"] += 1
+                asset_detail(
+                    log,
+                    "⏭ %s: blacklist temporal activa (%.1f min restantes)",
+                    sym,
+                    remain_min,
                 )
                 self.bot.stats["skipped"] += 1
                 continue
 
             if sym in self.bot.failed_assets:
-                log.info(
+                reject_counts["failed_prev"] += 1
+                asset_detail(
+                    log,
                     "⏭ %s skipped — falló en ciclo anterior (%d ciclos restantes)",
                     sym,
                     self.bot.failed_assets[sym],
@@ -1228,7 +1241,13 @@ class AssetScanner:
                 and sym not in self.bot.trades
             ):
                 candles_15m = candles_15m_by_asset.get(sym, [])
-                f_eval = evaluate_strat_f(candles_15m, candles, candles_1m, payout=payout)
+                f_eval = evaluate_strat_f(
+                    candles_15m,
+                    candles,
+                    candles_1m,
+                    payout=payout,
+                    min_payout=int(getattr(_runtime_config, "MIN_PAYOUT", MIN_PAYOUT)),
+                )
                 # Estocástico M15 (Fase 2/3): capa fina sobre pyquotex. Modo medición.
                 stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
                 _batch = getattr(self, "_strat_f_batch", None)
@@ -1280,8 +1299,9 @@ class AssetScanner:
                     self.bot.stats["strat_f_signals"] += 1
                     _rec["decision"] = "ACCEPTED"
                     _batch[0].append(_rec)
+                    strat_f_accepts += 1
                     log.info(
-                        "[STRAT-F] %s %s strength=%.2f ctx=%s event=%s",
+                        "[STRAT-F] ✓ %s %s strength=%.2f ctx=%s event=%s",
                         sym,
                         f_eval.direction.upper(),
                         f_eval.strength,
@@ -1291,7 +1311,9 @@ class AssetScanner:
                 elif f_eval.skip_reason:
                     _rec["decision"] = "REJECTED_STRAT_F"
                     _batch[1].append(_rec)
-                    log.info("[STRAT-F] %s skip: %s", sym, f_eval.skip_reason)
+                    key = f"F:{short_reason(f_eval.skip_reason)}"
+                    reject_counts[key] += 1
+                    asset_detail(log, "[STRAT-F] %s skip: %s", sym, f_eval.skip_reason)
 
                 # Caja negra STRAT-F (Fase 3): grabar cada decisión ANTES de ejecutar.
                 # Modo medición: registra siempre, no filtra por estocástico.
@@ -1334,12 +1356,15 @@ class AssetScanner:
                         setattr(f_candidate, "_black_box_cid", _bb_cid)
 
 
-            if payout < STRAT_A_MIN_PAYOUT:
-                log.info(
+            strat_a_floor = int(getattr(_runtime_config, "STRAT_A_MIN_PAYOUT", STRAT_A_MIN_PAYOUT))
+            if payout < strat_a_floor:
+                reject_counts["A:payout bajo"] += 1
+                asset_detail(
+                    log,
                     "⛔ [STRAT-A] %s: payout=%d%% < %d%% — excluido del scan",
                     sym,
                     payout,
-                    STRAT_A_MIN_PAYOUT,
+                    strat_a_floor,
                 )
                 self.bot.stats["skipped"] = self.bot.stats.get("skipped", 0) + 1
                 continue
@@ -1421,7 +1446,9 @@ class AssetScanner:
                     min_zone_age = (
                         ZONE_AGE_BREAKOUT_MIN if ev.stage == "breakout" else STRAT_A_ZONE_MIN_AGE_REBOUND
                     )
-                    log.info(
+                    reject_counts["A:zona joven"] += 1
+                    asset_detail(
+                        log,
                         "⏭ %s: zona demasiado joven (%.1fmin < %dmin) — skip",
                         sym,
                         zone.age_minutes,
@@ -1453,6 +1480,18 @@ class AssetScanner:
 
         if radar_entries_from_cycle:
             self._update_radar_watchlist(radar_entries_from_cycle)
+
+        # One compact line instead of dozens of per-asset skip rows
+        n_assets = len(assets)
+        n_rej = sum(reject_counts.values())
+        log.info(
+            "📊 Eval | assets=%d | candidatos=%d | STRAT-F ok=%d | skips=%d [%s]",
+            n_assets,
+            len(candidates),
+            strat_f_accepts,
+            n_rej,
+            format_reject_summary(reject_counts),
+        )
 
         return {
             "candidates": candidates,
@@ -1784,7 +1823,8 @@ class AssetScanner:
                 self.executor._record_scan_acceptances(0)
                 return
 
-        log.info(
+        asset_detail(
+            log,
             "[SCORE] Umbral dinámico sesión=%d (ventana=%d scans, accepted=%d)",
             session_threshold,
             ADAPTIVE_THRESHOLD_WINDOW_SCANS,
@@ -1792,57 +1832,57 @@ class AssetScanner:
         )
 
         journal = get_journal()
-        log.info("── %d candidatos evaluados ──", len(candidates))
-        for c in sorted(candidates, key=lambda x: -x.score):
+        ranked = sorted(candidates, key=lambda x: -x.score)
+        log.info("── %d candidatos ──", len(ranked))
+        for c in ranked:
             eff_threshold = self._score_threshold_for_candidate(c, session_threshold)
             if (
                 self._is_strat_a_candidate(c)
                 and c.score < STRAT_A_MIN_SCORE
                 and c.score >= session_threshold
             ):
-                log.info(
+                asset_detail(
+                    log,
                     "⛔ [STRAT-A] %s: score=%.1f < %d — veto calidad (umbral STRAT-A fijo)",
                     c.asset,
                     c.score,
                     STRAT_A_MIN_SCORE,
                 )
-            rng_pips = (c.zone.ceiling - c.zone.floor) * 10_000
-            status = "✅" if c.score >= eff_threshold else "❌"
-            decision_tag = "ACEPTADO" if c.score >= eff_threshold else "RECHAZADO"
-            rev_pattern = getattr(c, "_reversal_pattern", "none")
-            rev_strength = float(getattr(c, "_reversal_strength", 0.0) or 0.0)
-            rev_confirms = bool(getattr(c, "_reversal_confirms", False))
-            ob_adj = int(round(c.score_breakdown.get("order_block", 0.0)))
-            ma_adj = int(round(c.score_breakdown.get("ma_filter", 0.0)))
-            zone_age_min = c.zone.age_minutes
-            if rev_pattern == "none":
-                rev_txt = "~ sin patrón 1m"
-            elif rev_confirms:
-                rev_txt = "✓ confirmado"
-            else:
-                rev_txt = "✗ contradice (-15pts)"
+            origin = getattr(c, "_strategy_origin", "STRAT-A")
+            status = "✓" if c.score >= eff_threshold else "·"
+            decision_tag = "OK" if c.score >= eff_threshold else "bajo umbral"
+            # Compact one-liner (detail mode adds OB/MA)
             log.info(
-                "  %s %s [%d%%] %s  score=%.1f/100  "
-                "[comp=%.1f  rebote=%.1f  trend=%.1f  payout=%.1f]  "
-                "rng=%.1fpips  zona=%.0fmin  1m_pattern=%s strength=%.2f %s "
-                "[OB%+d][MA%+d][umbral=%d] → %s",
-                status, c.asset, c.payout, c.direction.upper(), c.score,
-                c.score_breakdown.get("compression", 0),
-                c.score_breakdown.get("bounce", 0),
-                c.score_breakdown.get("trend", 0),
-                c.score_breakdown.get("payout", 0),
-                rng_pips,
-                zone_age_min,
-                rev_pattern,
-                rev_strength,
-                rev_txt,
-                ob_adj,
-                ma_adj,
+                "  %s %s %s %s score=%.1f [%d%%] umbral=%d → %s",
+                status,
+                origin,
+                c.asset,
+                c.direction.upper(),
+                c.score,
+                c.payout,
                 eff_threshold,
                 decision_tag,
             )
-            log.info("      [OB] %s", getattr(c, "_ob_info", "sin datos"))
-            log.info("      [MA] %s", getattr(c, "_ma_info", "sin datos"))
+            if is_verbose():
+                rev_pattern = getattr(c, "_reversal_pattern", "none")
+                rev_strength = float(getattr(c, "_reversal_strength", 0.0) or 0.0)
+                log.info(
+                    "      detail pattern=%s strength=%.2f zona=%.0fmin "
+                    "comp=%.1f rebote=%.1f trend=%.1f payout_pts=%.1f",
+                    rev_pattern,
+                    rev_strength,
+                    c.zone.age_minutes,
+                    c.score_breakdown.get("compression", 0),
+                    c.score_breakdown.get("bounce", 0),
+                    c.score_breakdown.get("trend", 0),
+                    c.score_breakdown.get("payout", 0),
+                )
+                ob_info = getattr(c, "_ob_info", "sin datos")
+                ma_info = getattr(c, "_ma_info", "sin datos")
+                if ob_info and ob_info != "sin datos":
+                    log.info("      [OB] %s", ob_info)
+                if ma_info and ma_info != "sin datos":
+                    log.info("      [MA] %s", ma_info)
 
         selected, rejected = select_best(
             candidates,
@@ -1964,7 +2004,17 @@ class AssetScanner:
                     )
                     continue
 
-            log.info(explain_score(winner, threshold=session_threshold))
+            # Full breakdown only when verbose; one-line score always
+            if is_verbose():
+                log.info(explain_score(winner, threshold=session_threshold))
+            else:
+                log.info(
+                    "Score winner %s %s = %.1f (umbral=%d)",
+                    winner.asset,
+                    winner.direction.upper(),
+                    winner.score,
+                    session_threshold,
+                )
             amount = getattr(winner, "_amount", 0.0)
             stage = getattr(winner, "_stage", "initial")
             if self.bot.compensation_pending and stage == "initial":

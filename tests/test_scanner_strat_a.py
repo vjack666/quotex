@@ -597,13 +597,14 @@ async def test_strat_a_scan_excludes_low_payout_asset(monkeypatch, caplog):
         candles_h1={sym: []},
     )
 
-    with caplog.at_level("INFO", logger="scanner"):
+    with caplog.at_level("DEBUG", logger="scanner"):
         result = await scanner._scan_phase_evaluate_assets(cycle)
 
     assert result["candidates"] == []
     assert bot.stats["skipped"] >= 1
+    # Compact cycle summary stays on INFO; per-asset payout spam is DEBUG.
+    assert "A:payout bajo" in caplog.text
     assert "⛔ [STRAT-A]" in caplog.text
-    assert sym in caplog.text
     assert "payout=86" in caplog.text
     assert "< 87" in caplog.text
 
@@ -635,10 +636,12 @@ async def test_strat_a_scan_logs_pattern_missing_veto(monkeypatch, caplog):
         candles_h1={sym: []},
     )
 
-    with caplog.at_level("INFO", logger="scanner"):
+    with caplog.at_level("DEBUG", logger="scanner"):
         result = await scanner._scan_phase_evaluate_assets(cycle)
 
     assert result["candidates"] == []
+    # Pattern veto is asset-detail (DEBUG by default); summary stays INFO.
+    assert "📊 Eval" in caplog.text
     assert "⛔ [STRAT-A]" in caplog.text
     assert sym in caplog.text
     assert "rebote techo" in caplog.text

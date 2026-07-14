@@ -565,8 +565,61 @@
   <div class="card col-3 kpi">
     <h2>Balance</h2>
     <div class="val accent" id="balance">–</div>
-    <div class="lbl">USD · PRACTICE</div>
+    <div class="lbl">USD · cuenta (informativo)</div>
     <div class="delta" id="balance-delta"></div>
+  </div>
+
+  <!-- BANKROLL BINARIAS (Massaniello) -->
+  <div class="card col-4" id="bankroll-card">
+    <h2>Bankroll binarias <span class="sub2">Massaniello</span></h2>
+    <p style="font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.4;">
+      Capital que el bot <strong>arriesga</strong> en la secuencia. No usa el balance completo de la cuenta.
+    </p>
+    <div class="rows">
+      <div class="row">
+        <span class="k">Capital asignado</span>
+        <span class="v" style="display:flex;align-items:center;gap:6px;">
+          <span>$</span>
+          <input type="number" id="br-assigned" min="1" max="10000" step="1"
+            class="br-edit" data-br="assigned"
+            oninput="brOnFieldEdit()" onchange="brOnFieldEdit()"
+            style="width:88px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;color:var(--silver);padding:4px 8px;font-size:13px;font-weight:600;">
+        </span>
+      </div>
+      <div class="row"><span class="k">Balance cuenta</span><span class="v" id="br-account">–</span></div>
+      <div class="row">
+        <span class="k">Ops / ITM</span>
+        <span class="v" style="display:flex;align-items:center;gap:6px;">
+          <input type="number" id="br-ops" min="2" max="20" step="1" title="Operaciones por sesión"
+            class="br-edit" data-br="ops"
+            oninput="brOnFieldEdit()" onchange="brOnFieldEdit()"
+            style="width:52px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;color:var(--silver);padding:4px 6px;font-size:13px;font-weight:600;">
+          <span style="opacity:.6;">/</span>
+          <input type="number" id="br-itm" min="1" max="15" step="1" title="ITM objetivo"
+            class="br-edit" data-br="itm"
+            oninput="brOnFieldEdit()" onchange="brOnFieldEdit()"
+            style="width:52px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;color:var(--silver);padding:4px 6px;font-size:13px;font-weight:600;">
+        </span>
+      </div>
+      <div class="row">
+        <span class="k">Payout mín. % <span style="opacity:.65;font-weight:400">(escáner + stake)</span></span>
+        <span class="v" style="display:flex;align-items:center;gap:6px;">
+          <input type="number" id="br-payout" min="50" max="98" step="1" title="Mínimo payout del escáner y fórmula Massaniello"
+            class="br-edit" data-br="payout"
+            oninput="brOnFieldEdit()" onchange="brOnFieldEdit()"
+            style="width:60px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;color:var(--silver);padding:4px 6px;font-size:13px;font-weight:600;">
+          <span style="opacity:.7;">%</span>
+        </span>
+      </div>
+      <div class="row"><span class="k">Próximo stake <span style="opacity:.65;font-weight:400">(en vivo)</span></span><span class="v accent" id="br-next">–</span></div>
+      <div class="row"><span class="k">Estado</span><span class="v" id="br-status">–</span></div>
+    </div>
+    <div id="br-warn" style="display:none;font-size:11px;color:var(--orange);margin-top:8px;"></div>
+    <div id="br-msg" style="display:none;font-size:11px;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+      <button class="cfg-btn secondary" type="button" id="br-refresh" onclick="refreshBankroll()" style="padding:6px 12px;font-size:11px;">Actualizar</button>
+      <button class="cfg-btn primary" type="button" id="br-save" onclick="saveBankroll()" style="padding:6px 12px;font-size:11px;">Guardar bankroll</button>
+    </div>
   </div>
 
   <!-- OPERACIÓN ACTUAL -->
@@ -763,19 +816,10 @@
       <h2>Configuración del bot <span class="sub2">solo editable cuando el bot está detenido</span></h2>
       <div class="cfg-msg" id="cfg-msg"></div>
 
-      <!-- Massaniello -->
-      <div class="cfg-section">Massaniello</div>
-      <div class="cfg-grid" id="cfg-grid">
-        <div class="cfg-field"><label>Operaciones por sesión</label><input type="number" id="cfg-mass-ops" min="2" max="20"></div>
-        <div class="cfg-field"><label>ITM objetivo</label><input type="number" id="cfg-mass-wins" min="1" max="15"></div>
-        <div class="cfg-field"><label>Tiempo máx. sesión (min)</label><input type="number" id="cfg-session-max" min="5" max="480" step="5"></div>
-        <div class="cfg-field"><label>Capital virtual (USD)</label><input type="number" id="cfg-mass-virtual" min="5" max="10000" step="5"></div>
-      </div>
-
-      <!-- Payout y Scanner -->
-      <div class="cfg-section">Payout y Scanner</div>
+      <!-- Payout / bankroll Massaniello: solo en Operación → Bankroll -->
+      <div class="cfg-section">Sesión</div>
       <div class="cfg-grid" id="cfg-grid2">
-        <div class="cfg-field"><label>Payout mínimo general (%)</label><input type="number" id="cfg-min-payout" min="50" max="98" step="1"></div>
+        <div class="cfg-field"><label>Tiempo máx. sesión (min)</label><input type="number" id="cfg-session-max" min="5" max="480" step="5"></div>
       </div>
 
       <!-- Operación -->
@@ -958,10 +1002,16 @@ function render(s){
   if(typeof pnl==="number"){ pe.textContent=(pnl>=0?"+":"")+pnl.toFixed(2); pe.className="v "+(pnl>=0?"up":"down"); }
   setText("m-wr", (typeof m.win_rate_pct==="number")? m.win_rate_pct.toFixed(0)+"%" : "–");
   setText("m-ops", (m.wins_in_cycle!=null||m.losses_in_cycle!=null)? `${m.wins_in_cycle||0} / ${m.losses_in_cycle||0}` : "–");
-  setText("m-next", (typeof m.next_amount==="number" && m.next_amount>0)? m.next_amount.toFixed(2) : "–");
+  const nextAmt = (typeof m.next_stake==="number" && m.next_stake>0)
+    ? m.next_stake
+    : (typeof m.next_amount==="number" && m.next_amount>0 ? m.next_amount : null);
+  setText("m-next", nextAmt!=null ? nextAmt.toFixed(2) : "–");
   const saf = document.getElementById("m-safety");
   const sv = m.safety_status || "OK";
   saf.textContent = sv; saf.className = "safety " + sv;
+
+  // ---- Bankroll card (live fields; input only overwritten when not focused) ----
+  applyBankrollFromSnapshot(s, m);
 
   // ---- Actividad ----
   setText("a-scans", s.total_scans);
@@ -1035,6 +1085,9 @@ ws.onerror = goDown;
 // snapshot inicial por HTTP (por si el WS tarda)
 fetch('/api/state').then(r=>r.json()).then(applyData).catch(()=>{});
 fetch('/api/strat_f').then(r=>r.json()).then(d=>{ if(d && d.accepted) render({strat_f:d}); }).catch(()=>{});
+_brBindDirtyHandlers();
+refreshBankroll(true); // first load only fills inputs from server
+if(typeof pollRunnerStatus==="function") pollRunnerStatus();
 
 // ── Caja Negra (Fase 5b) ──
 function stochCell(s){
@@ -1143,10 +1196,12 @@ function updateRunnerUI(runner){
     btn.textContent = "Detener";
     btn.className = "ctrl-btn stop";
     btn.disabled = false;
+    setBankrollLocked(true);
   } else {
     btn.textContent = "Iniciar";
     btn.className = "ctrl-btn start";
     btn.disabled = false;
+    setBankrollLocked(false);
   }
   // Info line
   const info = document.getElementById("ctrl-info");
@@ -1158,6 +1213,8 @@ function updateRunnerUI(runner){
   }
   // Update session info if available
   if(runner.session) updateSessionInfo(runner.session);
+  // Readonly bankroll status only — never rewrite user inputs here
+  refreshBankrollStatus();
 }
 
 function botToggle(){
@@ -1469,26 +1526,327 @@ if (typeof ws !== "undefined") {
   });
 }
 
+// ── Bankroll binarias (Massaniello + payout) ─────────────────────────────────
+// Inputs are USER-OWNED after first load. Polls must NOT rewrite them.
+// Stake updates LIVE in the browser (same formula as massaniello_engine).
+
+let _brLocked = false;
+let _brInputsLoaded = false;
+let _brDirty = { assigned: false, ops: false, itm: false, payout: false };
+let _brUserTouched = false; // once true, snapshot must never overwrite stake
+
+// ── Massaniello stake (mirrors src/massaniello_engine.py) ─────────────────────
+function _brEffectiveProfit(profit){
+  return profit < 1 ? profit + 1 : profit;
+}
+function _brMultiplierTable(operations, expectedItm, profit){
+  profit = _brEffectiveProfit(profit);
+  const table = [];
+  for(let i = 0; i <= operations; i++){
+    table[i] = [];
+    for(let j = 0; j <= expectedItm + 1; j++) table[i][j] = null;
+  }
+  for(let played = operations; played >= 0; played--){
+    for(let wins = expectedItm; wins >= 0; wins--){
+      if(wins === expectedItm){
+        table[played][wins] = 1.0;
+      } else if(expectedItm - wins === operations - played){
+        table[played][wins] = Math.pow(profit, operations - played);
+      } else if(played === operations){
+        table[played][wins] = null;
+      } else {
+        const afterLoss = table[played + 1][wins];
+        const afterWin = table[played + 1][wins + 1];
+        if(afterLoss == null || afterWin == null) table[played][wins] = null;
+        else {
+          table[played][wins] =
+            profit * afterLoss * afterWin / (afterLoss + (profit - 1) * afterWin);
+        }
+      }
+    }
+  }
+  return table;
+}
+function _brCalculateStake(capital, operations, expectedItm, payoutPct, wins, losses){
+  capital = Number(capital);
+  operations = parseInt(operations, 10);
+  expectedItm = parseInt(expectedItm, 10);
+  payoutPct = parseInt(payoutPct, 10);
+  wins = wins || 0;
+  losses = losses || 0;
+  if(!(capital > 0) || !(operations >= 1) || !(expectedItm >= 1) || expectedItm > operations) return null;
+  if(!(payoutPct >= 1 && payoutPct <= 99)) return null;
+  const played = wins + losses;
+  if(played >= operations || wins >= expectedItm || losses >= operations - expectedItm + 1) return null;
+  const profit = _brEffectiveProfit(payoutPct / 100.0);
+  const table = _brMultiplierTable(operations, expectedItm, profit);
+  const afterLoss = table[played + 1][wins];
+  const afterWin = table[played + 1][wins + 1];
+  if(afterLoss == null || afterWin == null) return capital;
+  const denom = afterLoss + (profit - 1) * afterWin;
+  if(denom === 0) return capital;
+  let stake = (1 - profit * afterWin / denom) * capital;
+  stake = Math.max(0, Math.min(capital, stake));
+  // cents round-up like bot
+  return Math.ceil(stake * 100 - 1e-9) / 100;
+}
+
+function _brReadForm(){
+  return {
+    capital: parseFloat(document.getElementById("br-assigned").value),
+    ops: parseInt(document.getElementById("br-ops").value, 10),
+    itm: parseInt(document.getElementById("br-itm").value, 10),
+    payout: parseInt(document.getElementById("br-payout").value, 10),
+  };
+}
+
+function _brPreviewUrl(formLive){
+  const f = _brReadForm();
+  const q = new URLSearchParams();
+  if(formLive) q.set("form", "1");
+  if(!isNaN(f.capital) && f.capital >= 0) q.set("capital", String(f.capital));
+  if(!isNaN(f.ops) && f.ops >= 1) q.set("ops", String(f.ops));
+  if(!isNaN(f.itm) && f.itm >= 1) q.set("itm", String(f.itm));
+  if(!isNaN(f.payout) && f.payout >= 50) q.set("payout", String(f.payout));
+  return "/api/massaniello/preview?" + q.toString();
+}
+
+/** Instant stake from form — no network, same formula as bot. */
+function _brUpdateStakeFromForm(){
+  const f = _brReadForm();
+  const el = document.getElementById("br-next");
+  if(!el) return;
+  const stake = _brCalculateStake(f.capital, f.ops, f.itm, f.payout, 0, 0);
+  if(stake == null || isNaN(stake)){
+    el.textContent = "–";
+    return;
+  }
+  const pay = (!isNaN(f.payout) ? f.payout : "–");
+  el.textContent = "$" + stake.toFixed(2) + " @" + pay + "%";
+}
+
+/** Called from oninput/onchange on bankroll fields. */
+function brOnFieldEdit(){
+  _brUserTouched = true;
+  const t = (typeof event !== "undefined" && event && event.target) ? event.target : null;
+  if(t && t.dataset && t.dataset.br) _brDirty[t.dataset.br] = true;
+  // Always recompute stake immediately so user sees risk before Guardar
+  _brUpdateStakeFromForm();
+}
+
+function _brBindDirtyHandlers(){
+  // Handlers also on HTML oninput=; this is backup + dirty flags
+  document.querySelectorAll(".br-edit").forEach(el=>{
+    if(el.dataset.brBound) return;
+    el.dataset.brBound = "1";
+    el.addEventListener("input", brOnFieldEdit);
+    el.addEventListener("change", brOnFieldEdit);
+  });
+}
+
+function _brLiveStakePreview(){
+  // Prefer client formula (instant). API is optional backup.
+  _brUpdateStakeFromForm();
+}
+
+function _brFillInputsOnce(p, force){
+  const assigned = document.getElementById("br-assigned");
+  const ops = document.getElementById("br-ops");
+  const itm = document.getElementById("br-itm");
+  const pay = document.getElementById("br-payout");
+  if(!assigned || !ops || !itm || !pay) return;
+  if(force || (!_brDirty.assigned && (!_brInputsLoaded || assigned.value===""))){
+    if(p.assigned_capital!=null) assigned.value = p.assigned_capital;
+  }
+  if(force || (!_brDirty.ops && (!_brInputsLoaded || ops.value===""))){
+    if(p.operations!=null) ops.value = p.operations;
+  }
+  if(force || (!_brDirty.itm && (!_brInputsLoaded || itm.value===""))){
+    if(p.expected_wins!=null) itm.value = p.expected_wins;
+  }
+  if(force || (!_brDirty.payout && (!_brInputsLoaded || pay.value===""))){
+    if(p.payout_pct!=null) pay.value = p.payout_pct;
+  }
+  _brInputsLoaded = true;
+}
+
+function _brApplyReadonly(p){
+  if(!p) return;
+  setText("br-account", p.account_balance!=null ? ("$"+Number(p.account_balance).toFixed(2)) : "–");
+  // Never overwrite stake from server while user is editing the form
+  if(!_brUserTouched){
+    const stakeLabel = p.next_stake!=null
+      ? ("$"+Number(p.next_stake).toFixed(2) + (p.payout_pct!=null ? (" @"+p.payout_pct+"%") : ""))
+      : "–";
+    setText("br-next", stakeLabel);
+  } else {
+    _brUpdateStakeFromForm();
+  }
+  setText("br-status", p.status || "–");
+  const warn = document.getElementById("br-warn");
+  if(warn){
+    if(p.warn_assigned_gt_balance){
+      warn.style.display = "block";
+      warn.textContent = "Aviso: capital asignado mayor que el balance de cuenta. El bot igual usa el capital asignado como tope de riesgo.";
+    } else {
+      warn.style.display = "none";
+      warn.textContent = "";
+    }
+  }
+}
+
+function applyBankrollFromSnapshot(s, m){
+  // Snapshot polls: ONLY account balance + live W/L status. Never touch inputs or live stake.
+  m = m || (s && s.masaniello) || {};
+  const bal = s && s.known_balance;
+  if(typeof bal === "number"){
+    setText("br-account", "$" + bal.toFixed(2));
+  }
+  if(!_brUserTouched && !_brLocked){
+    const nextAmt = (typeof m.next_stake==="number" && m.next_stake>0) ? m.next_stake : null;
+    if(nextAmt!=null) setText("br-next", "$" + nextAmt.toFixed(2));
+  }
+  if(m.wins_in_cycle!=null || m.losses_in_cycle!=null){
+    const w = m.wins_in_cycle||0, l = m.losses_in_cycle||0;
+    setText("br-status", w + "W / " + l + "L" + (m.safety_status && m.safety_status!=="OK" ? " · "+m.safety_status : ""));
+  }
+}
+
+function setBankrollLocked(locked){
+  _brLocked = !!locked;
+  ["br-assigned", "br-ops", "br-itm", "br-payout"].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.disabled = _brLocked;
+  });
+  const save = document.getElementById("br-save");
+  if(save) save.disabled = _brLocked;
+}
+
+/** Readonly status only — safe to call often. */
+function refreshBankrollStatus(){
+  // Poll never fights the form: if user touched fields, only recompute local stake
+  if(_brUserTouched){
+    _brUpdateStakeFromForm();
+    return;
+  }
+  fetch(_brPreviewUrl(false))
+    .then(r=>r.json())
+    .then(p=>{ if(p && !p.error) _brApplyReadonly(p); })
+    .catch(()=>{});
+}
+
+/**
+ * Load/fill bankroll form.
+ * @param {boolean} force - rewrite inputs from server (after save or explicit Actualizar)
+ */
+function refreshBankroll(force){
+  _brBindDirtyHandlers();
+  fetch(_brPreviewUrl(false))
+    .then(r=>r.json())
+    .then(p=>{
+      if(!p || p.error) return;
+      if(force){
+        _brDirty = { assigned: false, ops: false, itm: false, payout: false };
+        _brUserTouched = false;
+      }
+      _brFillInputsOnce(p, !!force);
+      // Always show stake for current field values
+      _brUpdateStakeFromForm();
+    })
+    .catch(()=>{
+      _brUpdateStakeFromForm();
+    });
+}
+
+function saveBankroll(){
+  const msg = document.getElementById("br-msg");
+  if(_brLocked){
+    msg.style.display = "block";
+    msg.style.color = "var(--orange)";
+    msg.textContent = "Sesión en curso: capital/Ops/ITM/payout se desbloquean al terminar (o al detener el bot).";
+    return;
+  }
+  const raw = parseFloat(document.getElementById("br-assigned").value);
+  let ops = parseInt(document.getElementById("br-ops").value, 10);
+  let itm = parseInt(document.getElementById("br-itm").value, 10);
+  let pay = parseInt(document.getElementById("br-payout").value, 10);
+  if(isNaN(raw) || raw < 0){
+    msg.style.display = "block";
+    msg.style.color = "var(--red)";
+    msg.textContent = "Capital inválido.";
+    return;
+  }
+  if(isNaN(ops) || ops < 2){
+    msg.style.display = "block";
+    msg.style.color = "var(--red)";
+    msg.textContent = "Ops debe ser ≥ 2.";
+    return;
+  }
+  if(isNaN(itm) || itm < 1){
+    msg.style.display = "block";
+    msg.style.color = "var(--red)";
+    msg.textContent = "ITM debe ser ≥ 1.";
+    return;
+  }
+  if(itm > ops){
+    msg.style.display = "block";
+    msg.style.color = "var(--red)";
+    msg.textContent = "ITM no puede ser mayor que Ops.";
+    return;
+  }
+  if(isNaN(pay) || pay < 50 || pay > 98){
+    msg.style.display = "block";
+    msg.style.color = "var(--red)";
+    msg.textContent = "Payout mínimo entre 50 y 98.";
+    return;
+  }
+  fetch("/api/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      massaniello_virtual_capital: raw,
+      massaniello_ops: ops,
+      massaniello_wins: itm,
+      min_payout: pay,
+    }),
+  })
+    .then(r=>r.json())
+    .then(d=>{
+      if(d.error){
+        msg.style.display = "block";
+        msg.style.color = "var(--red)";
+        msg.textContent = d.error;
+        return;
+      }
+      msg.style.display = "block";
+      msg.style.color = "var(--emerald)";
+      msg.textContent = "Guardado en motor: $" + raw.toFixed(2) + " · " + ops + "/" + itm + " · payout≥" + pay + "% (ver log).";
+      _brDirty = { assigned: false, ops: false, itm: false, payout: false };
+      _brUserTouched = false;
+      refreshBankroll(true);
+      setTimeout(()=>{ msg.style.display="none"; }, 5000);
+    })
+    .catch(()=>{
+      msg.style.display = "block";
+      msg.style.color = "var(--red)";
+      msg.textContent = "Error de conexión al guardar.";
+    });
+}
+
 // ── Config Panel ─────────────────────────────────────────────────────────────
 
 function loadConfig(){
   fetch("/api/config").then(r=>r.json()).then(c=>{
     if(!c) return;
-    // Massaniello
-    document.getElementById("cfg-mass-ops").value = c.massaniello_ops || 5;
-    document.getElementById("cfg-mass-wins").value = c.massaniello_wins || 3;
-    document.getElementById("cfg-session-max").value = c.session_max_min || 60;
-    document.getElementById("cfg-mass-virtual").value = c.massaniello_virtual_capital || 30;
-    // Payout / Scanner
-    document.getElementById("cfg-min-payout").value = c.min_payout || 80;
-    // Operación
+    // Massaniello + min_payout: SOLO en Operación → Bankroll
+    const sm = document.getElementById("cfg-session-max");
+    if(sm) sm.value = c.session_max_min || 60;
     document.getElementById("cfg-expiry").value = c.duration_sec || 300;
     document.getElementById("cfg-base-amount").value = c.amount_initial || 1;
     document.getElementById("cfg-max-loss").value = c.max_loss_session ? Math.round(c.max_loss_session*100) : 20;
     document.getElementById("cfg-max-trades").value = c.cycle_ops || 5;
     document.getElementById("cfg-max-daily").value = c.cycle_wins || 2;
     document.getElementById("cfg-stratf-only").value = c.strat_f_only !== false ? "true" : "false";
-    // Disable fields if bot is running
     const locked = (c._runner_state === "running" || c._runner_state === "starting");
     document.querySelectorAll(".cfg-grid input, .cfg-grid select").forEach(el => el.disabled = locked);
   }).catch(()=>{});
@@ -1496,15 +1854,9 @@ function loadConfig(){
 
 function saveConfig(){
   const msg = document.getElementById("cfg-msg");
+  // No enviar massaniello/payout desde Consola
   const body = {
-    // Massaniello
-    massaniello_ops: parseInt(document.getElementById("cfg-mass-ops").value) || 5,
-    massaniello_wins: parseInt(document.getElementById("cfg-mass-wins").value) || 3,
     session_max_min: parseInt(document.getElementById("cfg-session-max").value) || 60,
-    massaniello_virtual_capital: parseFloat(document.getElementById("cfg-mass-virtual").value) || 30,
-    // Payout / Scanner
-    min_payout: parseInt(document.getElementById("cfg-min-payout").value) || 80,
-    // Operación
     duration_sec: parseInt(document.getElementById("cfg-expiry").value) || 300,
     amount_initial: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
     max_loss_session: (parseInt(document.getElementById("cfg-max-loss").value) || 20) / 100,

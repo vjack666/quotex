@@ -12,15 +12,26 @@ from config import ALIGN_SCAN_TO_CANDLE, SCAN_INTERVAL_SEC, SCAN_LEAD_SEC, TF_5M
 log = logging.getLogger("consolidation_bot")
 
 
-async def sleep_with_inline_countdown(wait_seconds: float, label: str) -> None:
+async def sleep_with_inline_countdown(
+    wait_seconds: float,
+    label: str,
+    *,
+    should_abort=None,
+) -> bool:
+    """Sleep with countdown. Returns True if aborted early via should_abort()."""
     total = max(0.0, float(wait_seconds))
     if total <= 0.0:
-        return
+        return False
 
     end_at = time.monotonic() + total
     last_logged_sec: Optional[int] = None
+    aborted = False
     try:
         while True:
+            if should_abort is not None and should_abort():
+                aborted = True
+                log.info("⏹ %s interrumpido (sesión finalizada)", label)
+                break
             remaining = max(0.0, end_at - time.monotonic())
             rem_sec = int(remaining + 0.999)
             if rem_sec >= 60:
@@ -40,6 +51,7 @@ async def sleep_with_inline_countdown(wait_seconds: float, label: str) -> None:
     finally:
         sys.stdout.write("\r" + (" " * 100) + "\r\n")
         sys.stdout.flush()
+    return aborted
 
 
 def seconds_until_next_scan(now_ts: Optional[float] = None) -> float:

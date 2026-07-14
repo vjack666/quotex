@@ -598,3 +598,36 @@ modo solo-STRAT-F: `STRAT_F_ONLY=True` en `src/config.py`.
 
 **Estado final:** G1+G2 cerrados por código y test. Sin commit aún (cambios sin
 commitear para revisión de Ruben, según costumbre del proyecto).
+## 2026-07-14 — Hub bankroll Massaniello + resolve broker lag + log compacto
+
+**Contexto:** Sesión de endurecimiento operativa: bankroll en dashboard, no
+confundir balance de cuenta con capital de riesgo; corregir LOSS prematuros
+por lag del broker; logs más legibles.
+
+### Bankroll en hub (Operación)
+- Card **Bankroll binarias**: capital asignado, Ops/ITM, payout mín. %, próximo stake.
+- Stake se actualiza **en vivo** (JS = misma fórmula `massaniello_engine`).
+- **Guardar bankroll** → `POST /api/config` + log `HUB config aplicada…`.
+- `min_payout` unifica piso de escáner (`MIN_PAYOUT` / STRAT-A / STRAT-F).
+- Motor lee Ops/ITM en **runtime** (`MassanielloRiskManager` no congela defaults al import).
+- Consola: sin bloque Massaniello duplicado.
+
+### Resolve de trades (broker lag)
+- `profitAmount == 0` ya no es LOSS.
+- Grace 20s, timeout check_win 90s, más reintentos.
+- Sin resultado confiable → UNRESOLVED (reconcile 15 min).
+- Countdown entre scans se aborta si la sesión ya terminó.
+
+### Log
+- Modo normal compacto; `BOT_LOG_VERBOSE=1` para detalle por activo.
+- `src/bot_logging.py` helpers.
+
+### Archivos clave
+- `hub/static/index.html`, `app.py`, `src/massaniello_preview.py`, `src/massaniello_risk.py`
+- `src/executor.py`, `src/loop_utils.py`, `src/scanner.py`, `src/config.py`
+- `src/bot_logging.py`, tests nuevos de preview/resolve/config live
+
+### Verificación
+- pytest suite verde (~339 passed).
+
+---

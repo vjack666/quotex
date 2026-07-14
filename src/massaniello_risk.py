@@ -7,12 +7,8 @@ from math import ceil
 from typing import Any, Optional, Tuple
 
 from alerter import alerter
-from config import (
-    MASSANIELLO_EXPECTED_WINS,
-    MASSANIELLO_OPERATIONS,
-    MIN_ORDER_AMOUNT,
-    SESSION_MAX_MIN,
-)
+import config as _cfg
+from config import MIN_ORDER_AMOUNT
 from massaniello_engine import Settings, calculate_stake, effective_profit
 
 # Lazy import to avoid circular deps at module level
@@ -33,23 +29,44 @@ log = logging.getLogger(__name__)
 
 
 class MassanielloRiskManager:
-    """Wrapper de sesión: 5 ops / 3 ITM / límite temporal."""
+    """Wrapper de sesión Massaniello (ops / ITM / límite temporal).
+
+    Ops/ITM se leen de ``config`` en el momento de crear la instancia (no al
+    importar el módulo), para que el hub (capital + Ops/ITM) actualice el motor
+    real de stakes — misma fórmula que la calculadora Desktop/massaniello.
+    """
 
     def __init__(
         self,
-        operations: int = MASSANIELLO_OPERATIONS,
-        expected_wins: int = MASSANIELLO_EXPECTED_WINS,
-        session_max_min: int = SESSION_MAX_MIN,
+        operations: Optional[int] = None,
+        expected_wins: Optional[int] = None,
+        session_max_min: Optional[int] = None,
     ) -> None:
-        self.operations = int(operations)
-        self.expected_wins = int(expected_wins)
-        self.session_max_min = int(session_max_min)
+        # Read LIVE module values (hub may have changed them via /api/config).
+        ops = int(operations if operations is not None else _cfg.MASSANIELLO_OPERATIONS)
+        ew = int(expected_wins if expected_wins is not None else _cfg.MASSANIELLO_EXPECTED_WINS)
+        smm = int(session_max_min if session_max_min is not None else _cfg.SESSION_MAX_MIN)
+        if ops < 1:
+            ops = 1
+        if ew < 1:
+            ew = 1
+        if ew > ops:
+            ew = ops
+        self.operations = ops
+        self.expected_wins = ew
+        self.session_max_min = smm
         self.session_start_time: Optional[float] = None
         self.entries = 0
         self.wins = 0
         self.losses = 0
         self.current_balance: Optional[float] = None
         self._initial_capital: Optional[float] = None
+        log.info(
+            "MassanielloRiskManager listo: %d ops / %d ITM / max %d min (motor calculadora)",
+            self.operations,
+            self.expected_wins,
+            self.session_max_min,
+        )
 
     @staticmethod
     def _round_up_cents(amount: float) -> float:

@@ -93,12 +93,14 @@ class MassanielloPersistence:
         # Si la sesión previa ya estaba completa/fallida/agotada → NO restaurar
         # contadores. Solo recuperamos el balance y dejamos el manager en defaults.
         if validated.get("session_active", 1) == 0:
-            log.info("Sesión Massaniello previa estaba completa — arrancando nueva sesión limpia")
             if validated.get("current_balance") is not None:
                 manager.current_balance = validated["current_balance"]
                 manager._initial_capital = validated.get("initial_capital") or validated["current_balance"]
             # wins, losses, entries, session_start_time quedan en 0/None (defaults del __init__)
-            log.info("  → Contadores en cero (nueva sesión), balance recuperado: %s", manager.current_balance)
+            log.info(
+                "Massaniello: sesión previa completa → nueva limpia (balance=%s)",
+                manager.current_balance,
+            )
             return
 
         # Sesión activa → restaurar todo normal

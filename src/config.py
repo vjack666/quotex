@@ -61,9 +61,17 @@ FETCH_RETRY_BACKOFF_SEC = 0.35
 ORDER_SEND_RETRIES = 1
 RECONNECT_TIMEOUT_SEC = 12.0
 SCAN_MAX_ASSETS_PER_CYCLE = 40
-SCAN_PROGRESS_EVERY = 10
+# Logging verbosity: set BOT_LOG_VERBOSE=1 for per-asset noise + phase markers.
+# Default (normal) keeps cycle summaries, signals, entries, wins/losses.
+LOG_VERBOSE = os.environ.get("BOT_LOG_VERBOSE", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+SCAN_PROGRESS_EVERY = 10 if LOG_VERBOSE else 0  # 0 = no progress spam
 SCAN_WS_INTER_ASSET_DELAY_SEC = 2.0
-SCAN_PHASE_LOG = True
+SCAN_PHASE_LOG = bool(LOG_VERBOSE)  # [FASE n/5] only in verbose
 CONNECT_RETRY_DELAY_SEC = 2.0
 
 CANDLE_FETCH_CONCURRENCY = 5
@@ -106,7 +114,7 @@ MA_LOOKBACK_CANDLES = 60
 MA_FAST_PERIOD = 35
 MA_SLOW_PERIOD = 50
 MA_FLAT_DELTA_PCT = 0.0005
-DRY_RUN_VERBOSE = True
+DRY_RUN_VERBOSE = bool(LOG_VERBOSE)
 
 EMAIL = os.environ.get("QUOTEX_EMAIL", "")
 PASSWORD = os.environ.get("QUOTEX_PASSWORD", "")
@@ -124,10 +132,13 @@ MARTIN_MONITOR_INTERVAL_SEC = 10.0
 MARTIN_ALERT_PCT = 0.0005
 MARTIN_LIVE_WINDOW_MIN_SEC = 30.0
 MARTIN_LIVE_WINDOW_MAX_SEC = 60.0
-MARTIN_RESOLVE_GRACE_SEC = 5.0
-MARTIN_RESOLVE_TIMEOUT_SEC = 8.0
-MARTIN_RESOLVE_RETRY_SEC = 5.0
-MARTIN_RESOLVE_MAX_ATTEMPTS = 3
+# Resolve timing: Quotex often settles a few seconds AFTER nominal expiry.
+# check_win waits until game_state==1; short timeouts caused premature LOSS
+# when profitAmount was still 0 / history not updated yet.
+MARTIN_RESOLVE_GRACE_SEC = 20.0
+MARTIN_RESOLVE_TIMEOUT_SEC = 90.0
+MARTIN_RESOLVE_RETRY_SEC = 8.0
+MARTIN_RESOLVE_MAX_ATTEMPTS = 6
 
 STRAT_A_MIN_PAYOUT = 87
 STRAT_A_MIN_SCORE = 75

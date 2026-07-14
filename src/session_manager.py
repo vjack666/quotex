@@ -123,7 +123,8 @@ class SessionManager:
         self._state = SessionState.SCANNING
         self._session_start_time = time.time()
         self._emit_state_changed()
-        log.info("🔍 Session started — SCANNING")
+        # bootstrap_for_run() emits the user-facing line; keep this quiet
+        log.debug("Session started — SCANNING")
 
     def stop(self) -> None:
         """Transition to STOPPED from any state."""

@@ -289,8 +289,54 @@ async def update_config(body: dict[str, Any]):
     """Update bot configuration (only when bot is stopped)."""
     if _runner.state in ("running", "starting"):
         return {"error": "Cannot change config while bot is running. Stop it first."}
+    log = logging.getLogger("app")
+    # Audit trail: what the user committed from the hub
+    keys_of_interest = (
+        "massaniello_ops",
+        "massaniello_wins",
+        "massaniello_virtual_capital",
+        "min_payout",
+        "session_max_min",
+    )
+    interesting = {k: body.get(k) for k in keys_of_interest if k in body}
+    if interesting:
+        log.info("HUB config save (antes de aplicar): %s", interesting)
     _runner.update_config(**body)
-    return {"status": "updated", "config": _runner.get_config()}
+    cfg = _runner.get_config()
+    log.info(
+        "HUB config aplicada → Massaniello %s ops / %s ITM | capital=$%s | "
+        "min_payout=%s%% (escáner + stake)",
+        cfg.get("massaniello_ops"),
+        cfg.get("massaniello_wins"),
+        cfg.get("massaniello_virtual_capital"),
+        cfg.get("min_payout"),
+    )
+    return {"status": "updated", "config": cfg}
+
+
+@_hub_app.get("/api/massaniello/preview")
+async def massaniello_preview(
+    payout: int | None = None,
+    capital: float | None = None,
+    ops: int | None = None,
+    itm: int | None = None,
+    form: int = 0,
+):
+    """Next-stake preview using the same Massaniello formula as the bot.
+
+    Query overrides (optional, for live hub typing without save):
+      capital, ops, itm, payout, form=1
+    """
+    from massaniello_preview import preview_from_runner
+
+    return preview_from_runner(
+        _runner,
+        payout_pct=payout,
+        assigned_capital=capital,
+        operations=ops,
+        expected_wins=itm,
+        use_form_overrides=bool(form),
+    )
 
 
 @_hub_app.get("/api/logs")

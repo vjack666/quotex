@@ -85,7 +85,7 @@ async def fetch_candles(
             return valid
     got = len(valid)
     if hasattr(client, "get_historical_candles"):
-        log.info(
+        log.debug(
             "%s tf=%ss: get_candles returned %d<%d, using get_historical_candles",
             asset, tf_sec, got, min_expected,
         )

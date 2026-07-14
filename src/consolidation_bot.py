@@ -144,7 +144,15 @@ class ConsolidationBot:
         # Semáforo COMPARTIDO del WebSocket: lo usan el prefetch del scan loop y
         # el HTF en background, para no saturar el único socket de Quotex a la vez.
         self._ws_sem = asyncio.Semaphore(CANDLE_FETCH_CONCURRENCY)
-        self.htf_scanner = HTFScanner(client, assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT), min_payout=STRAT_A_MIN_PAYOUT, on_asset_refresh=self._on_htf_asset_refresh, ws_sem=self._ws_sem)
+        # Live MIN_PAYOUT from config module (hub bankroll card can change it)
+        _mp = int(getattr(_config, "MIN_PAYOUT", 80))
+        self.htf_scanner = HTFScanner(
+            client,
+            assets_fn=lambda: get_open_assets(client, min_payout=int(getattr(_config, "MIN_PAYOUT", 80))),
+            min_payout=_mp,
+            on_asset_refresh=self._on_htf_asset_refresh,
+            ws_sem=self._ws_sem,
+        )
         self._htf_task: asyncio.Task[Any] | None = None
         self._hub_scanner: Any = None
 
@@ -338,8 +346,7 @@ async def main(
 
     # Smart lifecycle: Iniciar → SCANNING; incomplete Massaniello → resume.
     # Without this the manager stays STOPPED and the scan loop exits immediately.
-    _bootstrap_mode = bot.session_manager.bootstrap_for_run(bot.massaniello)
-    log.info("Session bootstrap mode: %s", _bootstrap_mode)
+    bot.session_manager.bootstrap_for_run(bot.massaniello)
     bot.session_stop_hit = False
 
     # Register live bot with web BotRunner (if this process is the runner task).
@@ -379,13 +386,13 @@ async def main(
                     _old, bot.massaniello._initial_capital, _kelly_factor,
                 )
         else:
-            log.info("⏸️ Kelly factor %.4f — sin ajuste", _kelly_factor)
+            log.debug("Kelly factor %.4f — sin ajuste", _kelly_factor)
         _kelly.close()
     except Exception as exc:
         log.warning("⚠️ No se pudo aplicar Kelly sizing: %s", exc)
 
     bot._htf_task = asyncio.create_task(bot.htf_scanner.run_forever())
-    log.info("[HTF] Scanner 15m iniciado en background")
+    # run_forever() logs the single HTF start line
 
     if hub_scanner is not None:
         bot._hub_scanner = hub_scanner
@@ -531,7 +538,23 @@ async def main(
                 sleep_for = max(5.0, SCAN_INTERVAL_SEC - elapsed)
 
             try:
-                await sleep_with_inline_countdown(sleep_for, "Próximo escaneo")
+                aborted = await sleep_with_inline_countdown(
+                    sleep_for,
+                    "Próximo escaneo",
+                    should_abort=lambda: bool(
+                        bot.session_stop_hit
+                        or bot.session_manager.state == SessionState.COMPLETED
+                    ),
+                )
+                if aborted:
+                    # Session ended during wait (trade resolve) — stop without another full scan
+                    log.info(
+                        "🎯 SESIÓN MASSANIELLO FINALIZADA — "
+                        "scan detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
+                    )
+                    await asyncio.sleep(1.0)
+                    bot.session_manager.stop()
+                    break
             except asyncio.CancelledError:
                 break
     except KeyboardInterrupt:
@@ -633,10 +656,21 @@ class BotRunner:
         _config.MASSANIELLO_EXPECTED_WINS = int(c.get("massaniello_wins", 3))
         _config.SESSION_MAX_MIN = int(c.get("session_max_min", 60))
         _config.MASSANIELLO_VIRTUAL_CAPITAL = float(c.get("massaniello_virtual_capital", 30.0))
-        _config.MIN_PAYOUT = int(c.get("min_payout", 80))
+        # Single user-facing payout floor: scanner + Massaniello stake math
+        mp = max(50, min(98, int(c.get("min_payout", 80))))
+        _config.MIN_PAYOUT = mp
+        _config.STRAT_A_MIN_PAYOUT = mp
+        _config.STRAT_F_MIN_PAYOUT = mp
         _config.STRAT_F_MIN_SCORE = int(c.get("strat_f_min_score", 60))
         _config.STRAT_F_ZONE_MIN_AGE = int(c.get("strat_f_zone_min_age", 3))
         _config.DURATION_SEC = int(c.get("duration_sec", 300))
+        log.info(
+            "Config módulo: Massaniello %d/%d capital=$%.2f min_payout=%d%%",
+            _config.MASSANIELLO_OPERATIONS,
+            _config.MASSANIELLO_EXPECTED_WINS,
+            _config.MASSANIELLO_VIRTUAL_CAPITAL,
+            mp,
+        )
 
     def _apply_config_to_bot(self) -> None:
         """Push config changes to the live bot instance (hot-reload)."""
@@ -644,12 +678,29 @@ class BotRunner:
         if bot is None:
             return
         c = self._config
-        # Update Massaniello manager on the live bot
+        # Update Massaniello manager on the live bot (ops/ITM drive real stakes).
+        # Only safe while session has no progress — otherwise wait until stop.
         if hasattr(bot, "massaniello") and bot.massaniello is not None:
             mgr = bot.massaniello
-            mgr.operations = int(c.get("massaniello_ops", 5))
-            mgr.expected_wins = int(c.get("massaniello_wins", 3))
-            mgr.session_max_min = int(c.get("session_max_min", 60))
+            played = int(getattr(mgr, "wins", 0) or 0) + int(getattr(mgr, "losses", 0) or 0)
+            new_ops = int(c.get("massaniello_ops", 5))
+            new_wins = int(c.get("massaniello_wins", 3))
+            new_smm = int(c.get("session_max_min", 60))
+            if played == 0:
+                mgr.operations = new_ops
+                mgr.expected_wins = new_wins
+                mgr.session_max_min = new_smm
+                log.info(
+                    "Massaniello actualizado en vivo: %d ops / %d ITM",
+                    new_ops,
+                    new_wins,
+                )
+            else:
+                log.warning(
+                    "Massaniello config guardada en módulo, pero sesión con %d ops "
+                    "jugadas — se aplica en la próxima sesión limpia",
+                    played,
+                )
         # Update scanner payout threshold
         if hasattr(bot, "scanner") and bot.scanner is not None:
             pass  # scanner reads config module at import time, already updated
@@ -763,7 +814,15 @@ class BotRunner:
     async def _run(self) -> None:
         """Wrapper que ejecuta main() y maneja el lifecycle."""
         try:
+            # Ensure ops/ITM/capital from hub are in config module BEFORE
+            # MassanielloRiskManager() is constructed inside main().
             self._apply_config_to_module()
+            log.info(
+                "BotRunner start — Massaniello hub: %d ops / %d ITM / capital=$%.2f",
+                int(self._config.get("massaniello_ops", 5)),
+                int(self._config.get("massaniello_wins", 3)),
+                float(self._config.get("massaniello_virtual_capital", 30.0)),
+            )
             self._state = "running"
             await main(
                 dry_run=self._config["dry_run"],

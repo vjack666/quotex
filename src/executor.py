@@ -592,8 +592,66 @@ class TradeExecutor:
     async def _resolve_trade_after_expiry(self, asset: str, trade: TradeState) -> None:
         wait_sec = max(0.0, trade.duration_sec + MARTIN_RESOLVE_GRACE_SEC - (time.time() - trade.opened_at))
         if wait_sec > 0:
+            log.info(
+                "⌛ %s: esperando liquidación broker (%.0fs = duration+grace)…",
+                asset,
+                wait_sec,
+            )
             await asyncio.sleep(wait_sec)
         await self._resolve_trade(trade, asset)
+
+    @staticmethod
+    def _interpret_broker_result(
+        win_val: Any = None,
+        *,
+        status: Any = None,
+        payload: Any = None,
+        trade_amount: float = 0.0,
+        payout_pct: int = 80,
+    ) -> Optional[Tuple[str, float]]:
+        """Map broker payload to (WIN|LOSS, profit) or None if not settled yet.
+
+        Critical: profitAmount == 0 / missing history must NOT be treated as LOSS.
+        Quotex often exposes the ticket before profit is final (lag after expiry).
+        """
+        # Path A: check_win() → bool or numeric PnL
+        if win_val is not None:
+            if isinstance(win_val, bool):
+                if win_val:
+                    payout_rate = max(0.01, float(payout_pct) / 100.0)
+                    return "WIN", float(trade_amount) * payout_rate
+                return "LOSS", -abs(float(trade_amount))
+            if isinstance(win_val, (int, float)):
+                profit = float(win_val)
+                if profit > 0:
+                    return "WIN", profit
+                if profit < 0:
+                    return "LOSS", profit
+                # profit == 0 → still open / not settled
+                return None
+            return None
+
+        # Path B: get_result() → ("win"|"loss"|None, payload)
+        if status is None:
+            return None
+        status_l = str(status).strip().lower()
+        profit = 0.0
+        if isinstance(payload, dict):
+            try:
+                profit = float(payload.get("profitAmount", 0) or 0)
+            except (TypeError, ValueError):
+                profit = 0.0
+
+        if profit > 0:
+            return "WIN", profit
+        if profit < 0:
+            return "LOSS", profit
+
+        # Ambiguous: library may label profit==0 as "loss" before settlement.
+        # Only trust explicit status when profit is non-zero (handled above).
+        if status_l in {"win", "loss"} and profit == 0:
+            return None
+        return None
     async def _process_pending_martin(
         self,
         candidates: list[CandidateEntry],
@@ -795,39 +853,29 @@ class TradeExecutor:
             try:
                 outcome = None
                 profit = 0.0
+                interpreted = None
 
                 # Compatibilidad: si guardamos REF-<id>, intentar check_win por id numérico.
                 if oid.startswith("REF-"):
                     ref_id = int(oid.split("-", 1)[1])
                     win_val = await self.client.check_win(ref_id)
-                    if isinstance(win_val, (int, float)):
-                        profit = float(win_val)
-                        outcome = "WIN" if profit > 0 else "LOSS"
-                    elif isinstance(win_val, bool):
-                        outcome = "WIN" if win_val else "LOSS"
+                    interpreted = self._interpret_broker_result(win_val, trade_amount=0.0)
                 else:
                     status, payload = await self.client.get_result(oid)
-                    if status == "win":
-                        outcome = "WIN"
-                        if isinstance(payload, dict):
-                            profit = float(payload.get("profitAmount", 0) or 0)
-                    elif status == "loss":
-                        outcome = "LOSS"
-                        if isinstance(payload, dict):
-                            profit = float(payload.get("profitAmount", 0) or 0)
+                    interpreted = self._interpret_broker_result(
+                        status=status, payload=payload, trade_amount=0.0,
+                    )
 
-                if outcome in {"WIN", "LOSS"}:
+                if interpreted is not None:
+                    outcome, profit = interpreted
                     journal._conn.execute(
                         "UPDATE candidates SET outcome=?, profit=?, closed_at=? WHERE id=? AND outcome='PENDING'",
                         (outcome, float(profit), datetime.now(tz=BROKER_TZ).isoformat(), rid),
                     )
                     resolved += 1
                 else:
-                    journal._conn.execute(
-                        "UPDATE candidates SET outcome='UNRESOLVED', closed_at=? WHERE id=? AND outcome='PENDING'",
-                        (datetime.now(tz=BROKER_TZ).isoformat(), rid),
-                    )
-                    unresolved += 1
+                    # Leave PENDING — do not force UNRESOLVED/LOSS while broker lagging
+                    log.debug("Reconcile: id=%s still unsettled — keep PENDING", rid)
             except Exception:
                 journal._conn.execute(
                     "UPDATE candidates SET outcome='UNRESOLVED', closed_at=? WHERE id=? AND outcome='PENDING'",
@@ -910,6 +958,8 @@ class TradeExecutor:
         """
         Consulta el resultado de una operación expirada al broker
         y actualiza el journal con WIN / LOSS / UNRESOLVED sin bloquear el bot.
+
+        Never treats profitAmount==0 as LOSS (broker lag after expiry).
         """
         if trade.resolved:
             return
@@ -928,43 +978,62 @@ class TradeExecutor:
 
         outcome = "UNRESOLVED"
         profit  = 0.0
+        payout_pct = int(getattr(trade, "payout", 0) or 80)
         if has_id or has_ref:
             for attempt in range(1, MARTIN_RESOLVE_MAX_ATTEMPTS + 1):
+                interpreted: Optional[Tuple[str, float]] = None
                 try:
                     if has_ref:
+                        # check_win blocks until game_state==1; give it real time.
                         win_val = await asyncio.wait_for(
                             self.client.check_win(trade.order_ref),
                             timeout=MARTIN_RESOLVE_TIMEOUT_SEC,
                         )
-                        if isinstance(win_val, bool):
-                            outcome = "WIN" if win_val else "LOSS"
-                            profit = trade.amount * 0.8 if win_val else -abs(trade.amount)
-                            break
-                        if isinstance(win_val, (int, float)):
-                            profit = float(win_val)
-                            outcome = "WIN" if profit > 0 else "LOSS"
-                            break
+                        interpreted = self._interpret_broker_result(
+                            win_val,
+                            trade_amount=float(trade.amount),
+                            payout_pct=payout_pct,
+                        )
+                        if interpreted is None:
+                            log.info(
+                                "⏳ %s: resultado aún no liquidado (check_win=%r) intento %d/%d",
+                                sym,
+                                win_val,
+                                attempt,
+                                MARTIN_RESOLVE_MAX_ATTEMPTS,
+                            )
                     elif has_id:
                         status, payload = await asyncio.wait_for(
                             self.client.get_result(trade.order_id),
                             timeout=MARTIN_RESOLVE_TIMEOUT_SEC,
                         )
-                        if status == "win":
-                            outcome = "WIN"
-                            if isinstance(payload, dict):
-                                profit = float(payload.get("profitAmount", 0) or 0)
-                            break
-                        if status == "loss":
-                            outcome = "LOSS"
-                            if isinstance(payload, dict):
-                                profit = float(payload.get("profitAmount", 0) or 0)
-                            if profit == 0:
-                                profit = -abs(trade.amount)
-                            break
+                        interpreted = self._interpret_broker_result(
+                            status=status,
+                            payload=payload,
+                            trade_amount=float(trade.amount),
+                            payout_pct=payout_pct,
+                        )
+                        if interpreted is None:
+                            log.info(
+                                "⏳ %s: ticket sin PnL final (status=%r profit=%s) intento %d/%d",
+                                sym,
+                                status,
+                                (payload or {}).get("profitAmount") if isinstance(payload, dict) else None,
+                                attempt,
+                                MARTIN_RESOLVE_MAX_ATTEMPTS,
+                            )
+                    if interpreted is not None:
+                        outcome, profit = interpreted
+                        break
                 except asyncio.TimeoutError:
-                    log.debug("%s: check_win timeout intento %d/%d", sym, attempt, MARTIN_RESOLVE_MAX_ATTEMPTS)
+                    log.info(
+                        "⏳ %s: timeout esperando liquidación broker intento %d/%d",
+                        sym,
+                        attempt,
+                        MARTIN_RESOLVE_MAX_ATTEMPTS,
+                    )
                 except Exception as exc:
-                    log.debug(
+                    log.warning(
                         "No se pudo obtener resultado de %s / ref=%s intento %d/%d: %s",
                         trade.order_id,
                         trade.order_ref,
@@ -975,6 +1044,13 @@ class TradeExecutor:
 
                 if attempt < MARTIN_RESOLVE_MAX_ATTEMPTS:
                     await asyncio.sleep(MARTIN_RESOLVE_RETRY_SEC)
+
+        if outcome == "UNRESOLVED":
+            log.warning(
+                "⚠ %s: quedó UNRESOLVED (no se forzó LOSS). "
+                "Se reintentará en reconcile a los 15 min.",
+                sym,
+            )
 
         trade.resolved = True
 
