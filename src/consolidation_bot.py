@@ -529,6 +529,17 @@ class BotRunner:
             "cycle_profit_pct": 0.10,
             "min_payout": 80,
             "scan_lead_sec": 35.0,
+            # Massaniello
+            "massaniello_ops": _config.MASSANIELLO_OPERATIONS,
+            "massaniello_wins": _config.MASSANIELLO_EXPECTED_WINS,
+            "session_max_min": _config.SESSION_MAX_MIN,
+            "massaniello_virtual_capital": _config.MASSANIELLO_VIRTUAL_CAPITAL,
+            # Scanner payout
+            "strat_f_min_payout": _config.STRAT_F_MIN_PAYOUT,
+            "strat_f_min_score": _config.STRAT_F_MIN_SCORE,
+            "strat_f_zone_min_age": _config.STRAT_F_ZONE_MIN_AGE,
+            # Duration
+            "duration_sec": _config.DURATION_SEC,
         }
 
     @property
@@ -552,6 +563,37 @@ class BotRunner:
         for k, v in kwargs.items():
             if k in self._config:
                 self._config[k] = v
+        self._apply_config_to_module()
+        self._apply_config_to_bot()
+
+    def _apply_config_to_module(self) -> None:
+        """Push _config values into the config module so imports see updated values."""
+        c = self._config
+        _config.MASSANIELLO_OPERATIONS = int(c.get("massaniello_ops", 5))
+        _config.MASSANIELLO_EXPECTED_WINS = int(c.get("massaniello_wins", 3))
+        _config.SESSION_MAX_MIN = int(c.get("session_max_min", 60))
+        _config.MASSANIELLO_VIRTUAL_CAPITAL = float(c.get("massaniello_virtual_capital", 30.0))
+        _config.MIN_PAYOUT = int(c.get("min_payout", 80))
+        _config.STRAT_F_MIN_PAYOUT = int(c.get("strat_f_min_payout", 80))
+        _config.STRAT_F_MIN_SCORE = int(c.get("strat_f_min_score", 60))
+        _config.STRAT_F_ZONE_MIN_AGE = int(c.get("strat_f_zone_min_age", 3))
+        _config.DURATION_SEC = int(c.get("duration_sec", 300))
+
+    def _apply_config_to_bot(self) -> None:
+        """Push config changes to the live bot instance (hot-reload)."""
+        bot = self._bot
+        if bot is None:
+            return
+        c = self._config
+        # Update Massaniello manager on the live bot
+        if hasattr(bot, "massaniello") and bot.massaniello is not None:
+            mgr = bot.massaniello
+            mgr.operations = int(c.get("massaniello_ops", 5))
+            mgr.expected_wins = int(c.get("massaniello_wins", 3))
+            mgr.session_max_min = int(c.get("session_max_min", 60))
+        # Update scanner payout threshold
+        if hasattr(bot, "scanner") and bot.scanner is not None:
+            pass  # scanner reads config module at import time, already updated
 
     def get_status(self) -> dict[str, Any]:
         status: dict[str, Any] = {
@@ -598,6 +640,7 @@ class BotRunner:
     async def _run(self) -> None:
         """Wrapper que ejecuta main() y maneja el lifecycle."""
         try:
+            self._apply_config_to_module()
             self._state = "running"
             await main(
                 dry_run=self._config["dry_run"],

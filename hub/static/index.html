@@ -245,6 +245,12 @@
 
   /* Config Panel */
   .cfg-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+  .cfg-section {
+    font-size:11px; font-weight:510; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--accent-2); margin:18px 0 8px; padding-bottom:4px;
+    border-bottom:1px solid var(--border-2);
+  }
+  .cfg-section:first-of-type { margin-top:0; }
   .cfg-field { display:flex; flex-direction:column; gap:4px; }
   .cfg-field label { font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:.5px; }
   .cfg-field input, .cfg-field select {
@@ -468,17 +474,36 @@
     <div class="card col-12">
       <h2>Configuración del bot <span class="sub2">solo editable cuando el bot está detenido</span></h2>
       <div class="cfg-msg" id="cfg-msg"></div>
+
+      <!-- Massaniello -->
+      <div class="cfg-section">Massaniello</div>
       <div class="cfg-grid" id="cfg-grid">
+        <div class="cfg-field"><label>Operaciones por sesión</label><input type="number" id="cfg-mass-ops" min="2" max="20"></div>
+        <div class="cfg-field"><label>ITM objetivo</label><input type="number" id="cfg-mass-wins" min="1" max="15"></div>
+        <div class="cfg-field"><label>Tiempo máx. sesión (min)</label><input type="number" id="cfg-session-max" min="5" max="480" step="5"></div>
+        <div class="cfg-field"><label>Capital virtual (USD)</label><input type="number" id="cfg-mass-virtual" min="5" max="10000" step="5"></div>
+      </div>
+
+      <!-- Payout y Scanner -->
+      <div class="cfg-section">Payout y Scanner</div>
+      <div class="cfg-grid" id="cfg-grid2">
+        <div class="cfg-field"><label>Payout mínimo general (%)</label><input type="number" id="cfg-min-payout" min="50" max="98" step="1"></div>
+        <div class="cfg-field"><label>STRAT-F payout mínimo (%)</label><input type="number" id="cfg-stratf-payout" min="50" max="98" step="1"></div>
+        <div class="cfg-field"><label>STRAT-F score mínimo</label><input type="number" id="cfg-stratf-score" min="0" max="100" step="1"></div>
+        <div class="cfg-field"><label>STRAT-F zona mín. edad (velas)</label><input type="number" id="cfg-stratf-age" min="1" max="20"></div>
+      </div>
+
+      <!-- Operación -->
+      <div class="cfg-section">Operación</div>
+      <div class="cfg-grid" id="cfg-grid3">
         <div class="cfg-field"><label>Expiry (segundos)</label><input type="number" id="cfg-expiry" min="30" max="3600" step="30"></div>
         <div class="cfg-field"><label>Monto base (USD)</label><input type="number" id="cfg-base-amount" min="0.5" max="1000" step="0.5"></div>
         <div class="cfg-field"><label>Máx. loss seguidos</label><input type="number" id="cfg-max-loss" min="1" max="20"></div>
         <div class="cfg-field"><label>Max concurrent trades</label><input type="number" id="cfg-max-trades" min="1" max="5"></div>
         <div class="cfg-field"><label>Max daily trades</label><input type="number" id="cfg-max-daily" min="1" max="100"></div>
-        <div class="cfg-field"><label>Payout mínimo (%)</label><input type="number" id="cfg-min-payout" min="50" max="95" step="1"></div>
-        <div class="cfg-field"><label>Score mínimo</label><input type="number" id="cfg-min-score" min="0" max="10" step="0.1"></div>
-        <div class="cfg-field"><label>STOnly mode</label><select id="cfg-stonly"><option value="false">No</option><option value="true">Sí</option></select></div>
         <div class="cfg-field"><label>STRAT-F Only</label><select id="cfg-stratf-only"><option value="true">Sí</option><option value="false">No</option></select></div>
       </div>
+
       <div class="cfg-actions">
         <button class="cfg-btn secondary" onclick="loadConfig()">Resetear</button>
         <button class="cfg-btn primary" onclick="saveConfig()">Guardar</button>
@@ -834,38 +859,54 @@ function pollRunnerStatus(){
 function loadConfig(){
   fetch("/api/config").then(r=>r.json()).then(c=>{
     if(!c) return;
-    document.getElementById("cfg-expiry").value = c.expiry_sec || 180;
-    document.getElementById("cfg-base-amount").value = c.base_amount || 1;
-    document.getElementById("cfg-max-loss").value = c.max_loss_streak || 5;
-    document.getElementById("cfg-max-trades").value = c.max_concurrent_trades || 1;
-    document.getElementById("cfg-max-daily").value = c.max_daily_trades || 20;
-    document.getElementById("cfg-min-payout").value = c.min_payout_pct || 70;
-    document.getElementById("cfg-min-score").value = c.min_score || 0;
-    document.getElementById("cfg-stonly").value = c.stonly ? "true" : "false";
-    document.getElementById("cfg-stratf-only").value = c.strat_f_only ? "true" : "false";
+    // Massaniello
+    document.getElementById("cfg-mass-ops").value = c.massaniello_ops || 5;
+    document.getElementById("cfg-mass-wins").value = c.massaniello_wins || 3;
+    document.getElementById("cfg-session-max").value = c.session_max_min || 60;
+    document.getElementById("cfg-mass-virtual").value = c.massaniello_virtual_capital || 30;
+    // Payout / Scanner
+    document.getElementById("cfg-min-payout").value = c.min_payout || 80;
+    document.getElementById("cfg-stratf-payout").value = c.strat_f_min_payout || 80;
+    document.getElementById("cfg-stratf-score").value = c.strat_f_min_score || 60;
+    document.getElementById("cfg-stratf-age").value = c.strat_f_zone_min_age || 3;
+    // Operación
+    document.getElementById("cfg-expiry").value = c.duration_sec || 300;
+    document.getElementById("cfg-base-amount").value = c.amount_initial || 1;
+    document.getElementById("cfg-max-loss").value = c.max_loss_session ? Math.round(c.max_loss_session*100) : 20;
+    document.getElementById("cfg-max-trades").value = c.cycle_ops || 5;
+    document.getElementById("cfg-max-daily").value = c.cycle_wins || 2;
+    document.getElementById("cfg-stratf-only").value = c.strat_f_only !== false ? "true" : "false";
     // Disable fields if bot is running
     const locked = (c._runner_state === "running" || c._runner_state === "starting");
-    document.querySelectorAll("#cfg-grid input, #cfg-grid select").forEach(el => el.disabled = locked);
+    document.querySelectorAll(".cfg-grid input, .cfg-grid select").forEach(el => el.disabled = locked);
   }).catch(()=>{});
 }
 
 function saveConfig(){
   const msg = document.getElementById("cfg-msg");
   const body = {
-    expiry_sec: parseInt(document.getElementById("cfg-expiry").value) || 180,
-    base_amount: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
-    max_loss_streak: parseInt(document.getElementById("cfg-max-loss").value) || 5,
-    max_concurrent_trades: parseInt(document.getElementById("cfg-max-trades").value) || 1,
-    max_daily_trades: parseInt(document.getElementById("cfg-max-daily").value) || 20,
-    min_payout_pct: parseInt(document.getElementById("cfg-min-payout").value) || 70,
-    min_score: parseFloat(document.getElementById("cfg-min-score").value) || 0,
-    stonly: document.getElementById("cfg-stonly").value === "true",
+    // Massaniello
+    massaniello_ops: parseInt(document.getElementById("cfg-mass-ops").value) || 5,
+    massaniello_wins: parseInt(document.getElementById("cfg-mass-wins").value) || 3,
+    session_max_min: parseInt(document.getElementById("cfg-session-max").value) || 60,
+    massaniello_virtual_capital: parseFloat(document.getElementById("cfg-mass-virtual").value) || 30,
+    // Payout / Scanner
+    min_payout: parseInt(document.getElementById("cfg-min-payout").value) || 80,
+    strat_f_min_payout: parseInt(document.getElementById("cfg-stratf-payout").value) || 80,
+    strat_f_min_score: parseInt(document.getElementById("cfg-stratf-score").value) || 60,
+    strat_f_zone_min_age: parseInt(document.getElementById("cfg-stratf-age").value) || 3,
+    // Operación
+    duration_sec: parseInt(document.getElementById("cfg-expiry").value) || 300,
+    amount_initial: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
+    max_loss_session: (parseInt(document.getElementById("cfg-max-loss").value) || 20) / 100,
+    cycle_ops: parseInt(document.getElementById("cfg-max-trades").value) || 5,
+    cycle_wins: parseInt(document.getElementById("cfg-max-daily").value) || 2,
     strat_f_only: document.getElementById("cfg-stratf-only").value === "true",
   };
   fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
     .then(r=>r.json()).then(d=>{
       if(d.error){ msg.textContent=d.error; msg.className="cfg-msg err"; }
-      else { msg.textContent="Configuración guardada."; msg.className="cfg-msg ok"; setTimeout(()=>{ msg.className="cfg-msg"; },3000); }
+      else { msg.textContent="Configuración guardada y aplicada al bot."; msg.className="cfg-msg ok"; setTimeout(()=>{ msg.className="cfg-msg"; },3000); }
     }).catch(()=>{ msg.textContent="Error de conexión"; msg.className="cfg-msg err"; });
 }
 
