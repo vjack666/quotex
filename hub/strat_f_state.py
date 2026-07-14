@@ -8,7 +8,7 @@ MasanielloState) que vivían en hub_models.py.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -21,6 +21,7 @@ class StratFRow:
     payout: int            # %
     ctx: str               # range | uptrend | downtrend | broken
     event: str             # fractal_up | fractal_down | none
+    stoch_m15: Optional[Dict[str, Any]] = None  # snapshot estocástico M15
 
 
 @dataclass
@@ -30,6 +31,7 @@ class StratFReject:
     asset: str
     payout: int
     skip_reason: str       # p.ej. "M1 no rebota (cierra fuera)"
+    stoch_m15: Optional[Dict[str, Any]] = None  # snapshot estocástico M15
 
 
 @dataclass

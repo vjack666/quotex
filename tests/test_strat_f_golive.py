@@ -142,7 +142,7 @@ def test_scan_all_respects_strat_f_only(monkeypatch):
     async def _fake_enter(asset, direction, amount, zone, reason, stage,
                           journal_cid=None, signal_ts=None,
                           strategy_origin="STRAT-A", duration_sec=0, payout=0,
-                          score_original=0):
+                          score_original=0, black_box_cid=0):
         calls.append((asset, strategy_origin))
         return True
     monkeypatch.setattr(sc.executor, "enter_trade", _fake_enter)

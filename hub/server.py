@@ -22,6 +22,16 @@ from .hub_models import HubState
 from .strat_f_panel import StratFPanel
 from .hub_scanner import HubScanner
 
+# El módulo src.stats usa imports pelados (p.ej. `from black_box_recorder import ...`).
+# Al correr `python -m hub.server` desde la raíz, src/ no está en sys.path, así que
+# lo insertamos antes de importarlo. Los tests ya hacen esto; aquí cubrimos el launcher.
+import sys as _sys
+_SRC_DIR = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SRC_DIR))
+
+from src.stats import build_stats  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 STATIC_DIR = HERE / "static"
 INDEX_PATH = STATIC_DIR / "index.html"
@@ -218,6 +228,15 @@ async def api_strat_f():
     if _panel is None:
         return {"status": "waiting"}
     return _serialize(_panel.get_state())
+
+
+@app.get("/api/blackbox")
+async def api_blackbox():
+    """Reporte de la caja negra STRAT-F (win_rate, ranking pérdidas, A/B estocástico)."""
+    try:
+        return build_stats()
+    except Exception as exc:  # DB aún no creada (Fase 6 pendiente) o sin datos
+        return {"status": "empty", "error": str(exc), "total_resolved": 0}
 
 
 @app.websocket("/ws")

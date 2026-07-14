@@ -29,7 +29,10 @@ from config import *  # noqa: F401,F403 — re-export para main.py
 from alerter import alerter
 from candle_cache import CandleCache
 from config import MAX_SIMULTANEOUS_TRADES, MIN_ASSET_SPREAD, MAX_ENTRIES_PER_ASSET
-from connection import ConnectionManager, connect_with_retry, get_open_assets, looks_like_connection_issue
+from connection import (
+    ConnectionManager, connect_with_retry, create_trading_client, get_open_assets,
+    looks_like_connection_issue,
+)
 from diversification_enforcer import DiversificationEnforcer
 from htf_scanner import HTFScanner
 from errors import BotError
@@ -71,8 +74,10 @@ class ConsolidationBot:
         dry_run: bool,
         account_type: str = "PRACTICE",
         greylist_assets: Optional[set[str]] = None,
+        trade_client: Optional[Quotex] = None,
     ):
         self.client = client
+        self.trade_client = trade_client
         self.dry_run = dry_run
         self.account_type = account_type
         self.zones: dict[str, ConsolidationZone] = {}
@@ -137,7 +142,7 @@ class ConsolidationBot:
         self.htf_scanner = HTFScanner(client, assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT), min_payout=STRAT_A_MIN_PAYOUT, on_asset_refresh=self._on_htf_asset_refresh, ws_sem=self._ws_sem)
         self._htf_task: asyncio.Task[Any] | None = None
         self._hub_scanner: Any = None
-        self.executor = TradeExecutor(client, self)
+        self.executor = TradeExecutor(client, self, trade_client, self.htf_scanner)
         self.scanner = AssetScanner(self, self.executor)
         self.diversification_enforcer = DiversificationEnforcer(
             max_simultaneous_trades=MAX_SIMULTANEOUS_TRADES,
@@ -265,6 +270,19 @@ async def main(
     account_type = "REAL" if real_account else "PRACTICE"
     await client.change_account(account_type)
 
+    # Fix F6 (raíz): cliente de trading LIMPIO separado del de datos (scanner/HTF).
+    # El scanner abre streams de velas en vivo de ~29 activos en M1+M5 en el mismo
+    # socket; eso deja orders/open sin respuesta. Separar elimina la competencia.
+    trade_client = None
+    try:
+        trade_client, tc_reason = await create_trading_client(
+            email=EMAIL, password=PASSWORD, account_type=account_type,
+        )
+        if trade_client is None:
+            log.warning("No se pudo crear cliente de trading separado: %s (usando cliente de datos para buy)", tc_reason)
+    except Exception as _tc_exc:
+        log.warning("Excepción creando cliente de trading: %s", _tc_exc)
+
     start_balance: Optional[float] = None
     try:
         bal = await client.get_balance()
@@ -275,6 +293,7 @@ async def main(
 
     bot = ConsolidationBot(
         client=client, dry_run=dry_run, account_type=account_type, greylist_assets=greylist_assets,
+        trade_client=trade_client,
     )
     if start_balance is not None:
         bot.set_session_start_balance(start_balance)

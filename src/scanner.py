@@ -49,6 +49,7 @@ from config import (
     STRAT_A_ZONE_MIN_AGE_REBOUND,
     STRAT_MOMENTUM_ENABLED,
     STRAT_F_ENABLED,
+    STRAT_F_ONLY,
     STRAT_ORDER_BLOCK_ENABLED,
     STRAT_ORDER_BLOCK_MIN_STRENGTH,
     TF_1M,
@@ -58,6 +59,8 @@ from config import (
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets
+from black_box_recorder import get_black_box
+from stochastic_m15 import compute_stoch
 from entry_decision_engine import (
     _check_htf_available_and_aligned,
     _check_zone_memory_no_wall,
@@ -1030,6 +1033,16 @@ class AssetScanner:
         candles_15m_by_asset = cycle.candles_15m
         assets = cycle.assets
 
+        # Caja negra STRAT-F (Fase 3): un scan_id por ciclo de evaluación y un
+        # session_id estable para agrupar ANTES/DESPUÉS. Modo medición: graba,
+        # no filtra.
+        _bb = get_black_box()
+        _bb_scan_id = _bb.record_scan_start(
+            "STRAT-F", getattr(cycle, "scan_number", 0),
+            {"market_state": "unknown", "volatility_atr": 0.0},
+        )
+        _bb_session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         for idx, (sym, payout) in enumerate(assets, start=1):
             if SCAN_PROGRESS_EVERY > 0 and (
                 idx == 1 or idx % SCAN_PROGRESS_EVERY == 0 or idx == len(assets)
@@ -1064,9 +1077,13 @@ class AssetScanner:
             candles = candles_5m_by_asset.get(sym, [])
             candles_1m = candles_1m_by_asset.get(sym, [])
             candles_1m_collected[sym] = candles_1m
+
+            # STRAT_F_ONLY: bypass temprano — solo evalúa STRAT-F
+            _strat_f_only_mode = STRAT_F_ONLY and not _runtime_config.STRAT_A_ONLY
+
             momentum_hit = (
                 detect_momentum_1m(candles_1m)
-                if not _runtime_config.STRAT_A_ONLY and _runtime_config.STRAT_MOMENTUM_ENABLED
+                if not _runtime_config.STRAT_A_ONLY and not _strat_f_only_mode and _runtime_config.STRAT_MOMENTUM_ENABLED
                 else None
             )
             if momentum_hit and sym not in self.bot.trades:
@@ -1114,7 +1131,7 @@ class AssetScanner:
             # ── Reversal Swing ──
             swing_hit = (
                 detect_reversal_swing(candles_1m)
-                if not _runtime_config.STRAT_A_ONLY and _runtime_config.STRAT_REVERSAL_SWING_ENABLED
+                if not _runtime_config.STRAT_A_ONLY and not _strat_f_only_mode and _runtime_config.STRAT_REVERSAL_SWING_ENABLED
                 else None
             )
             if swing_hit and sym not in self.bot.trades:
@@ -1158,7 +1175,7 @@ class AssetScanner:
             # ── Order Block (post-momentum, pre-STRAT-A) ──
             ob_hit = (
                 detect_order_block_entry(candles_1m)
-                if not _runtime_config.STRAT_A_ONLY and STRAT_ORDER_BLOCK_ENABLED
+                if not _runtime_config.STRAT_A_ONLY and not _strat_f_only_mode and STRAT_ORDER_BLOCK_ENABLED
                 else None
             )
             if ob_hit and sym not in self.bot.trades:
@@ -1207,11 +1224,13 @@ class AssetScanner:
             # ── STRAT-F (Fractal / Wyckoff, marco M15/M5/M1) ──
             if (
                 not _runtime_config.STRAT_A_ONLY
-                and STRAT_F_ENABLED
+                and (STRAT_F_ENABLED or _strat_f_only_mode)
                 and sym not in self.bot.trades
             ):
                 candles_15m = candles_15m_by_asset.get(sym, [])
                 f_eval = evaluate_strat_f(candles_15m, candles, candles_1m, payout=payout)
+                # Estocástico M15 (Fase 2/3): capa fina sobre pyquotex. Modo medición.
+                stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
                 _batch = getattr(self, "_strat_f_batch", None)
                 if _batch is None:
                     _batch = [[], []]
@@ -1227,9 +1246,11 @@ class AssetScanner:
                     "candles_5m": candles,
                     "candles_1m": candles_1m,
                     "candles_15m": candles_15m,
+                    "stoch_m15": stoch_m15,
                     "zone": f_eval.zone,
                     "decision": None,
                 }
+                f_candidate = None
                 if f_eval.has_signal and f_eval.direction and f_eval.zone:
                     f_amount, _ = self.executor._compute_initial_amount(payout)
                     f_candidate = CandidateEntry(
@@ -1271,6 +1292,47 @@ class AssetScanner:
                     _rec["decision"] = "REJECTED_STRAT_F"
                     _batch[1].append(_rec)
                     log.info("[STRAT-F] %s skip: %s", sym, f_eval.skip_reason)
+
+                # Caja negra STRAT-F (Fase 3): grabar cada decisión ANTES de ejecutar.
+                # Modo medición: registra siempre, no filtra por estocástico.
+                if _rec.get("decision"):
+                    _bb_cid = _bb.record_candidate(
+                        _bb_scan_id,
+                        "STRAT-F",
+                        {
+                            "asset": sym,
+                            "direction": f_eval.direction or "",
+                            "score": round(f_eval.strength * 100.0, 1),
+                            "payout": payout,
+                            "decision": _rec["decision"],
+                            "decision_reason": f_eval.m5_event or "",
+                            "reject_reason": f_eval.skip_reason or "",
+                            "strategy_details": {
+                                "strength": round(f_eval.strength * 100.0, 1),
+                                "ctx": f_eval.m15_context,
+                                "event": f_eval.m5_event,
+                                "pattern": f_eval.pattern_name,
+                            },
+                            "candles_1m": [
+                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                                for c in (candles_1m or [])[-5:]
+                            ],
+                            "candles_5m": [
+                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                                for c in (candles or [])[-3:]
+                            ],
+                            "candles_15m": [
+                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                                for c in (candles_15m or [])[-20:]
+                            ],
+                            "session_id": _bb_session_id,
+                            "stoch_m15": stoch_m15,
+                        },
+                    )
+                    # Vincular el candidate_id al winner para resolución exacta en Fase 4.
+                    if f_candidate is not None:
+                        setattr(f_candidate, "_black_box_cid", _bb_cid)
+
 
             if payout < STRAT_A_MIN_PAYOUT:
                 log.info(
@@ -1628,6 +1690,7 @@ class AssetScanner:
                 asset=a["asset"], direction=a["direction"],
                 strength=int(a["strength"]), payout=a["payout"],
                 ctx=a.get("ctx", ""), event=a.get("event", ""),
+                stoch_m15=a.get("stoch_m15"),
             )
             for a in _batch[0]
         ]
@@ -1635,6 +1698,7 @@ class AssetScanner:
             StratFReject(
                 asset=r["asset"], payout=r["payout"],
                 skip_reason=r["skip_reason"],
+                stoch_m15=r.get("stoch_m15"),
             )
             for r in _batch[1]
         ]
@@ -1925,24 +1989,66 @@ class AssetScanner:
             )
             accepted_this_scan += 1
             winner._journal_cid = cid  # type: ignore[attr-defined]
-            entered = await self.executor.enter_trade(
-                winner.asset, winner.direction, amount,
-                winner.zone,
+            entered = await self._enter_candidate(
+                journal, winner, cid,
                 f"SCORE={winner.score:.1f}/100 | {winner.direction.upper()} "
                 f"en {winner.asset} payout={winner.payout}%",
-                stage,
-                journal_cid=cid,
-                signal_ts=getattr(winner, "_signal_ts_1m", winner.candles[-1].ts if winner.candles else None),
-                strategy_origin=getattr(winner, "_strategy_origin", "STRAT-A"),
-                duration_sec=DURATION_SEC,
-                payout=winner.payout,
-                score_original=winner.score,
+                stage, amount, DURATION_SEC,
             )
+            if not entered:
+                # Fix F6: Quotex PRACTICE rechaza ciertos activos OTC con
+                # reason=unexpected aunque is_open=True. En lugar de abortar el
+                # ciclo, iteramos el ranking de candidatos para encontrar uno
+                # que el broker acepte (p.ej. USDZAR_otc suele funcionar).
+                log.warning(
+                    "⚠ Broker rechazó %s (unexpected). Probando siguiente candidato del ranking...",
+                    winner.asset,
+                )
+                for alt in sorted(candidates, key=lambda x: -x.score):
+                    if alt is winner or alt.asset in self.bot.failed_assets:
+                        continue
+                    alt_cid = journal.log_candidate(
+                        alt,
+                        decision="ACCEPTED",
+                        amount=getattr(alt, "_amount", 0.0),
+                        stage=getattr(alt, "_stage", "initial"),
+                        outcome=outcome,
+                        strategy=self.executor._strategy_snapshot(),
+                    )
+                    entered = await self._enter_candidate(
+                        journal, alt, alt_cid,
+                        f"SCORE={alt.score:.1f}/100 | {alt.direction.upper()} "
+                        f"en {alt.asset} payout={alt.payout}%",
+                        getattr(alt, "_stage", "initial"),
+                        getattr(alt, "_amount", 0.0),
+                        DURATION_SEC,
+                    )
+                    if entered:
+                        log.info("✓ Entrada alternativa aceptada en %s", alt.asset)
+                        break
             if entered:
                 await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
 
         self.bot.stats["skipped"] += len(rejected)
         self.executor._record_scan_acceptances(accepted_this_scan)
+
+    async def _enter_candidate(
+        self, journal, cand, cid, note, stage, amount, duration_sec
+    ) -> bool:
+        """Envía la orden para un candidato y devuelve True si el broker la aceptó."""
+        return await self.executor.enter_trade(
+            cand.asset, cand.direction, amount,
+            cand.zone,
+            note,
+            stage,
+            journal_cid=cid,
+            signal_ts=getattr(cand, "_signal_ts_1m", cand.candles[-1].ts if cand.candles else None),
+            strategy_origin=getattr(cand, "_strategy_origin", "STRAT-A"),
+            duration_sec=duration_sec,
+            payout=cand.payout,
+            score_original=cand.score,
+            black_box_cid=getattr(cand, "_black_box_cid", 0),
+        )
 
     async def scan_all(self) -> None:
         """

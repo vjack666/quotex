@@ -36,6 +36,9 @@ async def enviar_orden(
     igual que espera pyquotex.
     """
     time_mode = "TIMER" if asset.endswith("_otc") else "TIME"
+    # Fix: strat_fractal genera "CALL"/"PUT" (mayus) pero pyquotex espera
+    # "call"/"put" (minus). Normalizar para que el broker no rechace silencioso.
+    direction = direction.lower()
     try:
         status, info = await asyncio.wait_for(
             client.buy(amount, asset, direction, duration, time_mode=time_mode),

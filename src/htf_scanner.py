@@ -80,8 +80,12 @@ class HTFScanner:
         # con el scan loop (evita que HTF y prefetch saturen el socket a la vez).
         # Si no, crea uno propio (retrocompatible).
         self._sem = ws_sem if ws_sem is not None else asyncio.Semaphore(2)
+        # Flag de pausa (lo setea el executor durante orders/open para
+        # liberar el WebSocket). Se chequea DENTRO del ciclo (no solo
+        # al inicio) para cortar en segundos, no en 3min.
+        self._paused = False
 
-    # ── API pública ────────────────────────────────────────────────────────
+    # ── API pública ──────────────────────────────────────────────
 
     def get_candles_15m(self, asset: str) -> list:
         """
@@ -130,7 +134,15 @@ class HTFScanner:
             out.append((sym, int(payout), float(age), bool(age <= max_age)))
         return out
 
-    # ── Loop background ────────────────────────────────────────────────────
+    def pause(self) -> None:
+        """Pausa el refresco (libera el WebSocket para orders/open)."""
+        self._paused = True
+
+    def resume(self) -> None:
+        """Reanuda el refresco en la próxima ronda."""
+        self._paused = False
+
+    # ── Loop background ──────────────────────────────────────────
 
     async def run_forever(self) -> None:
         """
@@ -145,6 +157,11 @@ class HTFScanner:
         )
 
         while True:
+            if self._paused:
+                # Fix F6i: el bot está por enviar/pending una orden. No emitir
+                # get_candles (M15) para no saturar el WS que buy() usa.
+                await asyncio.sleep(HTF_CYCLE_SLEEP)
+                continue
             try:
                 await self._refresh_cycle()
             except asyncio.CancelledError:
@@ -205,6 +222,11 @@ class HTFScanner:
         skipped   = 0
 
         for sym, payout in assets:
+            # Fix F6i: si se pausó durante el ciclo, cortar ya (no esperar
+            # el ciclo completo de ~29 activos). Permite que el executor
+            # compre con el WebSocket limpio en segundos, no en 3min.
+            if self._paused:
+                return
             if not self._needs_refresh(sym):
                 skipped += 1
                 continue

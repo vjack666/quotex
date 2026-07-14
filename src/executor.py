@@ -71,12 +71,17 @@ from config import (
     H1_CONFIRM_ENABLED,
     MASSANIELLO_VIRTUAL_CAPITAL,
 )
-from connection import fetch_candles_with_retry, get_open_assets, place_order
+from config import EMAIL, PASSWORD
+from connection import create_trading_client, fetch_candles_with_retry, get_open_assets, place_order
 from entry_sync import EntrySynchronizer
 from entry_scorer import CandidateEntry
 from models import ConsolidationZone, EntryTimingInfo, MartinPending, TradeState
 from strat_a import price_at_ceiling, price_at_floor
 from trade_journal import get_journal
+from black_box_recorder import get_black_box
+from stochastic_m15 import compute_stoch
+from strat_f_postmortem import analyze_postmortem
+from candle_patterns import fetch_candles_1m
 
 if TYPE_CHECKING:
     from pyquotex.stable_api import Quotex
@@ -84,10 +89,44 @@ if TYPE_CHECKING:
 log = logging.getLogger("executor")
 
 class TradeExecutor:
-    def __init__(self, client, bot):
+    def __init__(self, client, bot, trade_client=None, htf_scanner=None):
         self.client = client
         self.bot = bot
+        # Cliente de trading LIMPIO (separado del de datos) para buy().
+        # Si es None, usa client (fallback compatibilidad).
+        self.trade_client = trade_client if trade_client is not None else client
+        # Referencia directa al HTF scanner para pausarlo durante la orden.
+        self.htf = htf_scanner
         self.entry_sync = EntrySynchronizer()
+
+    async def _ensure_trade_client_alive(self) -> None:
+        """Crea un trade_client FRESCO antes de cada orden.
+
+        Fix definitivo: pyquotex.buy() Internamente hace:
+          1. start_candles_stream() — subscribe a velas en vivo
+          2. get_server_time() — profile + server time
+          3. api.buy() → settings_apply + tick + orders/open
+          4. Espera buy_id por duration+5 segundos
+
+        Todos esos pasos envían mensajes WS. Si el trade_client estuvo idle
+        durante el scan (60-90s), el WS puede parecer vivo (get_balance pasa)
+        pero los flujos internos de buy() fallan silenciosamente.
+
+        Solución: crear un trade_client FRESCO (igual que compra_venta_m5_otc.py
+        que funciona en <2s). Un connect + buy inmediato = WS limpio.
+        """
+        try:
+            account_type = getattr(self.bot, "account_type", "PRACTICE")
+            tc, tc_reason = await create_trading_client(
+                email=EMAIL, password=PASSWORD, account_type=account_type,
+            )
+            if tc is not None:
+                self.trade_client = tc
+                log.info("  ✓ trade_client fresco creado para orden")
+            else:
+                log.error("  ✗ No se pudo crear trade_client: %s", tc_reason)
+        except Exception as exc:
+            log.error("  ✗ Excepción creando trade_client: %s", exc)
 
     @staticmethod
     def _uses_massaniello() -> bool:
@@ -935,6 +974,61 @@ class TradeExecutor:
         log.info("🏁 %s %s $%.2f | saldo: $%.2f", sym, outcome, profit, balance_now)
         self._update_cycle_after_result(outcome=outcome, profit=profit)
 
+        # Post-mortem caja negra STRAT-F (Fase 4): solo estrategia STRAT-F.
+        # En caso de pérdida, baja velas 1m post-expiry y evalúa si había OTRA
+        # MEJOR ENTRADA pocos minutos después (alimenta calibración / IA).
+        # Resolución por id exacto (trade.black_box_cid) si está vinculado;
+        # fallback por asset para compatibilidad con ciclos previos.
+        if getattr(trade, "strategy_origin", "") == "STRAT-F":
+            try:
+                bb = get_black_box()
+                bb_cid = getattr(trade, "black_box_cid", 0) or 0
+                before = None
+                if bb_cid:
+                    before = bb.get_candidate_by_id(bb_cid)
+                if before is None:
+                    before = bb.get_pending_candidate_before(sym)
+                candles_post = []
+                if before:
+                    post_raw = await fetch_candles_1m(self.client, sym, count=5)
+                    candles_post = [
+                        {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                        for c in (post_raw or [])
+                    ]
+                    loss_reason, improvement_hint = analyze_postmortem(
+                        before_candles_1m=before["candles_1m"],
+                        after_candles_1m=candles_post,
+                        direction=before["direction"] or trade.direction,
+                        outcome=outcome,
+                        entry_price=getattr(trade, "entry_price", None),
+                        exit_price=None,
+                    )
+                    if bb_cid:
+                        bb.resolve_candidate_by_id(
+                            bb_cid, outcome, profit,
+                            entry_price=getattr(trade, "entry_price", None),
+                            candles_post=candles_post,
+                            stoch_m15=before.get("stoch_m15"),
+                            loss_reason=loss_reason or None,
+                            improvement_hint=improvement_hint or None,
+                        )
+                    else:
+                        bb.resolve_candidate_for_asset(
+                            sym, outcome, profit,
+                            entry_price=getattr(trade, "entry_price", None),
+                            candles_post=candles_post,
+                            stoch_m15=before.get("stoch_m15"),
+                            loss_reason=loss_reason or None,
+                            improvement_hint=improvement_hint or None,
+                        )
+                    if outcome == "LOSS":
+                        log.info(
+                            "[POST-MORTEM] %s %s | razon=%s | mejora=%s",
+                            sym, trade.direction, loss_reason, improvement_hint,
+                        )
+            except Exception as exc:
+                log.debug("[POST-MORTEM] %s: error (no bloquea): %s", sym, exc)
+
         hub = getattr(self.bot, "_hub_scanner", None)
         if hub is not None:
             hub.record_trade_result(asset=sym, outcome=outcome, profit=profit)
@@ -1065,6 +1159,7 @@ class TradeExecutor:
         duration_sec: int = DURATION_SEC,
         payout: int = MIN_PAYOUT,
         score_original: float = 0.0,
+        black_box_cid: int = 0,
     ) -> bool:
         blocked, block_reason = self._massaniello_session_blocks_entry()
         if blocked:
@@ -1159,15 +1254,41 @@ class TradeExecutor:
         log.info("[%s] %s ENTRADA[%s] %s  %s  $%.2f  %ds  | %s",
                  strategy_origin, icon, stage, direction.upper(), sym, amount, duration_sec, reason)
 
-        ok, oid, open_price, order_ref, reject_reason = await place_order(
-            self.client,
-            sym,
-            direction,
-            amount,
-            duration_sec,
-            self.bot.dry_run,
-            account_type=self.bot.account_type,
-        )
+        # Fix F6k: 1 sola instancia de Quotex. El HTF scanner corre en
+        # run_forever sobre el MISMO WebSocket #1 que buy() usa. Aunque
+        # lo pausamos, el run_forever sigue vivo y el broker no confirma
+        # buy() (buy_timeout). Solución: CANCELAR la task HTF antes de
+        # buy() (WS#1 100% limpio) y RECREARLA después. Pruebas S2/S3/S5
+        # confirmaron que scan masivo + client.buy() SIN HTF -> status=True.
+        htf_task = getattr(self.bot, "_htf_task", None)
+        if htf_task is not None and not htf_task.done():
+            htf_task.cancel()
+            try:
+                await htf_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        # Fix WS idle: verificar que el trade_client esté vivo antes de buy().
+        # Si quedó idle durante el scan, Nginx/Cloudflare cierra la conexión.
+        await self._ensure_trade_client_alive()
+        try:
+            ok, oid, open_price, order_ref, reject_reason = await place_order(
+                self.trade_client,
+                sym,
+                direction,
+                amount,
+                duration_sec,
+                self.bot.dry_run,
+                account_type=self.bot.account_type,
+            )
+        finally:
+            # Recrear la task HTF para el próximo ciclo.
+            try:
+                if getattr(self.bot, "htf_scanner", None) is not None:
+                    self.bot._htf_task = asyncio.create_task(
+                        self.bot.htf_scanner.run_forever()
+                    )
+            except Exception as exc:
+                log.warning("  ⚠ No se pudo recrear la task HTF: %s", exc)
         if not ok:
             log.error("  ✗ Fallo al colocar orden en %s | reason=%s", sym, reject_reason)
             # Marcar activo para skip durante 2 ciclos consecutivos.
@@ -1195,6 +1316,7 @@ class TradeExecutor:
             duration_sec=int(duration_sec),
             payout=int(payout),
             score_original=float(score_original),
+            black_box_cid=int(black_box_cid),
         )
         trade = self.bot.trades[sym]
         hub = getattr(self.bot, "_hub_scanner", None)

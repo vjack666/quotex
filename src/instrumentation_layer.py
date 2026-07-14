@@ -11,7 +11,7 @@ Se inyecta vía logging configuración.
 
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 # Crear logger dedicado para métricas del pipeline
@@ -29,7 +29,7 @@ class PipelineMetrics:
     
     def reset(self):
         """Reinicia contadores para un nuevo ciclo."""
-        self.timestamp = datetime.utcnow().isoformat()
+        self.timestamp = datetime.now(timezone.utc).isoformat()
         
         # TIER 1: Asset Discovery
         self.assets_total = 0

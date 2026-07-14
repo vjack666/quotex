@@ -100,6 +100,7 @@ class TradeState:
     payout: int = MIN_PAYOUT
     resolved: bool = False
     score_original: float = 0.0
+    black_box_cid: int = 0
 
 
 @dataclass

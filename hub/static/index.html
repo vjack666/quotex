@@ -158,12 +158,41 @@
   }
   .footnote { text-align:center; color: var(--faint); font-size:11px; margin-top:6px; }
 
+  /* Tabs */
+  .tabs { display:flex; gap:6px; margin:0 auto 18px; max-width:1280px; }
+  .tab-btn {
+    font-family:'Inter', sans-serif; font-size:12.5px; font-weight:510; letter-spacing:.2px;
+    color: var(--muted); background: var(--surface); border:1px solid var(--border);
+    padding:7px 16px; border-radius:9999px; cursor:pointer; transition: all .18s ease;
+  }
+  .tab-btn:hover { color: var(--silver); border-color: var(--border); background: var(--surface-2); }
+  .tab-btn.active { color:#fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }
+  .view { display:none; }
+  .view.active { display:block; }
+
+  /* Caja Negra badges */
+  .bb-kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom:16px; }
+  .bb-badge { display:flex; flex-direction:column; gap:4px; }
+  .bb-badge .v { font-size:24px; font-weight:590; letter-spacing:-0.5px; font-family:'JetBrains Mono', monospace; }
+  .bb-badge .l { font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+  .bb-badge .v.good { color: var(--emerald); }
+  .bb-badge .v.bad { color: var(--red); }
+  .bb-badge .v.warn { color: var(--orange); }
+  .bb-tag { font-size:10.5px; font-weight:510; padding:2px 8px; border-radius:9999px; border:1px solid var(--border); }
+  .bb-tag.extremo { color: var(--orange); border-color: rgba(240,136,62,.4); background: rgba(240,136,62,.08); }
+  .bb-tag.neutro { color: var(--muted); }
+  .bb-tag.sin_datos { color: var(--faint); }
+  .bb-hint { color: var(--faint); font-size:11px; font-style:italic; }
+  .bb-wr { font-family:'JetBrains Mono', monospace; font-weight:500; }
+
   @media (max-width: 1024px){
     .col-3,.col-4,.col-5,.col-6,.col-7,.col-8 { grid-column: span 6; }
+    .bb-kpis { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 640px){
     body { padding:14px; }
     .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-12 { grid-column: span 12; }
+    .bb-kpis { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
 </head>
@@ -183,6 +212,12 @@
   </div>
 </header>
 
+<nav class="tabs">
+  <button class="tab-btn active" id="tab-op" onclick="showTab('op')">Operación</button>
+  <button class="tab-btn" id="tab-bb" onclick="showTab('bb')">Caja Negra</button>
+</nav>
+
+<div class="view active" id="op-view">
 <div class="grid">
 
   <!-- BALANCE -->
@@ -245,8 +280,8 @@
   <div class="card col-6">
     <h2>✅ Señales aceptadas <span class="sub2" id="acc-count">0</span></h2>
     <table>
-      <thead><tr><th>Activo</th><th>Dir</th><th>Score</th><th>Payout</th><th>Contexto</th></tr></thead>
-      <tbody id="acc-body"><tr><td class="empty" colspan="5">esperando señales…</td></tr></tbody>
+      <thead><tr><th>Activo</th><th>Dir</th><th>Score</th><th>Payout</th><th>Contexto</th><th>Estoc. M15</th></tr></thead>
+      <tbody id="acc-body"><tr><td class="empty" colspan="6">esperando señales…</td></tr></tbody>
     </table>
     <div class="barwrap"><i id="bar-acc" style="width:0%"></i></div>
   </div>
@@ -261,7 +296,48 @@
     <div class="barwrap rej"><i id="bar-rej" style="width:0%"></i></div>
   </div>
 
-</div>
+</div><!-- /grid op -->
+</div><!-- /op-view -->
+
+<!-- ============ CAJA NEGRA ============ -->
+<div class="view" id="bb-view">
+  <div class="bb-kpis">
+    <div class="bb-badge"><span class="v" id="bb-total">–</span><span class="l">Operaciones</span></div>
+    <div class="bb-badge"><span class="v" id="bb-wr">–</span><span class="l">Win rate</span></div>
+    <div class="bb-badge"><span class="v" id="bb-exp">–</span><span class="l">Expectancy</span></div>
+    <div class="bb-badge"><span class="v" id="bb-pnl">–</span><span class="l">PnL total</span></div>
+  </div>
+
+  <div class="grid">
+    <!-- Por asset -->
+    <div class="card col-6">
+      <h2>Win rate por activo <span class="sub2" id="bb-asset-count"></span></h2>
+      <table>
+        <thead><tr><th>Activo</th><th>Ops</th><th>Win rate</th><th>Expectancy</th><th>Estoc.</th></tr></thead>
+        <tbody id="bb-asset-body"><tr><td class="empty" colspan="5">sin datos aún (Fase 6 pendiente)</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Ranking pérdidas -->
+    <div class="card col-6">
+      <h2>¿Por qué se pierde? <span class="sub2">ranking loss_reason</span></h2>
+      <table>
+        <thead><tr><th>Motivo</th><th>Veces</th><th>Mejora sugerida</th></tr></thead>
+        <tbody id="bb-loss-body"><tr><td class="empty" colspan="3">sin pérdidas registradas</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- A/B estocástico -->
+    <div class="card col-12">
+      <h2>A/B estocástico M15 <span class="sub2">modo medición · aún no filtra</span></h2>
+      <table>
+        <thead><tr><th>Escenario</th><th>Ops</th><th>Win rate</th><th>Expectancy</th></tr></thead>
+        <tbody id="bb-ab-body"><tr><td class="empty" colspan="4">sin datos aún</td></tr></tbody>
+      </table>
+      <div class="bb-hint" id="bb-ab-note" style="margin-top:10px;"></div>
+    </div>
+  </div>
+</div><!-- /bb-view -->
 
 <div class="principle">
   Principio del bot: nunca evaluar una señal en una sola vela. El mercado deja rastro; el filtro lo hace explícito.
@@ -384,7 +460,8 @@ function render(s){
       `<td class="${(c.direction||"")==="call"?"d-call":"d-put"}">${(c.direction||"").toUpperCase()}</td>`+
       `<td class="score">${strength!=null? (typeof strength==="number"? strength.toFixed(1): strength) : "–"}</td>`+
       `<td>${c.payout!=null?c.payout+"%":"–"}</td>`+
-      `<td>${ctx||"–"}</td>`;
+      `<td>${ctx||"–"}</td>`+
+      `<td>${stochCell(c.stoch_m15)}</td>`;
     accB.appendChild(tr);
   });
 
@@ -433,6 +510,95 @@ ws.onerror = goDown;
 // snapshot inicial por HTTP (por si el WS tarda)
 fetch('/api/state').then(r=>r.json()).then(applyData).catch(()=>{});
 fetch('/api/strat_f').then(r=>r.json()).then(d=>{ if(d && d.accepted) render({strat_f:d}); }).catch(()=>{});
+
+// ── Caja Negra (Fase 5b) ──
+function stochCell(s){
+  if(!s || (s.k===undefined && !s.estado)) return '<span class="bb-tag sin_datos">–</span>';
+  const k = (typeof s.k==="number") ? s.k.toFixed(0) : "–";
+  const d = (typeof s.d==="number") ? s.d.toFixed(0) : "–";
+  const estado = (s.estado||"").toUpperCase();
+  const cls = estado==="SOBRECOMPRA"||estado==="SOBREVENTA" ? "extremo" : "neutro";
+  const label = estado ? estado : "NEUTRO";
+  return `<span class="bb-tag ${cls}">${k}/${d} · ${label}</span>`;
+}
+
+function showTab(which){
+  document.getElementById("tab-op").classList.toggle("active", which==="op");
+  document.getElementById("tab-bb").classList.toggle("active", which==="bb");
+  document.getElementById("op-view").classList.toggle("active", which==="op");
+  document.getElementById("bb-view").classList.toggle("active", which==="bb");
+  if(which==="bb") loadBlackbox();
+}
+
+function wrClass(wr){ return wr>=55 ? "good" : wr>=45 ? "warn" : "bad"; }
+
+function renderBlackbox(d){
+  if(!d) return;
+  const total = d.total_resolved||0;
+  setText("bb-total", total);
+  const wrEl = document.getElementById("bb-wr");
+  wrEl.textContent = total ? d.win_rate.toFixed(1)+"%" : "–";
+  wrEl.className = "v " + (total ? wrClass(d.win_rate) : "");
+  const expEl = document.getElementById("bb-exp");
+  expEl.textContent = total ? d.expectancy.toFixed(4) : "–";
+  expEl.className = "v " + (total ? (d.expectancy>=0?"good":"bad") : "");
+  const pnlEl = document.getElementById("bb-pnl");
+  pnlEl.textContent = total ? (d.pnl>=0?"+":"")+d.pnl.toFixed(2) : "–";
+  pnlEl.className = "v " + (total ? (d.pnl>=0?"good":"bad") : "");
+
+  // Por asset
+  const ab = document.getElementById("bb-asset-body"); ab.innerHTML="";
+  const assets = Object.entries(d.by_asset||{});
+  setText("bb-asset-count", assets.length ? assets.length+" pares" : "");
+  if(!assets.length){ ab.innerHTML='<tr><td class="empty" colspan="5">sin datos aún (Fase 6 pendiente)</td></tr>'; }
+  else assets.forEach(([a,v])=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td class="asset">${a}</td><td>${v.n}</td>`+
+      `<td class="bb-wr ${wrClass(v.win_rate)}">${v.win_rate.toFixed(1)}%</td>`+
+      `<td class="bb-wr">${v.expectancy.toFixed(4)}</td><td>–</td>`;
+    ab.appendChild(tr);
+  });
+
+  // Ranking pérdidas
+  const lb = document.getElementById("bb-loss-body"); lb.innerHTML="";
+  const losses = d.loss_ranking||[];
+  if(!losses.length){ lb.innerHTML='<tr><td class="empty" colspan="3">sin pérdidas registradas</td></tr>'; }
+  else losses.forEach(item=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td class="reason">${item.reason||"–"}</td><td>${item.count}</td>`+
+      `<td class="bb-hint">${item.hint||"–"}</td>`;
+    lb.appendChild(tr);
+  });
+
+  // A/B estocástico
+  const abEl = document.getElementById("bb-ab-body"); abEl.innerHTML="";
+  const abData = d.stoch_ab||{};
+  const keys = Object.keys(abData);
+  if(!keys.length){ abEl.innerHTML='<tr><td class="empty" colspan="4">sin datos aún</td></tr>'; }
+  else keys.forEach(k=>{
+    const v = abData[k];
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td><span class="bb-tag ${k}">${k}</span></td><td>${v.n}</td>`+
+      `<td class="bb-wr ${wrClass(v.win_rate)}">${v.win_rate.toFixed(1)}%</td>`+
+      `<td class="bb-wr">${v.expectancy.toFixed(4)}</td>`;
+    abEl.appendChild(tr);
+  });
+  const note = document.getElementById("bb-ab-note");
+  if(abData.extremo && abData.neutro && abData.extremo.n>=5 && abData.neutro.n>=5){
+    const diff = abData.extremo.win_rate - abData.neutro.win_rate;
+    note.textContent = `Diferencia extremo vs neutro: ${diff>=0?"+":""}${diff.toFixed(1)} pp — ` +
+      (Math.abs(diff)>=5 ? "hay señal para promover el estocástico a filtro." : "aún sin señal clara para filtrar.");
+  } else {
+    note.textContent = "Acumulando datos… se necesitan ≥5 ops por escenario para comparar.";
+  }
+}
+
+let _bbTimer = null;
+function loadBlackbox(){
+  fetch('/api/blackbox').then(r=>r.json()).then(renderBlackbox).catch(()=>{});
+  if(_bbTimer) clearInterval(_bbTimer);
+  _bbTimer = setInterval(()=>{ if(document.getElementById("bb-view").classList.contains("active")) loadBlackbox(); }, 5000);
+}
 </script>
 </body>
 </html>

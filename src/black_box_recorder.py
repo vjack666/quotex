@@ -92,12 +92,25 @@ CREATE TABLE IF NOT EXISTS scan_candidates (
     -- Velas snapshot (JSON)
     candles_1m      TEXT,                   -- últimas 5 velas 1m
     candles_5m      TEXT,                   -- últimas 3 velas 5m
+    candles_15m     TEXT,                   -- últimas velas 15m (contexto estocástico)
+    candles_post    TEXT,                   -- 3-5 velas 1m post-cierre (post-mortem)
     
     -- Resultado (si fue aceptado)
     order_id        TEXT,
     order_result    TEXT,                   -- WIN | LOSS | PENDING | EXPIRED
     profit          REAL,
+    entry_price     REAL,                   -- open 1m al entrar
+    exit_price      REAL,                   -- precio al expiry
     masaniello_snapshot TEXT,               -- JSON con estado Masaniello al cerrar
+    
+    -- Contexto estocástico M15 y sesión
+    session_id      TEXT,                   -- ciclo Massaniello
+    stoch_m15       TEXT,                   -- JSON {k, d, estado, cruce, divergencia}
+    stoch_contradicts INTEGER DEFAULT 0,    -- 1 si el estocástico va contra la dirección
+    
+    -- Post-mortem automático
+    loss_reason     TEXT,                   -- por qué perdió (ANTES vs resultado)
+    improvement_hint TEXT,                  -- sugerencia de calibración derivada de datos
     
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -180,6 +193,17 @@ class BlackBoxRecorder:
             ]
             if "masaniello_snapshot" not in cols:
                 con.execute("ALTER TABLE scan_candidates ADD COLUMN masaniello_snapshot TEXT")
+            # Migración caja negra STRAT-F + estocástico M15 (idempotente)
+            _NEW_COLS = [
+                "candles_15m", "candles_post", "entry_price", "exit_price",
+                "session_id", "stoch_m15", "stoch_contradicts",
+                "loss_reason", "improvement_hint",
+            ]
+            existing = set(cols)
+            for col in _NEW_COLS:
+                if col not in existing:
+                    _ctype = "INTEGER DEFAULT 0" if col == "stoch_contradicts" else "TEXT"
+                    con.execute(f"ALTER TABLE scan_candidates ADD COLUMN {col} {_ctype}")
             maintenance_cols = [
                 str(row[1]).lower()
                 for row in con.execute("PRAGMA table_info(maintenance_log)").fetchall()
@@ -265,15 +289,20 @@ class BlackBoxRecorder:
         # Velas (JSON)
         candles_1m = json.dumps(data.get("candles_1m", []), ensure_ascii=False) if data.get("candles_1m") else None
         candles_5m = json.dumps(data.get("candles_5m", []), ensure_ascii=False) if data.get("candles_5m") else None
+        candles_15m = json.dumps(data.get("candles_15m", []), ensure_ascii=False) if data.get("candles_15m") else None
+        session_id = data.get("session_id", None)
+        stoch_m15 = json.dumps(data.get("stoch_m15", {}), ensure_ascii=False) if data.get("stoch_m15") else None
         
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
-             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m, order_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
+             candles_15m, session_id, stoch_m15, order_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
-            decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m, order_id
+            decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
+            candles_15m, session_id, stoch_m15, order_id
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
@@ -302,6 +331,13 @@ class BlackBoxRecorder:
         order_id: Optional[str] = None,
         order_result: Optional[str] = None,
         profit: Optional[float] = None,
+        entry_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        candles_post: Optional[list] = None,
+        stoch_m15: Optional[Dict[str, Any] | str] = None,
+        stoch_contradicts: Optional[int] = None,
+        loss_reason: Optional[str] = None,
+        improvement_hint: Optional[str] = None,
         masaniello_snapshot: Optional[Dict[str, Any] | str] = None,
     ) -> None:
         """Actualiza un candidato existente con estado posterior al escaneo."""
@@ -328,6 +364,27 @@ class BlackBoxRecorder:
         if profit is not None:
             fields.append("profit = ?")
             values.append(profit)
+        if entry_price is not None:
+            fields.append("entry_price = ?")
+            values.append(entry_price)
+        if exit_price is not None:
+            fields.append("exit_price = ?")
+            values.append(exit_price)
+        if candles_post is not None:
+            fields.append("candles_post = ?")
+            values.append(json.dumps(candles_post, ensure_ascii=False) if candles_post else None)
+        if stoch_m15 is not None:
+            fields.append("stoch_m15 = ?")
+            values.append(json.dumps(stoch_m15, ensure_ascii=False) if isinstance(stoch_m15, dict) else stoch_m15)
+        if stoch_contradicts is not None:
+            fields.append("stoch_contradicts = ?")
+            values.append(int(stoch_contradicts))
+        if loss_reason is not None:
+            fields.append("loss_reason = ?")
+            values.append(loss_reason)
+        if improvement_hint is not None:
+            fields.append("improvement_hint = ?")
+            values.append(improvement_hint)
         if masaniello_snapshot is not None:
             fields.append("masaniello_snapshot = ?")
             if isinstance(masaniello_snapshot, str):
@@ -349,7 +406,169 @@ class BlackBoxRecorder:
         )
         con.commit()
         con.close()
-    
+
+    def resolve_candidate_for_asset(
+        self,
+        asset: str,
+        outcome: str,
+        profit: float,
+        *,
+        entry_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        candles_post: Optional[list] = None,
+        stoch_m15: Optional[Any] = None,
+        loss_reason: Optional[str] = None,
+        improvement_hint: Optional[str] = None,
+    ) -> Optional[int]:
+        """Cierra el candidato STRAT-F más reciente de `asset` sin resultado.
+
+        Usado por el post-mortem (Fase 4): busca el último candidato de ese
+        asset con order_result NULL y lo actualiza con el resultado real +
+        contexto post-cierre. Idempotente: si no hay pendiente, no hace nada.
+        Retorna el candidate_id actualizado o None.
+        """
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        row = cur.execute(
+            """
+            SELECT id FROM scan_candidates
+            WHERE asset = ? AND strategy = 'STRAT-F' AND order_result IS NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (asset,),
+        ).fetchone()
+        if not row:
+            con.close()
+            return None
+        cid = int(row[0])
+
+        fields = ["order_result = ?", "profit = ?"]
+        values: list[Any] = [outcome, profit]
+        if entry_price is not None:
+            fields.append("entry_price = ?")
+            values.append(entry_price)
+        if exit_price is not None:
+            fields.append("exit_price = ?")
+            values.append(exit_price)
+        if candles_post is not None:
+            fields.append("candles_post = ?")
+            values.append(json.dumps(candles_post, ensure_ascii=False) if candles_post else None)
+        if stoch_m15 is not None:
+            fields.append("stoch_m15 = ?")
+            values.append(json.dumps(stoch_m15, ensure_ascii=False) if isinstance(stoch_m15, dict) else stoch_m15)
+        if loss_reason is not None:
+            fields.append("loss_reason = ?")
+            values.append(loss_reason)
+        if improvement_hint is not None:
+            fields.append("improvement_hint = ?")
+            values.append(improvement_hint)
+        fields.append("updated_at = ?")
+        values.append(datetime.now(timezone.utc).isoformat())
+        values.append(cid)
+
+        cur.execute(
+            f"UPDATE scan_candidates SET {', '.join(fields)} WHERE id = ?",
+            values,
+        )
+        con.commit()
+        con.close()
+        return cid
+
+    def resolve_candidate_by_id(
+        self,
+        candidate_id: int,
+        outcome: str,
+        profit: float,
+        *,
+        entry_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        candles_post: Optional[list] = None,
+        stoch_m15: Optional[Any] = None,
+        loss_reason: Optional[str] = None,
+        improvement_hint: Optional[str] = None,
+    ) -> Optional[int]:
+        """Cierra un candidato por id exacto (resolución preferida de Fase 4)."""
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        row = cur.execute("SELECT id FROM scan_candidates WHERE id = ?", (candidate_id,)).fetchone()
+        if not row:
+            con.close()
+            return None
+        fields = ["order_result = ?", "profit = ?"]
+        values: list[Any] = [outcome, profit]
+        if entry_price is not None:
+            fields.append("entry_price = ?")
+            values.append(entry_price)
+        if exit_price is not None:
+            fields.append("exit_price = ?")
+            values.append(exit_price)
+        if candles_post is not None:
+            fields.append("candles_post = ?")
+            values.append(json.dumps(candles_post, ensure_ascii=False) if candles_post else None)
+        if stoch_m15 is not None:
+            fields.append("stoch_m15 = ?")
+            values.append(json.dumps(stoch_m15, ensure_ascii=False) if isinstance(stoch_m15, dict) else stoch_m15)
+        if loss_reason is not None:
+            fields.append("loss_reason = ?")
+            values.append(loss_reason)
+        if improvement_hint is not None:
+            fields.append("improvement_hint = ?")
+            values.append(improvement_hint)
+        fields.append("updated_at = ?")
+        values.append(datetime.now(timezone.utc).isoformat())
+        values.append(candidate_id)
+        cur.execute(
+            f"UPDATE scan_candidates SET {', '.join(fields)} WHERE id = ?",
+            values,
+        )
+        con.commit()
+        con.close()
+        return candidate_id
+
+    def get_candidate_by_id(self, candidate_id: int) -> Optional[Dict[str, Any]]:
+        """Recupera las velas ANTES + stoch de un candidato por id exacto."""
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        row = cur.execute(
+            """
+            SELECT id, candles_1m, stoch_m15, direction
+            FROM scan_candidates WHERE id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "candles_1m": json.loads(row[1]) if row[1] else [],
+            "stoch_m15": json.loads(row[2]) if row[2] else None,
+            "direction": row[3] or "",
+        }
+
+    def get_pending_candidate_before(self, asset: str) -> Optional[Dict[str, Any]]:
+        """Recupera las velas ANTES + stoch del candidato STRAT-F pendiente de `asset`."""
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        row = cur.execute(
+            """
+            SELECT id, candles_1m, stoch_m15, direction
+            FROM scan_candidates
+            WHERE asset = ? AND strategy = 'STRAT-F' AND order_result IS NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (asset,),
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "candles_1m": json.loads(row[1]) if row[1] else [],
+            "stoch_m15": json.loads(row[2]) if row[2] else None,
+            "direction": row[3] or "",
+        }
+
     def record_order_result(self, order_id: str, outcome: str, profit: float) -> None:
         """Actualiza resultado de una orden."""
         ts = datetime.now(timezone.utc).timestamp()
