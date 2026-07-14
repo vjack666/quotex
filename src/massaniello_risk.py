@@ -15,6 +15,20 @@ from config import (
 )
 from massaniello_engine import Settings, calculate_stake, effective_profit
 
+# Lazy import to avoid circular deps at module level
+_event_bus = None
+
+
+def _get_event_bus():
+    global _event_bus
+    if _event_bus is None:
+        try:
+            from hub.events import event_bus
+            _event_bus = event_bus
+        except ImportError:
+            pass
+    return _event_bus
+
 log = logging.getLogger(__name__)
 
 
@@ -137,6 +151,15 @@ class MassanielloRiskManager:
                 self.expected_wins,
             )
             alerter.alert_session_complete(self.wins, self.current_balance or 0.0)
+            bus = _get_event_bus()
+            if bus is not None:
+                bus.publish("session_complete", {
+                    "wins": self.wins,
+                    "expected_wins": self.expected_wins,
+                    "balance": self.current_balance,
+                    "session_max_min": self.session_max_min,
+                    "elapsed_min": (time.time() - self.session_start_time) / 60.0 if self.session_start_time else 0,
+                })
         return self.current_balance, status
 
     def register_loss(self, amount: float) -> Tuple[float, str]:

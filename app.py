@@ -276,6 +276,28 @@ async def get_logs(limit: int = 100):
     return entries[-limit:]
 
 
+@_hub_app.post("/api/session/reset")
+async def reset_session():
+    """Reset Massaniello session — clears session_stop_hit so bot resumes scanning."""
+    bot = _runner.bot
+    if bot is None:
+        return {"error": "Bot is not running"}
+    if not hasattr(bot, "session_stop_hit"):
+        return {"error": "Bot does not use Massaniello sessions"}
+    was_stopped = bot.session_stop_hit
+    bot.session_stop_hit = False
+    # Force a fresh Massaniello cycle if the current one is complete/failed
+    if hasattr(bot, "massaniello") and bot.massaniello is not None:
+        mgr = bot.massaniello
+        if mgr.is_session_complete() or mgr.is_session_failed() or mgr.is_session_exhausted():
+            from massaniello_risk import MassanielloRiskManager
+            bot.massaniello = MassanielloRiskManager()
+            if hasattr(bot.executor, "set_session_start_balance") and bot.current_balance:
+                bot.executor.set_session_start_balance(bot.current_balance)
+    log.info("🔄 Sesión Massaniello reiniciada manualmente desde dashboard")
+    return {"status": "reset", "was_stopped": was_stopped}
+
+
 @_hub_app.get("/health")
 async def health():
     """Health check endpoint."""
@@ -290,9 +312,8 @@ async def health():
 # ── WebSocket for logs ────────────────────────────────────────────────────────
 
 @_hub_app.websocket("/ws/logs")
-async def ws_logs(ws):
+async def ws_logs(ws: WebSocket):
     """WebSocket endpoint for real-time log streaming."""
-    from fastapi import WebSocket as _WS
     await ws.accept()
     q: asyncio.Queue = asyncio.Queue(maxsize=100)
     _log_subscribers.add(q)

@@ -185,6 +185,36 @@
   .ctrl-btn.stop:hover:not(:disabled) { background: #d94040; }
   .ctrl-spacer { flex:1; }
 
+  /* Session Complete Modal */
+  .modal-overlay {
+    display:none; position:fixed; inset:0; z-index:999;
+    background:rgba(0,0,0,.65); backdrop-filter:blur(4px);
+    align-items:center; justify-content:center;
+  }
+  .modal-overlay.show { display:flex; }
+  .modal-box {
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:28px 32px; max-width:440px; width:90%; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal-box .modal-icon { font-size:48px; margin-bottom:12px; }
+  .modal-box h2 { font-size:18px; font-weight:590; margin:0 0 8px; color:var(--emerald); }
+  .modal-box p { font-size:13px; color:var(--silver); margin:0 0 6px; line-height:1.6; }
+  .modal-box .modal-timer {
+    font-family:'JetBrains Mono', monospace; font-size:22px; font-weight:590;
+    color:var(--accent-2); margin:14px 0 20px;
+  }
+  .modal-box .modal-actions { display:flex; gap:10px; justify-content:center; }
+  .modal-btn {
+    font-family:'Inter', sans-serif; font-size:13px; font-weight:510;
+    padding:10px 24px; border-radius:8px; border:none; cursor:pointer;
+    transition: all .15s;
+  }
+  .modal-btn.primary { background:var(--emerald); color:#fff; }
+  .modal-btn.primary:hover { background:#0ea472; }
+  .modal-btn.secondary { background:var(--surface-3); color:var(--silver); border:1px solid var(--border); }
+  .modal-btn.secondary:hover { background:var(--surface-2); }
+
   /* Log Viewer */
   .log-wrap {
     background: #0a0b0c; border:1px solid var(--border); border-radius: var(--radius);
@@ -477,6 +507,22 @@
 <div class="principle">
   Principio del bot: nunca evaluar una señal en una sola vela. El mercado deja rastro; el filtro lo hace explícito.
   <div class="footnote">STRAT-F opera solo velas CERRADAS · zona mínima 30 min · edad y contexto M15 validados</div>
+</div>
+
+<!-- SESSION COMPLETE MODAL -->
+<div class="modal-overlay" id="session-modal">
+  <div class="modal-box">
+    <div class="modal-icon">🎯</div>
+    <h2>Sesión Massaniello Cumplida</h2>
+    <p>Meta alcanzada: <strong id="sm-wins">3</strong> ITM en sesión</p>
+    <p>Capital: <strong id="sm-balance">$0.00</strong> · Tiempo: <strong id="sm-time">0</strong> min</p>
+    <p style="color:var(--faint); font-size:12px;">La próxima sesión será en 4 horas</p>
+    <div class="modal-timer" id="sm-countdown"></div>
+    <div class="modal-actions">
+      <button class="modal-btn primary" onclick="sessionResetNow()">Abrir sesión ahora</button>
+      <button class="modal-btn secondary" onclick="sessionWait4h()">Esperar 4 horas</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -880,6 +926,60 @@ function clearLogs(){
 pollRunnerStatus();
 setInterval(pollRunnerStatus, 5000);
 connectLogWs();
+
+// ── Session Complete Modal ───────────────────────────────────────────────────
+
+let _sessionModalTimer = null;
+
+function showSessionModal(data){
+  document.getElementById("sm-wins").textContent = (data.wins||3) + "/" + (data.expected_wins||3);
+  document.getElementById("sm-balance").textContent = "$" + (data.balance||0).toFixed(2);
+  document.getElementById("sm-time").textContent = Math.round(data.elapsed_min||0);
+  document.getElementById("session-modal").classList.add("show");
+  document.getElementById("sm-countdown").textContent = "";
+  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); _sessionModalTimer=null; }
+}
+
+function sessionResetNow(){
+  document.getElementById("session-modal").classList.remove("show");
+  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); _sessionModalTimer=null; }
+  fetch("/api/session/reset",{method:"POST"}).then(r=>r.json()).then(d=>{
+    if(d.error) console.warn("Reset failed:", d.error);
+    else console.log("Session reset:", d);
+  }).catch(()=>{});
+}
+
+function sessionWait4h(){
+  const cd = document.getElementById("sm-countdown");
+  let remaining = 4*3600; // 4 hours in seconds
+  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); }
+  _sessionModalTimer = setInterval(()=>{
+    remaining--;
+    if(remaining<=0){
+      clearInterval(_sessionModalTimer);
+      _sessionModalTimer=null;
+      document.getElementById("sm-countdown").textContent = "Tiempo cumplido — sesión disponible";
+      document.getElementById("session-modal").classList.add("show");
+      return;
+    }
+    const h = Math.floor(remaining/3600);
+    const m = Math.floor((remaining%3600)/60);
+    const s = remaining%60;
+    cd.textContent = `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+  }, 1000);
+  // Start countdown display immediately
+  const h = Math.floor(remaining/3600);
+  const m = Math.floor((remaining%3600)/60);
+  cd.textContent = `${h}h ${String(m).padStart(2,'0')}m 00s`;
+}
+
+// Listen for session_complete events via the main WS
+ws.addEventListener("message", (e)=>{
+  try{
+    const m = JSON.parse(e.data);
+    if(m.type==="session_complete") showSessionModal(m.data||m);
+  }catch(_){}
+});
 </script>
 </body>
 </html>
