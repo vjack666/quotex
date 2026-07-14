@@ -930,26 +930,26 @@ class AssetScanner:
             MIN_PAYOUT,
         )
 
-        for sym in list(self.bot.trades.keys()):
-            entered = await self.executor._check_martin(sym)
-            if entered:
-                await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
-            await asyncio.sleep(0.2)
-
+        # ── GESTIÓN DE RIESGO: pausa total mientras hay trade abierto ──
+        # No escaneamos, no gastamos CPU/API. Esperamos a que el trade se
+        # resuelva en _resolve_trade_after_expiry y retomamos en el próximo ciclo.
         if self.bot.trades:
             activos_abiertos = ", ".join(self.bot.trades.keys())
             log.info(
-                "👁 Operación activa [%s] — escaneando igual para vigilar oportunidades.",
+                "⏳ Operación activa [%s] — pausa de gestión de riesgo. "
+                "Esperando resultado antes de escanear.",
                 activos_abiertos,
             )
-        else:
-            if self.bot.watched_candidates:
-                stale = [
-                    a for a, (_, ts) in self.bot.watched_candidates.items()
-                    if time.time() - ts > 300
-                ]
-                for a in stale:
-                    del self.bot.watched_candidates[a]
+            return
+
+        # ── Limpiar candidatos vigilados stale al inicio de cada ciclo limpio ──
+        if self.bot.watched_candidates:
+            stale = [
+                a for a, (_, ts) in self.bot.watched_candidates.items()
+                if time.time() - ts > 300
+            ]
+            for a in stale:
+                self.bot.watched_candidates.pop(a, None)
 
         decrement_failed_assets(self.bot)
         return assets

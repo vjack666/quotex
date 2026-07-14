@@ -261,7 +261,9 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_json({"type": "ping", "timestamp": time.time()})
             except WebSocketDisconnect:
                 break
-    except WebSocketDisconnect:
+            except asyncio.CancelledError:
+                break
+    except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     finally:
         _clients.discard(ws)

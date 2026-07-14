@@ -504,6 +504,134 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+class BotRunner:
+    """Gestiona el lifecycle del bot: start / stop / status.
+
+    Diseñado para ser llamado desde la API web (FastAPI lifespan).
+    El bot corre como asyncio.Task que se puede cancelar limpiamente.
+    """
+
+    def __init__(self) -> None:
+        self._task: asyncio.Task[Any] | None = None
+        self._bot: ConsolidationBot | None = None
+        self._client: Any = None
+        self._state: str = "stopped"  # stopped | starting | running | stopping | error
+        self._error: str | None = None
+        self._started_at: float | None = None
+        self._config: dict[str, Any] = {
+            "dry_run": False,
+            "real_account": False,
+            "amount_initial": 1.0,
+            "amount_martin": 3.0,
+            "max_loss_session": 0.20,
+            "cycle_ops": 5,
+            "cycle_wins": 2,
+            "cycle_profit_pct": 0.10,
+            "min_payout": 80,
+            "scan_lead_sec": 35.0,
+        }
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @property
+    def bot(self) -> ConsolidationBot | None:
+        return self._bot
+
+    @property
+    def error(self) -> str | None:
+        return self._error
+
+    def get_config(self) -> dict[str, Any]:
+        return dict(self._config)
+
+    def update_config(self, **kwargs: Any) -> None:
+        for k, v in kwargs.items():
+            if k in self._config:
+                self._config[k] = v
+
+    def get_status(self) -> dict[str, Any]:
+        status: dict[str, Any] = {
+            "state": self._state,
+            "config": self._config,
+            "uptime_sec": (time.time() - self._started_at) if self._started_at else None,
+        }
+        if self._error:
+            status["last_error"] = self._error
+        if self._bot is not None:
+            b = self._bot
+            status["balance"] = b.current_balance
+            status["stats"] = dict(b.stats)
+            status["cycle_id"] = b.cycle_id
+            status["cycle_ops"] = b.cycle_ops
+            status["cycle_wins"] = b.cycle_wins
+            status["cycle_losses"] = b.cycle_losses
+            status["cycle_profit"] = b.cycle_profit
+            status["active_trades"] = len(b.trades)
+            status["account_type"] = b.account_type
+        return status
+
+    async def start(self) -> None:
+        if self._state in ("running", "starting"):
+            return
+        self._state = "starting"
+        self._error = None
+        self._started_at = time.time()
+        self._task = asyncio.create_task(self._run(), name="bot-runner")
+
+    async def stop(self) -> None:
+        if self._state not in ("running", "starting"):
+            return
+        self._state = "stopping"
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await asyncio.wait_for(self._task, timeout=10.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        self._state = "stopped"
+        self._task = None
+
+    async def _run(self) -> None:
+        """Wrapper que ejecuta main() y maneja el lifecycle."""
+        try:
+            self._state = "running"
+            await main(
+                dry_run=self._config["dry_run"],
+                real_account=self._config["real_account"],
+                loop_forever=True,
+                hub_scanner=None,  # se conecta después via app.py
+            )
+        except asyncio.CancelledError:
+            log.info("BotRunner: task cancelada — shutdown limpio")
+        except SystemExit as exc:
+            self._error = f"SystemExit({exc.code})"
+            self._state = "error"
+            log.error("BotRunner: SystemExit %s", exc.code)
+        except Exception as exc:
+            self._error = str(exc)
+            self._state = "error"
+            log.error("BotRunner: error fatal — %s", exc, exc_info=True)
+        finally:
+            if self._state not in ("error",):
+                self._state = "stopped"
+            self._started_at = None
+
+    async def shutdown(self) -> None:
+        """Shutdown forzado — llamado desde FastAPI lifespan."""
+        await self.stop()
+        if self._client is not None:
+            try:
+                await asyncio.wait_for(self._client.close(), timeout=3.0)
+            except Exception:
+                pass
+            self._client = None
+
+
+_runner = BotRunner()
+
+
 def _extract_candidates_for_hub(bot: Any) -> list[dict]:
     """Convierte last_scan_candidates del bot a payloads para el hub."""
     raw: list[CandidateEntry] | None = getattr(bot, "last_scan_candidates", None)

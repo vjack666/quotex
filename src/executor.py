@@ -1267,9 +1267,14 @@ class TradeExecutor:
                 await htf_task
             except (asyncio.CancelledError, Exception):
                 pass
-        # Fix WS idle: verificar que el trade_client esté vivo antes de buy().
-        # Si quedó idle durante el scan, Nginx/Cloudflare cierra la conexión.
+        # Fix event-loop: yield control para que corutinas pendientes
+        # (incl. callbacks del WS thread que setean buy_id) se ejecuten
+        # ANTES de enviar la orden. Sin esto, el loop puede estar saturado
+        # por tareas del scan/HTF y el polling de buy_id no arranca a tiempo.
+        await asyncio.sleep(0)
         await self._ensure_trade_client_alive()
+        log.info("  → buy() llamando a %s %s $%.2f %ds (event loop limpio)",
+                 direction.upper(), sym, amount, duration_sec)
         try:
             ok, oid, open_price, order_ref, reject_reason = await place_order(
                 self.trade_client,

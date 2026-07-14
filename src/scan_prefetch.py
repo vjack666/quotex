@@ -264,6 +264,8 @@ async def prefetch_strat_a_secondary(
         ob, label = _resolve_ob_candles(sym, raw_ob.get(sym, []), candles_5m_fallback)
         candles_ob[sym] = ob
         ob_tf_labels[sym] = label
-        blocks_by_symbol[sym] = detect_order_blocks(ob)
+        # Fix: detect_order_blocks es sync (pure Python). Ejecutar en thread
+        # para no bloquear el event loop durante buy().
+        blocks_by_symbol[sym] = await asyncio.to_thread(detect_order_blocks, ob)
 
     return candles_ob, candles_h1, ob_tf_labels, blocks_by_symbol

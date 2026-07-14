@@ -183,7 +183,11 @@ class HTFScanner:
             log.debug("[HTF] No se pudo obtener lista de activos: %s", exc)
             return
 
-        entered, exited, updated = self._library.refresh_from_assets(assets)
+        # Fix: refresh_from_assets es sync. Ejecutar en thread para no
+        # bloquear el event loop durante buy().
+        entered, exited, updated = await asyncio.to_thread(
+            self._library.refresh_from_assets, assets
+        )
         if entered:
             log.info("[HTF LIB] +%d entran a biblioteca (payout>%d)", len(entered), self._min_payout)
         if exited:
