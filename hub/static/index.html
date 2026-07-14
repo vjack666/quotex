@@ -158,6 +158,87 @@
   }
   .footnote { text-align:center; color: var(--faint); font-size:11px; margin-top:6px; }
 
+  /* Bot Control Bar */
+  .ctrl-bar {
+    display:flex; align-items:center; gap:12px;
+    padding:10px 16px; margin-bottom:16px; max-width:1280px; margin-left:auto; margin-right:auto;
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+  }
+  .ctrl-bar .ctrl-label { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color: var(--muted); }
+  .ctrl-bar .ctrl-state {
+    font-size:12px; font-weight:510; padding:3px 10px; border-radius:9999px; letter-spacing:.3px;
+  }
+  .ctrl-bar .ctrl-state.stopped { color: var(--muted); background: var(--surface-3); }
+  .ctrl-bar .ctrl-state.running { color: var(--emerald); background: rgba(16,185,129,.12); }
+  .ctrl-bar .ctrl-state.starting { color: var(--orange); background: rgba(240,136,62,.12); }
+  .ctrl-bar .ctrl-state.stopping { color: var(--orange); background: rgba(240,136,62,.12); }
+  .ctrl-bar .ctrl-state.error { color: var(--red); background: rgba(248,81,73,.12); }
+  .ctrl-btn {
+    font-family:'Inter', sans-serif; font-size:12px; font-weight:510;
+    padding:6px 18px; border-radius:6px; border:none; cursor:pointer;
+    transition: all .15s ease; letter-spacing:.2px;
+  }
+  .ctrl-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .ctrl-btn.start { background: var(--emerald); color:#fff; }
+  .ctrl-btn.start:hover:not(:disabled) { background: #0ea472; }
+  .ctrl-btn.stop { background: var(--red); color:#fff; }
+  .ctrl-btn.stop:hover:not(:disabled) { background: #d94040; }
+  .ctrl-spacer { flex:1; }
+
+  /* Log Viewer */
+  .log-wrap {
+    background: #0a0b0c; border:1px solid var(--border); border-radius: var(--radius);
+    height:420px; display:flex; flex-direction:column; overflow:hidden;
+  }
+  .log-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; border-bottom:1px solid var(--border-2); flex-shrink:0;
+  }
+  .log-header h2 { font-size:13px; font-weight:510; color:var(--silver); margin:0; }
+  .log-body {
+    flex:1; overflow-y:auto; padding:10px 14px;
+    font-family:'JetBrains Mono', monospace; font-size:11.5px; line-height:1.7;
+    color: var(--silver); scroll-behavior: smooth;
+  }
+  .log-body .log-line { white-space:pre-wrap; word-break:break-all; }
+  .log-body .log-line .ts { color: var(--faint); }
+  .log-body .log-line .lvl-INFO { color: var(--emerald); }
+  .log-body .log-line .lvl-WARNING { color: var(--orange); }
+  .log-body .log-line .lvl-ERROR { color: var(--red); }
+  .log-body .log-line .lvl-DEBUG { color: var(--faint); }
+  .log-controls {
+    display:flex; align-items:center; gap:10px; padding:8px 14px;
+    border-top:1px solid var(--border-2); flex-shrink:0;
+  }
+  .log-controls label { font-size:11px; color: var(--muted); display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .log-controls input[type="checkbox"] { accent-color: var(--accent-2); }
+
+  /* Config Panel */
+  .cfg-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+  .cfg-field { display:flex; flex-direction:column; gap:4px; }
+  .cfg-field label { font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .cfg-field input, .cfg-field select {
+    background: var(--surface-3); border:1px solid var(--border); border-radius:5px;
+    color: var(--text); font-family:'JetBrains Mono', monospace; font-size:12px;
+    padding:7px 10px; outline:none; transition: border .15s;
+  }
+  .cfg-field input:focus, .cfg-field select:focus { border-color: var(--accent-2); }
+  .cfg-field input[type="checkbox"] { width:auto; padding:0; }
+  .cfg-actions { display:flex; gap:10px; margin-top:14px; justify-content:flex-end; }
+  .cfg-btn {
+    font-family:'Inter', sans-serif; font-size:12px; font-weight:510;
+    padding:7px 20px; border-radius:6px; border:1px solid var(--border); cursor:pointer;
+    transition: all .15s;
+  }
+  .cfg-btn.primary { background: var(--accent); color:#fff; border-color:var(--accent); }
+  .cfg-btn.primary:hover { background: var(--accent-2); }
+  .cfg-btn.secondary { background: transparent; color: var(--silver); }
+  .cfg-btn.secondary:hover { background: var(--surface-3); }
+  .cfg-msg { font-size:12px; padding:8px 12px; border-radius:5px; margin-bottom:12px; display:none; }
+  .cfg-msg.ok { display:block; color: var(--emerald); background: rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.2); }
+  .cfg-msg.err { display:block; color: var(--red); background: rgba(248,81,73,.08); border:1px solid rgba(248,81,73,.2); }
+  @media (max-width: 640px){ .cfg-grid { grid-template-columns: 1fr; } }
+
   /* Tabs */
   .tabs { display:flex; gap:6px; margin:0 auto 18px; max-width:1280px; }
   .tab-btn {
@@ -215,7 +296,18 @@
 <nav class="tabs">
   <button class="tab-btn active" id="tab-op" onclick="showTab('op')">Operación</button>
   <button class="tab-btn" id="tab-bb" onclick="showTab('bb')">Caja Negra</button>
+  <button class="tab-btn" id="tab-ctrl" onclick="showTab('ctrl')">Consola</button>
 </nav>
+
+<!-- BOT CONTROL BAR (always visible) -->
+<div class="ctrl-bar">
+  <span class="ctrl-label">Bot</span>
+  <span class="ctrl-state stopped" id="ctrl-state">STOPPED</span>
+  <button class="ctrl-btn start" id="btn-start" onclick="botStart()">Start</button>
+  <button class="ctrl-btn stop" id="btn-stop" onclick="botStop()" disabled>Stop</button>
+  <span class="ctrl-spacer"></span>
+  <span class="ctrl-label" id="ctrl-info" style="font-size:11px;"></span>
+</div>
 
 <div class="view active" id="op-view">
 <div class="grid">
@@ -338,6 +430,49 @@
     </div>
   </div>
 </div><!-- /bb-view -->
+
+<!-- ============ CONSOLA ============ -->
+<div class="view" id="ctrl-view">
+  <div class="grid">
+    <!-- Config Panel -->
+    <div class="card col-12">
+      <h2>Configuración del bot <span class="sub2">solo editable cuando el bot está detenido</span></h2>
+      <div class="cfg-msg" id="cfg-msg"></div>
+      <div class="cfg-grid" id="cfg-grid">
+        <div class="cfg-field"><label>Expiry (segundos)</label><input type="number" id="cfg-expiry" min="30" max="3600" step="30"></div>
+        <div class="cfg-field"><label>Monto base (USD)</label><input type="number" id="cfg-base-amount" min="0.5" max="1000" step="0.5"></div>
+        <div class="cfg-field"><label>Máx. loss seguidos</label><input type="number" id="cfg-max-loss" min="1" max="20"></div>
+        <div class="cfg-field"><label>Max concurrent trades</label><input type="number" id="cfg-max-trades" min="1" max="5"></div>
+        <div class="cfg-field"><label>Max daily trades</label><input type="number" id="cfg-max-daily" min="1" max="100"></div>
+        <div class="cfg-field"><label>Payout mínimo (%)</label><input type="number" id="cfg-min-payout" min="50" max="95" step="1"></div>
+        <div class="cfg-field"><label>Score mínimo</label><input type="number" id="cfg-min-score" min="0" max="10" step="0.1"></div>
+        <div class="cfg-field"><label>STOnly mode</label><select id="cfg-stonly"><option value="false">No</option><option value="true">Sí</option></select></div>
+        <div class="cfg-field"><label>STRAT-F Only</label><select id="cfg-stratf-only"><option value="true">Sí</option><option value="false">No</option></select></div>
+      </div>
+      <div class="cfg-actions">
+        <button class="cfg-btn secondary" onclick="loadConfig()">Resetear</button>
+        <button class="cfg-btn primary" onclick="saveConfig()">Guardar</button>
+      </div>
+    </div>
+
+    <!-- Log Viewer -->
+    <div class="card col-12" style="padding:0;">
+      <div class="log-wrap">
+        <div class="log-header">
+          <h2>Logs en vivo</h2>
+          <span class="ctrl-label" id="log-count">0 líneas</span>
+        </div>
+        <div class="log-body" id="log-body"></div>
+        <div class="log-controls">
+          <label><input type="checkbox" id="log-autoscroll" checked> Auto-scroll</label>
+          <label><input type="checkbox" id="log-show-debug"> Mostrar DEBUG</label>
+          <span style="flex:1"></span>
+          <button class="cfg-btn secondary" onclick="clearLogs()" style="padding:4px 12px; font-size:11px;">Limpiar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- /ctrl-view -->
 
 <div class="principle">
   Principio del bot: nunca evaluar una señal en una sola vela. El mercado deja rastro; el filtro lo hace explícito.
@@ -494,6 +629,9 @@ function applyData(data){
   if(data.strat_f || data.known_balance!==undefined || data.masaniello!==undefined
      || data.accepted || data.rejected){ render(data); }
   else if(data.state && (data.state.strat_f || data.state.known_balance!==undefined || data.state.accepted)){ render(data.state); }
+  // Bot runner status
+  if(data.runner) updateRunnerUI(data.runner);
+  else if(data.state && data.state.runner) updateRunnerUI(data.state.runner);
   goLive();
 }
 
@@ -525,9 +663,12 @@ function stochCell(s){
 function showTab(which){
   document.getElementById("tab-op").classList.toggle("active", which==="op");
   document.getElementById("tab-bb").classList.toggle("active", which==="bb");
+  document.getElementById("tab-ctrl").classList.toggle("active", which==="ctrl");
   document.getElementById("op-view").classList.toggle("active", which==="op");
   document.getElementById("bb-view").classList.toggle("active", which==="bb");
+  document.getElementById("ctrl-view").classList.toggle("active", which==="ctrl");
   if(which==="bb") loadBlackbox();
+  if(which==="ctrl") loadConfig();
 }
 
 function wrClass(wr){ return wr>=55 ? "good" : wr>=45 ? "warn" : "bad"; }
@@ -599,6 +740,146 @@ function loadBlackbox(){
   if(_bbTimer) clearInterval(_bbTimer);
   _bbTimer = setInterval(()=>{ if(document.getElementById("bb-view").classList.contains("active")) loadBlackbox(); }, 5000);
 }
+
+// ── Bot Control ──────────────────────────────────────────────────────────────
+
+function updateRunnerUI(runner){
+  if(!runner) return;
+  const st = runner.state || "stopped";
+  const el = document.getElementById("ctrl-state");
+  el.textContent = st.toUpperCase();
+  el.className = "ctrl-state " + st;
+  const btnS = document.getElementById("btn-start");
+  const btnX = document.getElementById("btn-stop");
+  btnS.disabled = (st==="running" || st==="starting");
+  btnX.disabled = (st!=="running" && st!=="starting");
+  // Info line
+  const info = document.getElementById("ctrl-info");
+  if(st==="running"){
+    const up = runner.uptime_sec!=null ? Math.floor(runner.uptime_sec)+"s" : "";
+    info.textContent = up ? "uptime: "+up : "";
+  } else {
+    info.textContent = "";
+  }
+}
+
+function botStart(){
+  document.getElementById("btn-start").disabled = true;
+  fetch("/api/bot/start",{method:"POST"}).then(r=>r.json()).then(d=>{
+    updateRunnerUI(d);
+    pollRunnerStatus();
+  }).catch(()=>{ document.getElementById("btn-start").disabled = false; });
+}
+
+function botStop(){
+  document.getElementById("btn-stop").disabled = true;
+  fetch("/api/bot/stop",{method:"POST"}).then(r=>r.json()).then(d=>{
+    updateRunnerUI(d);
+    pollRunnerStatus();
+  }).catch(()=>{ document.getElementById("btn-stop").disabled = false; });
+}
+
+function pollRunnerStatus(){
+  fetch("/api/bot/status").then(r=>r.json()).then(updateRunnerUI).catch(()=>{});
+}
+
+// ── Config Panel ─────────────────────────────────────────────────────────────
+
+function loadConfig(){
+  fetch("/api/config").then(r=>r.json()).then(c=>{
+    if(!c) return;
+    document.getElementById("cfg-expiry").value = c.expiry_sec || 180;
+    document.getElementById("cfg-base-amount").value = c.base_amount || 1;
+    document.getElementById("cfg-max-loss").value = c.max_loss_streak || 5;
+    document.getElementById("cfg-max-trades").value = c.max_concurrent_trades || 1;
+    document.getElementById("cfg-max-daily").value = c.max_daily_trades || 20;
+    document.getElementById("cfg-min-payout").value = c.min_payout_pct || 70;
+    document.getElementById("cfg-min-score").value = c.min_score || 0;
+    document.getElementById("cfg-stonly").value = c.stonly ? "true" : "false";
+    document.getElementById("cfg-stratf-only").value = c.strat_f_only ? "true" : "false";
+    // Disable fields if bot is running
+    const locked = (c._runner_state === "running" || c._runner_state === "starting");
+    document.querySelectorAll("#cfg-grid input, #cfg-grid select").forEach(el => el.disabled = locked);
+  }).catch(()=>{});
+}
+
+function saveConfig(){
+  const msg = document.getElementById("cfg-msg");
+  const body = {
+    expiry_sec: parseInt(document.getElementById("cfg-expiry").value) || 180,
+    base_amount: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
+    max_loss_streak: parseInt(document.getElementById("cfg-max-loss").value) || 5,
+    max_concurrent_trades: parseInt(document.getElementById("cfg-max-trades").value) || 1,
+    max_daily_trades: parseInt(document.getElementById("cfg-max-daily").value) || 20,
+    min_payout_pct: parseInt(document.getElementById("cfg-min-payout").value) || 70,
+    min_score: parseFloat(document.getElementById("cfg-min-score").value) || 0,
+    stonly: document.getElementById("cfg-stonly").value === "true",
+    strat_f_only: document.getElementById("cfg-stratf-only").value === "true",
+  };
+  fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){ msg.textContent=d.error; msg.className="cfg-msg err"; }
+      else { msg.textContent="Configuración guardada."; msg.className="cfg-msg ok"; setTimeout(()=>{ msg.className="cfg-msg"; },3000); }
+    }).catch(()=>{ msg.textContent="Error de conexión"; msg.className="cfg-msg err"; });
+}
+
+// ── Log Viewer (WebSocket) ───────────────────────────────────────────────────
+
+let _logWs = null;
+let _logLines = 0;
+const MAX_LOG_LINES = 500;
+
+function connectLogWs(){
+  const proto = location.protocol==='https:' ? 'wss://' : 'ws://';
+  _logWs = new WebSocket(proto + location.host + '/ws/logs');
+  _logWs.onmessage = (e)=>{
+    try{
+      const entry = JSON.parse(e.data);
+      if(entry.type==="ping") return;
+      appendLog(entry);
+    }catch(_){}
+  };
+  _logWs.onclose = ()=>{ setTimeout(connectLogWs, 3000); };
+  _logWs.onerror = ()=>{};
+}
+
+function appendLog(entry){
+  const body = document.getElementById("log-body");
+  if(!body) return;
+  const showDebug = document.getElementById("log-show-debug").checked;
+  const level = (entry.level||"INFO").toUpperCase();
+  if(!showDebug && level==="DEBUG") return;
+
+  const line = document.createElement("div");
+  line.className = "log-line";
+  const ts = entry.ts ? new Date(entry.ts * 1000).toLocaleTimeString() : "";
+  const lvlClass = "lvl-" + level;
+  line.innerHTML = `<span class="ts">${ts}</span> <span class="${lvlClass}">[${level}]</span> ${escHtml(entry.msg||entry.message||"")}`;
+  body.appendChild(line);
+  _logLines++;
+  if(_logLines > MAX_LOG_LINES){
+    while(body.firstChild && _logLines > MAX_LOG_LINES * 0.8) body.removeChild(body.firstChild);
+    _logLines = body.children.length;
+  }
+  document.getElementById("log-count").textContent = _logLines + " líneas";
+  if(document.getElementById("log-autoscroll").checked){
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+function escHtml(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function clearLogs(){
+  document.getElementById("log-body").innerHTML = "";
+  _logLines = 0;
+  document.getElementById("log-count").textContent = "0 líneas";
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+pollRunnerStatus();
+setInterval(pollRunnerStatus, 5000);
+connectLogWs();
 </script>
 </body>
 </html>

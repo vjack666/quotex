@@ -544,7 +544,9 @@ class BotRunner:
         return self._error
 
     def get_config(self) -> dict[str, Any]:
-        return dict(self._config)
+        cfg = dict(self._config)
+        cfg["_runner_state"] = self._state
+        return cfg
 
     def update_config(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
