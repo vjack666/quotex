@@ -406,7 +406,66 @@
   .trade-table-wrap .result-win { color: var(--emerald); font-weight: 590; }
   .trade-table-wrap .result-loss { color: var(--red); font-weight: 590; }
 
-  /* Cycle Complete Modal */
+  /* Session Complete Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(0,0,0,.65);
+    backdrop-filter: blur(4px);
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+
+  .modal-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    animation: modalIn .25s ease;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(12px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .modal-box .modal-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    line-height: 1;
+  }
+  .modal-box h2 {
+    font-size: 18px;
+    font-weight: 590;
+    margin: 0 0 6px;
+    color: var(--emerald);
+  }
+  .modal-box .modal-sub {
+    font-size: 13px;
+    color: var(--silver);
+    margin: 0 0 4px;
+    line-height: 1.5;
+  }
+  .modal-box .modal-hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 12px 0 18px;
+    padding: 10px 14px;
+    background: var(--surface-3);
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    line-height: 1.5;
+  }
+  .modal-box .modal-hint strong {
+    color: var(--emerald);
+  }
+
   .cycle-modal-summary {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -432,7 +491,39 @@
     font-family: 'JetBrains Mono', monospace;
   }
   .cycle-modal-summary .item .value.green { color: var(--emerald); }
-  .cycle-modal-summary .item .value.red { color: var(--red); }
+  .cycle-modal-summary .item .value.red   { color: var(--red); }
+
+  .modal-box .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .modal-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 510;
+    padding: 10px 24px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .modal-btn.primary {
+    background: var(--emerald);
+    color: #fff;
+  }
+  .modal-btn.primary:hover { background: #0ea472; }
+  .modal-btn.primary:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+  }
+  .modal-btn.secondary {
+    background: var(--surface-3);
+    color: var(--silver);
+    border: 1px solid var(--border);
+  }
+  .modal-btn.secondary:hover { background: var(--surface-2); }
 </style>
 </head>
 <body>
@@ -730,9 +821,11 @@
 
 <!-- SESSION COMPLETE MODAL -->
 <div class="modal-overlay" id="session-modal">
-  <div class="modal-box" style="max-width:500px;">
+  <div class="modal-box">
     <div class="modal-icon">🎯</div>
     <h2>Ciclo Completado</h2>
+    <p class="modal-sub" id="sm-subtitle">La sesión Massaniello ha alcanzado su meta.</p>
+
     <div class="cycle-modal-summary">
       <div class="item">
         <div class="label">Total Trades</div>
@@ -747,20 +840,28 @@
         <div class="value green" id="sm-wr">–</div>
       </div>
       <div class="item">
-        <div class="label">Ganancia/Pérdida</div>
+        <div class="label">Ganancia / Pérdida</div>
         <div class="value" id="sm-pnl">–</div>
       </div>
       <div class="item" style="grid-column: span 2;">
-        <div class="label">Duración</div>
+        <div class="label">Duración de la sesión</div>
         <div class="value" id="sm-duration">–</div>
       </div>
     </div>
-    <p style="text-align:center;margin:12px 0;color:#8a8f98;font-size:13px;">
-      El bot se ha detenido. Pulsa <strong style="color:#f7f8f8;">Iniciar</strong> en la barra superior para abrir un nuevo ciclo.
+
+    <p class="modal-hint">
+      El bot se ha <strong>detenido</strong>. No hay más escaneo.<br>
+      Pulsa <strong>Iniciar nuevo ciclo</strong> o usa el botón
+      <strong>Iniciar</strong> de la barra superior para comenzar una sesión limpia.
     </p>
+
     <div class="modal-actions">
-      <button class="modal-btn primary" onclick="sessionCloseAndStart()">Iniciar nuevo ciclo</button>
-      <button class="modal-btn secondary" onclick="sessionCloseModal()">Cerrar</button>
+      <button class="modal-btn primary" id="btn-new-cycle" onclick="sessionCloseAndStart()">
+        Iniciar nuevo ciclo
+      </button>
+      <button class="modal-btn secondary" onclick="sessionCloseModal()">
+        Cerrar
+      </button>
     </div>
   </div>
 </div>
@@ -1240,48 +1341,133 @@ function initResizeHandles(){
 
 // ── Session Modal ────────────────────────────────────────────────────────────
 
-function showCycleModal(data){
-  document.getElementById("sm-trades").textContent = data.trades || "–";
-  document.getElementById("sm-itm-otm").textContent = (data.itm || 0) + " / " + (data.otm || 0);
-  const wr = data.win_rate ? data.win_rate.toFixed(1) + "%" : "–";
+function showCycleModal(data) {
+  // Datos del resumen
+  document.getElementById("sm-trades").textContent =
+    data.trades != null ? data.trades : (data.wins != null ? (data.wins + (data.losses || 0)) : "–");
+
+  const itm = data.itm != null ? data.itm : (data.wins != null ? data.wins : 0);
+  const otm = data.otm != null ? data.otm : (data.losses != null ? data.losses : 0);
+  document.getElementById("sm-itm-otm").textContent = itm + " / " + otm;
+
+  const wrVal = data.win_rate != null
+    ? data.win_rate
+    : (itm + otm > 0 ? (itm / (itm + otm) * 100) : null);
   const wrEl = document.getElementById("sm-wr");
-  wrEl.textContent = wr;
-  wrEl.className = "value " + (data.win_rate >= 50 ? "green" : "red");
-  const pnl = data.pnl != null ? (data.pnl >= 0 ? "+" : "") + data.pnl.toFixed(2) : "–";
+  if (wrVal != null) {
+    wrEl.textContent = wrVal.toFixed(1) + "%";
+    wrEl.className = "value " + (wrVal >= 50 ? "green" : "red");
+  } else {
+    wrEl.textContent = "–";
+    wrEl.className = "value";
+  }
+
+  const pnl = data.pnl != null ? data.pnl : null;
   const pnlEl = document.getElementById("sm-pnl");
-  pnlEl.textContent = pnl;
-  pnlEl.className = "value " + (data.pnl >= 0 ? "green" : "red");
-  document.getElementById("sm-duration").textContent = data.duration ? Math.round(data.duration) + " min" : "–";
+  if (pnl != null) {
+    pnlEl.textContent = (pnl >= 0 ? "+" : "") + Number(pnl).toFixed(2);
+    pnlEl.className = "value " + (pnl >= 0 ? "green" : "red");
+  } else if (data.balance != null) {
+    pnlEl.textContent = Number(data.balance).toFixed(2);
+    pnlEl.className = "value";
+  } else {
+    pnlEl.textContent = "–";
+    pnlEl.className = "value";
+  }
+
+  const dur = data.duration != null ? data.duration : data.elapsed_min;
+  document.getElementById("sm-duration").textContent =
+    dur != null ? Math.round(dur) + " min" : "–";
+
+  // Subtítulo según tipo de finalización
+  const sub = document.getElementById("sm-subtitle");
+  if (data.failed || data.status === "SESSION_FAILED") {
+    sub.textContent = "La sesión ha finalizado por demasiadas pérdidas.";
+  } else if (data.timeout || data.status === "SESSION_TIMEOUT") {
+    sub.textContent = "La sesión ha expirado por tiempo máximo.";
+  } else {
+    sub.textContent = "La sesión Massaniello ha alcanzado su meta (ITM).";
+  }
+
+  // Mostrar modal
   document.getElementById("session-modal").classList.add("show");
+
+  // Actualizar estado visual de la barra de control
+  const st = document.getElementById("ctrl-state");
+  if (st) {
+    st.textContent = "STOPPED";
+    st.className = "ctrl-state stopped";
+  }
+  const btn = document.getElementById("btn-toggle");
+  if (btn) {
+    btn.textContent = "Iniciar";
+    btn.className = "ctrl-btn start";
+    btn.disabled = false;
+  }
 }
 
-function sessionCloseAndStart(){
+/** Cierra el modal y arranca una nueva sesión limpia */
+function sessionCloseAndStart() {
+  const btn = document.getElementById("btn-new-cycle");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Iniciando…";
+  }
+
   document.getElementById("session-modal").classList.remove("show");
-  // Primero reseteamos (por si acaso) y luego iniciamos el runner
-  fetch("/api/session/new-cycle", {method: "POST"})
-    .then(() => fetch("/api/bot/start", {method: "POST"}))
+
+  // 1) Reset de sesión (Massaniello limpio)
+  // 2) Arrancar el BotRunner
+  fetch("/api/session/new-cycle", { method: "POST" })
     .then(r => r.json())
     .then(d => {
-      updateRunnerUI(d);
-      pollRunnerStatus();
+      if (d.error) console.warn("new-cycle:", d.error);
+      return fetch("/api/bot/start", { method: "POST" });
     })
-    .catch(()=>{});
+    .then(r => r.json())
+    .then(d => {
+      if (typeof updateRunnerUI === "function") updateRunnerUI(d);
+      if (typeof pollRunnerStatus === "function") pollRunnerStatus();
+    })
+    .catch(err => {
+      console.error("Error al iniciar nuevo ciclo:", err);
+      // Fallback: solo intentar start
+      fetch("/api/bot/start", { method: "POST" })
+        .then(r => r.json())
+        .then(d => {
+          if (typeof updateRunnerUI === "function") updateRunnerUI(d);
+          if (typeof pollRunnerStatus === "function") pollRunnerStatus();
+        })
+        .catch(() => {});
+    })
+    .finally(() => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Iniciar nuevo ciclo";
+      }
+    });
 }
 
-function sessionCloseModal(){
+/** Solo cierra el modal (el bot se queda detenido) */
+function sessionCloseModal() {
   document.getElementById("session-modal").classList.remove("show");
 }
-}
 
-// Listen for session_completed events via the main WS
-ws.addEventListener("message", (e)=>{
-  try{
-    const m = JSON.parse(e.data);
-    if(m.type==="session_complete" || m.type==="session_completed"){
-      showCycleModal(m.data || m);
-    }
-  }catch(_){}
-});
+// Compatibilidad con nombres antiguos
+function sessionNewCycle()  { sessionCloseAndStart(); }
+function sessionStopBot()   { sessionCloseModal(); }
+
+// Escuchar eventos de sesión completada por WebSocket
+if (typeof ws !== "undefined") {
+  ws.addEventListener("message", (e) => {
+    try {
+      const m = JSON.parse(e.data);
+      if (m.type === "session_complete" || m.type === "session_completed") {
+        showCycleModal(m.data || m);
+      }
+    } catch (_) {}
+  });
+}
 
 // ── Config Panel ─────────────────────────────────────────────────────────────
 
