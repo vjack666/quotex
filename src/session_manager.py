@@ -1,13 +1,19 @@
 """Session lifecycle manager for the Quotex trading bot.
 
 Manages the state machine: STOPPED → SCANNING → TRADING → COMPLETED → RESETTING → SCANNING
+
+Smart rules:
+- Pressing Iniciar (or starting the bot process) must leave the session in SCANNING.
+- Incomplete Massaniello progress is resumed (counters kept).
+- Terminal Massaniello (meta ITM, failed, timeout, exhausted) stops scanning.
+- After terminal, the next Iniciar starts a fresh scan cycle.
 """
 from __future__ import annotations
 
 import logging
 import time
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from config import SESSION_COOLDOWN_MINUTES
 
@@ -28,6 +34,34 @@ def _get_event_bus():
     return _event_bus
 
 
+class _MassanielloLike(Protocol):
+    wins: int
+    losses: int
+    entries: int
+    operations: int
+    expected_wins: int
+
+    def is_session_complete(self) -> bool: ...
+    def is_session_failed(self) -> bool: ...
+    def is_session_timeout(self) -> bool: ...
+    def is_session_exhausted(self) -> bool: ...
+
+
+def massaniello_is_terminal(mgr: _MassanielloLike) -> bool:
+    """True when Massaniello no longer admits new entries for this cycle."""
+    return (
+        mgr.is_session_complete()
+        or mgr.is_session_failed()
+        or mgr.is_session_timeout()
+        or mgr.is_session_exhausted()
+    )
+
+
+def massaniello_has_progress(mgr: _MassanielloLike) -> bool:
+    """True when the current cycle already recorded entries/results."""
+    return (mgr.wins + mgr.losses) > 0 or mgr.entries > 0
+
+
 class SessionState(str, Enum):
     STOPPED = "stopped"
     SCANNING = "scanning"
@@ -40,11 +74,11 @@ class SessionManager:
     """Manages session lifecycle with explicit states.
 
     States:
-        STOPPED    - Bot is not running
+        STOPPED    - Bot is not running / user stopped
         SCANNING   - Actively looking for trade entries
         TRADING    - Has open positions, waiting for results
-        COMPLETED  - Session reached 3 ITM or 3 OTM, waiting for user confirmation
-        RESETTING  - Preparing for new cycle (clearing Massaniello state)
+        COMPLETED  - Meta reached (or failed/timeout); scan must stop
+        RESETTING  - Preparing for new cycle
     """
 
     def __init__(self, cooldown_minutes: int = SESSION_COOLDOWN_MINUTES) -> None:
@@ -55,6 +89,7 @@ class SessionManager:
         self._last_trade_reason: Optional[str] = None
         self._last_trade_info: Optional[dict] = None
         self._session_start_time: Optional[float] = None
+        self._last_bootstrap_mode: Optional[str] = None
 
     @property
     def state(self) -> SessionState:
@@ -75,6 +110,10 @@ class SessionManager:
     @property
     def session_start_time(self) -> Optional[float]:
         return self._session_start_time
+
+    @property
+    def last_bootstrap_mode(self) -> Optional[str]:
+        return self._last_bootstrap_mode
 
     def start(self) -> None:
         """Transition from STOPPED to SCANNING."""
@@ -111,7 +150,7 @@ class SessionManager:
         self._emit_state_changed()
 
     def session_completed(self, summary: Optional[dict] = None) -> None:
-        """Mark session as completed (3 ITM or 3 OTM reached).
+        """Mark session as completed (meta ITM / failed / timeout / exhausted).
 
         Emits session_completed event for the dashboard modal.
         """
@@ -166,13 +205,83 @@ class SessionManager:
         self._last_trade_reason = reason
         self._last_trade_info = trade_info
 
-    def tick(self, massaniello_is_complete: bool = False, massaniello_is_failed: bool = False, has_open_trades: bool = False) -> SessionState:
+    def bootstrap_for_run(
+        self,
+        massaniello: _MassanielloLike,
+        *,
+        force_new: bool = False,
+    ) -> str:
+        """Activate scanning when the user presses Iniciar / the process starts.
+
+        Returns one of: ``already_active`` | ``resumed`` | ``fresh``.
+
+        Rules:
+        - Already SCANNING/TRADING → leave as-is.
+        - COMPLETED → open a new cycle (user asked to run again).
+        - Incomplete Massaniello progress → SCANNING and keep counters (resume).
+        - Terminal or empty Massaniello → SCANNING as a fresh cycle.
+        """
+        if self._state in (SessionState.SCANNING, SessionState.TRADING):
+            self._last_bootstrap_mode = "already_active"
+            log.info("Session already active (%s) — keep scanning", self._state.value)
+            return "already_active"
+
+        if self._state == SessionState.COMPLETED:
+            self.confirm_new_cycle()
+            self._last_bootstrap_mode = "fresh"
+            log.info("♻️ Previous cycle completed — starting fresh scan cycle")
+            return "fresh"
+
+        # STOPPED / RESETTING
+        if self._state == SessionState.RESETTING:
+            self._state = SessionState.STOPPED
+
+        has_progress = massaniello_has_progress(massaniello)
+        terminal = massaniello_is_terminal(massaniello)
+
+        if force_new or terminal or not has_progress:
+            self.start()
+            self._last_bootstrap_mode = "fresh"
+            if terminal and has_progress:
+                log.info(
+                    "♻️ Massaniello terminal (%dW/%dL) — fresh session SCANNING",
+                    massaniello.wins,
+                    massaniello.losses,
+                )
+            else:
+                log.info("🆕 Fresh trading session — SCANNING")
+            return "fresh"
+
+        # Incomplete progress: resume counters, enable scan
+        self.start()
+        self._last_bootstrap_mode = "resumed"
+        played = massaniello.wins + massaniello.losses
+        log.info(
+            "🔄 Resuming incomplete session — %dW/%dL (ops %d/%d, entries=%d)",
+            massaniello.wins,
+            massaniello.losses,
+            played,
+            massaniello.operations,
+            massaniello.entries,
+        )
+        return "resumed"
+
+    def tick(
+        self,
+        massaniello_is_complete: bool = False,
+        massaniello_is_failed: bool = False,
+        has_open_trades: bool = False,
+        massaniello_is_terminal: bool = False,
+        force_complete: bool = False,
+    ) -> SessionState:
         """Called each scan cycle to update state.
 
         Args:
-            massaniello_is_complete: True if Massaniello reached 3 ITM
-            massaniello_is_failed: True if Massaniello reached 3 OTM
+            massaniello_is_complete: True if Massaniello reached expected ITM
+            massaniello_is_failed: True if Massaniello reached max losses
             has_open_trades: True if there are open positions
+            massaniello_is_terminal: True if timeout/exhausted/complete/failed
+            force_complete: True when executor already flagged session end
 
         Returns:
             Current session state
@@ -190,6 +299,10 @@ class SessionManager:
         if self._state == SessionState.TRADING:
             if not has_open_trades:
                 self.exit_trade()
+            # Still evaluate terminal after trade exits
+            if force_complete or massaniello_is_terminal or massaniello_is_complete or massaniello_is_failed:
+                if not has_open_trades:
+                    self.session_completed()
             return self._state
 
         # SCANNING state
@@ -197,7 +310,12 @@ class SessionManager:
             self.enter_trade()
             return self._state
 
-        if massaniello_is_complete or massaniello_is_failed:
+        if (
+            force_complete
+            or massaniello_is_terminal
+            or massaniello_is_complete
+            or massaniello_is_failed
+        ):
             self.session_completed()
             return self._state
 
@@ -216,6 +334,7 @@ class SessionManager:
             "elapsed_minutes": round(elapsed, 1),
             "last_trade_reason": self._last_trade_reason,
             "last_trade_info": self._last_trade_info,
+            "bootstrap_mode": self._last_bootstrap_mode,
         }
 
     def _emit_state_changed(self) -> None:

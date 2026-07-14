@@ -160,17 +160,24 @@ class TradeExecutor:
             return
         blocked, reason = self._massaniello_session_blocks_entry()
         if blocked:
-            # Secuencia 5/3 cumplida (3 ITM) o fallida (3 losses / expirada /
-            # sin ops): se detiene el escaneo y se reinicia el Massaniello en
-            # el capital virtual para el proximo arranque.
+            # Meta cumplida / fallida / timeout / sin ops: detener scan.
+            # Notify SessionManager BEFORE resetting counters so the main loop
+            # and hub modal see COMPLETED (not a ghost STOPPED with empty mgr).
             self.bot.session_stop_hit = True
+            summary = {
+                "reason": reason,
+                "wins": self.bot.massaniello.wins,
+                "losses": self.bot.massaniello.losses,
+                "entries": self.bot.massaniello.entries,
+            }
+            if self.session_manager is not None:
+                self.session_manager.session_completed(summary)
             vcap = self._massaniello_virtual()
             if vcap is not None:
                 from massaniello_risk import MassanielloRiskManager
                 self.bot.massaniello = MassanielloRiskManager()
                 self.set_session_start_balance(vcap)
-                # Guardar estado limpio en DB para que el próximo restart no
-                # cargue una sesión completa
+                # Clean state for next Iniciar (fresh cycle, not resume of terminal)
                 if hasattr(self.bot, "massaniello_persistence"):
                     self.bot.massaniello_persistence.save(self.bot.massaniello)
             log.info("🛑 Sesión Massaniello finalizada — %s (escaneo detenido)", reason)

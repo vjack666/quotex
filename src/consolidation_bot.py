@@ -40,7 +40,11 @@ from executor import TradeExecutor
 from loop_utils import seconds_until_next_scan, sleep_with_inline_countdown
 from massaniello_persistence import MassanielloPersistence
 from massaniello_risk import MassanielloRiskManager
-from session_manager import SessionManager, SessionState
+from session_manager import (
+    SessionManager,
+    SessionState,
+    massaniello_is_terminal,
+)
 from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
 from hub.strat_f_panel import StratFPanel
@@ -332,6 +336,16 @@ async def main(
     else:
         log.debug("Risk manager no es Massaniello — persistencia omitida")
 
+    # Smart lifecycle: Iniciar → SCANNING; incomplete Massaniello → resume.
+    # Without this the manager stays STOPPED and the scan loop exits immediately.
+    _bootstrap_mode = bot.session_manager.bootstrap_for_run(bot.massaniello)
+    log.info("Session bootstrap mode: %s", _bootstrap_mode)
+    bot.session_stop_hit = False
+
+    # Register live bot with web BotRunner (if this process is the runner task).
+    if _runner.state in ("starting", "running"):
+        _runner.bind_bot(bot)
+
     # ── Carga de pesos calibrados del entry_scorer ──────────────────────────
     try:
         from weight_calibrator import WeightCalibrator
@@ -423,23 +437,24 @@ async def main(
                     massaniello_is_complete=mgr.is_session_complete(),
                     massaniello_is_failed=mgr.is_session_failed(),
                     has_open_trades=has_open_trades,
+                    massaniello_is_terminal=massaniello_is_terminal(mgr),
+                    force_complete=bool(bot.session_stop_hit),
                 )
 
-                # Sesión completada → notificar y DETENER el bot por completo.
-                # El usuario debe pulsar "Iniciar" en el hub para un nuevo ciclo.
-                if current_state == SessionState.COMPLETED:
+                # Meta cumplida / fallida / timeout / exhausted → detener scan.
+                # El usuario pulsa Iniciar para un ciclo nuevo (o se reanuda si quedó incompleto).
+                if current_state == SessionState.COMPLETED or bot.session_stop_hit:
                     log.info(
-                        "🎯 SESIÓN MASSANIELLO COMPLETADA — "
-                        "bot detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
+                        "🎯 SESIÓN MASSANIELLO FINALIZADA — "
+                        "scan detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
                     )
-                    # Dar tiempo a que el modal se muestre vía event_bus + WS
                     await asyncio.sleep(2.0)
-                    # Forzar estado STOPPED para que el runner termine limpio
                     sm.stop()
                     break
 
-                # If session is stopped, break the loop
+                # STOPPED only after explicit stop (user/API) — never "never started"
                 if current_state == SessionState.STOPPED:
+                    log.info("Session STOPPED — ending scan loop")
                     break
 
                 await bot.scan_all()
@@ -522,6 +537,12 @@ async def main(
     except KeyboardInterrupt:
         log.info("Detenido por el usuario (Ctrl+C).")
     finally:
+        # Persist Massaniello so an incomplete session can resume on next Iniciar
+        try:
+            if getattr(bot, "massaniello_persistence", None) is not None:
+                bot.massaniello_persistence.save(bot.massaniello)
+        except Exception as exc:
+            log.warning("No se pudo guardar Massaniello al salir: %s", exc)
         try:
             await asyncio.wait_for(bot.shutdown_background_tasks(), timeout=3.0)
         except Exception:
@@ -701,24 +722,35 @@ class BotRunner:
             return bot.session_manager.get_status()
         return {"error": "Session manager not available"}
 
+    def bind_bot(self, bot: ConsolidationBot) -> None:
+        """Attach the live bot instance created inside main()."""
+        self._bot = bot
+        self._client = getattr(bot, "client", None)
+
     async def start(self) -> None:
         if self._state in ("running", "starting"):
             return
         self._state = "starting"
         self._error = None
         self._started_at = time.time()
-        # Start session manager
-        if self._bot is not None and hasattr(self._bot, "session_manager"):
-            self._bot.session_manager.start()
+        # Session bootstrap runs inside main() after Massaniello load + bot create.
+        # Do NOT call session_manager.start() here: self._bot is still None / stale.
         self._task = asyncio.create_task(self._run(), name="bot-runner")
 
     async def stop(self) -> None:
         if self._state not in ("running", "starting"):
             return
         self._state = "stopping"
-        # Stop session manager
-        if self._bot is not None and hasattr(self._bot, "session_manager"):
-            self._bot.session_manager.stop()
+        # Persist incomplete session before tearing down
+        if self._bot is not None:
+            try:
+                pers = getattr(self._bot, "massaniello_persistence", None)
+                if pers is not None:
+                    pers.save(self._bot.massaniello)
+            except Exception as exc:
+                log.warning("No se pudo guardar Massaniello al stop: %s", exc)
+            if hasattr(self._bot, "session_manager"):
+                self._bot.session_manager.stop()
         if self._task and not self._task.done():
             self._task.cancel()
             try:
