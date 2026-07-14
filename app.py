@@ -95,7 +95,7 @@ def _setup_web_logging() -> None:
 
 
 # ── Import hub server (FastAPI app lives here) ────────────────────────────────
-from hub.server import app as _hub_app, init as _hub_init, run_server as _hub_run_server
+from hub.server import app as _hub_app, init as _hub_init, run_server as _hub_run_server, _open_browser, _auto_open_dashboard
 from hub.hub_scanner import HubScanner
 
 # ── BotRunner import ──────────────────────────────────────────────────────────
@@ -125,6 +125,11 @@ async def lifespan(application):
     relay = asyncio.create_task(_event_relay())
 
     log.info("Hub dashboard ready. Bot is STOPPED — use /api/bot/start to begin.")
+
+    # Auto-open browser (unless disabled)
+    if os.environ.get("HUB_NO_OPEN", "").lower() not in ("1", "true", "yes"):
+        port = getattr(application.state, "_port", 8080)
+        asyncio.create_task(_auto_open_dashboard("0.0.0.0", port))
 
     yield
 
@@ -349,6 +354,9 @@ def main():
 
     if args.no_browser:
         os.environ["HUB_NO_OPEN"] = "1"
+
+    # Store port in app state so lifespan can use it
+    _hub_app.state._port = args.port
 
     print(f"  → QUOTEX Web App: http://localhost:{args.port}")
     print(f"  → Dashboard: http://localhost:{args.port}/")
