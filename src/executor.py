@@ -89,7 +89,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("executor")
 
 class TradeExecutor:
-    def __init__(self, client, bot, trade_client=None, htf_scanner=None):
+    def __init__(self, client, bot, trade_client=None, htf_scanner=None, session_manager=None):
         self.client = client
         self.bot = bot
         # Cliente de trading LIMPIO (separado del de datos) para buy().
@@ -98,6 +98,8 @@ class TradeExecutor:
         # Referencia directa al HTF scanner para pausarlo durante la orden.
         self.htf = htf_scanner
         self.entry_sync = EntrySynchronizer()
+        # Session manager for lifecycle tracking
+        self.session_manager = session_manager
 
     async def _ensure_trade_client_alive(self) -> None:
         """Crea un trade_client FRESCO antes de cada orden.
@@ -1045,6 +1047,10 @@ class TradeExecutor:
 
         self._register_asset_outcome(sym, outcome)
 
+        # Notify session manager that trade is resolved
+        if self.session_manager is not None:
+            self.session_manager.exit_trade()
+
         # Actualizar estado de compensación para la próxima entrada
         if outcome == "WIN":
             self.bot.compensation_pending = False
@@ -1349,6 +1355,18 @@ class TradeExecutor:
 
         self.bot.stats["entries"] += 1
         self.bot.stats["strat_a_signals"] += 1
+
+        # Notify session manager that a trade was entered
+        if self.session_manager is not None:
+            self.session_manager.enter_trade()
+            self.session_manager.set_trade_reason(reason, {
+                "asset": sym,
+                "direction": direction,
+                "amount": amount,
+                "strategy": strategy_origin,
+                "score": score_original,
+                "payout": payout,
+            })
 
         if oid:
             log.info("  ✓ Orden aceptada  id=%s  open=%.5f  ref=%s", oid, open_price, order_ref)

@@ -739,6 +739,132 @@ class BlackBoxRecorder:
         except Exception as e:
             print(f"⚠️ Error escribiendo JSONL: {e}")
     
+    def get_trades(self, limit: int = 100, date_from: Optional[str] = None) -> list[dict]:
+        """Retrieve closed trades from the black box DB.
+
+        Args:
+            limit: Max number of trades to return (default 100)
+            date_from: Optional ISO date string to filter from (e.g. "2024-01-15")
+
+        Returns:
+            List of trade dicts ordered by most recent first.
+        """
+        con = sqlite3.connect(self.db_path)
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+
+        query = """
+            SELECT id, asset, direction, score, payout, order_result, profit,
+                   entry_price, exit_price, ts, created_at
+            FROM scan_candidates
+            WHERE order_result IS NOT NULL
+        """
+        params: list[Any] = []
+
+        if date_from:
+            # created_at is stored as ISO text like "2024-01-15 10:30:00"
+            query += " AND created_at >= ?"
+            params.append(date_from + " 00:00:00")
+
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        rows = cur.execute(query, params).fetchall()
+        con.close()
+
+        trades = []
+        for row in rows:
+            trades.append({
+                "id": int(row["id"]),
+                "asset": row["asset"] or "",
+                "direction": (row["direction"] or "").upper(),
+                "score": float(row["score"]) if row["score"] is not None else None,
+                "payout": int(row["payout"]) if row["payout"] is not None else None,
+                "result": row["order_result"] or "",
+                "profit": float(row["profit"]) if row["profit"] is not None else 0.0,
+                "entry_price": float(row["entry_price"]) if row["entry_price"] is not None else None,
+                "exit_price": float(row["exit_price"]) if row["exit_price"] is not None else None,
+                "ts": float(row["ts"]) if row["ts"] is not None else None,
+                "created_at": row["created_at"] or "",
+            })
+        return trades
+
+    def clear_trades(self) -> int:
+        """Delete all trade records from the DB (JSONL files remain intact).
+
+        Returns:
+            Number of records deleted.
+        """
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM scan_candidates WHERE order_result IS NOT NULL")
+        count = int(cur.fetchone()[0])
+        cur.execute("DELETE FROM scan_candidates WHERE order_result IS NOT NULL")
+        con.commit()
+        con.close()
+        log.info("🧹 Black box: %d trade records cleared (JSONL files preserved)", count)
+        return count
+
+    def get_session_summary(self) -> dict[str, Any]:
+        """Get current session stats from the black box.
+
+        Returns:
+            Dict with session statistics.
+        """
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+
+        # Today's trades
+        today = datetime.now().strftime("%Y-%m-%d")
+        row = cur.execute(
+            """
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN order_result='WIN' THEN 1 ELSE 0 END) as wins,
+                   SUM(CASE WHEN order_result='LOSS' THEN 1 ELSE 0 END) as losses,
+                   COALESCE(SUM(profit), 0) as pnl
+            FROM scan_candidates
+            WHERE order_result IS NOT NULL AND created_at >= ?
+            """,
+            (today + " 00:00:00",),
+        ).fetchone()
+
+        total = int(row[0]) if row[0] else 0
+        wins = int(row[1]) if row[1] else 0
+        losses = int(row[2]) if row[2] else 0
+        pnl = float(row[3]) if row[3] else 0.0
+        win_rate = (wins / total * 100) if total > 0 else 0.0
+
+        # Last trade
+        last = cur.execute(
+            """
+            SELECT asset, direction, order_result, profit, created_at
+            FROM scan_candidates
+            WHERE order_result IS NOT NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+        ).fetchone()
+
+        last_trade = None
+        if last:
+            last_trade = {
+                "asset": last[0] or "",
+                "direction": (last[1] or "").upper(),
+                "result": last[2] or "",
+                "profit": float(last[3]) if last[3] else 0.0,
+                "created_at": last[4] or "",
+            }
+
+        con.close()
+
+        return {
+            "today_total": total,
+            "today_wins": wins,
+            "today_losses": losses,
+            "today_pnl": round(pnl, 2),
+            "today_win_rate": round(win_rate, 1),
+            "last_trade": last_trade,
+        }
+
     def export_summary(self) -> Dict[str, Any]:
         """Genera resumen del día."""
         con = sqlite3.connect(self.db_path)

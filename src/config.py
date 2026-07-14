@@ -33,6 +33,7 @@ CYCLE_TARGET_PROFIT_PCT = 0.10
 MASSANIELLO_OPERATIONS = 5
 MASSANIELLO_EXPECTED_WINS = 3
 SESSION_MAX_MIN = 60
+SESSION_COOLDOWN_MINUTES = 0  # Minutes to wait between cycles (0 = immediate)
 RISK_MANAGER = "massaniello"
 # Saldo virtual de referencia para la calculadora Massaniello. Si > 0, el bot
 # IGNORA el saldo real de la cuenta para dimensionar los stakes y usa este

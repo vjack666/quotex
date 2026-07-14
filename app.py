@@ -95,6 +95,7 @@ def _setup_web_logging() -> None:
 
 
 # ── Import hub server (FastAPI app lives here) ────────────────────────────────
+from fastapi import WebSocket
 from hub.server import app as _hub_app, init as _hub_init, run_server as _hub_run_server, _open_browser, _auto_open_dashboard
 from hub.hub_scanner import HubScanner
 
@@ -330,6 +331,56 @@ async def health():
         "uptime_sec": (time.time() - _runner._started_at) if _runner._started_at else None,
         "timestamp": time.time(),
     }
+
+
+# ── Black Box API Endpoints ───────────────────────────────────────────────────
+
+@_hub_app.get("/api/blackbox/trades")
+async def get_blackbox_trades(limit: int = 100, date_from: str = ""):
+    """Get trade history from black box."""
+    from black_box_recorder import get_black_box
+    bb = get_black_box()
+    trades = bb.get_trades(limit=limit, date_from=date_from or None)
+    return {"trades": trades, "count": len(trades)}
+
+
+@_hub_app.delete("/api/blackbox/trades")
+async def clear_blackbox_trades():
+    """Clear trade history from black box (JSONL files preserved)."""
+    from black_box_recorder import get_black_box
+    bb = get_black_box()
+    deleted = bb.clear_trades()
+    return {"status": "cleared", "deleted": deleted}
+
+
+@_hub_app.get("/api/blackbox/session")
+async def get_blackbox_session():
+    """Get current session summary from black box."""
+    from black_box_recorder import get_black_box
+    bb = get_black_box()
+    return bb.get_session_summary()
+
+
+# ── Session Management API Endpoints ──────────────────────────────────────────
+
+@_hub_app.post("/api/session/new-cycle")
+async def new_cycle():
+    """Confirm and start a new trading cycle."""
+    result = _runner.confirm_new_cycle()
+    return result
+
+
+@_hub_app.post("/api/session/reject-cycle")
+async def reject_cycle():
+    """Decline new cycle — stop bot."""
+    result = _runner.reject_new_cycle()
+    return result
+
+
+@_hub_app.get("/api/session/status")
+async def session_status():
+    """Get current session status."""
+    return _runner.get_session_status()
 
 
 # ── WebSocket for logs ────────────────────────────────────────────────────────

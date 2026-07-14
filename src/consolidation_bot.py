@@ -40,6 +40,7 @@ from executor import TradeExecutor
 from loop_utils import seconds_until_next_scan, sleep_with_inline_countdown
 from massaniello_persistence import MassanielloPersistence
 from massaniello_risk import MassanielloRiskManager
+from session_manager import SessionManager, SessionState
 from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
 from hub.strat_f_panel import StratFPanel
@@ -142,7 +143,11 @@ class ConsolidationBot:
         self.htf_scanner = HTFScanner(client, assets_fn=lambda: get_open_assets(client, min_payout=STRAT_A_MIN_PAYOUT), min_payout=STRAT_A_MIN_PAYOUT, on_asset_refresh=self._on_htf_asset_refresh, ws_sem=self._ws_sem)
         self._htf_task: asyncio.Task[Any] | None = None
         self._hub_scanner: Any = None
-        self.executor = TradeExecutor(client, self, trade_client, self.htf_scanner)
+
+        # Session manager for lifecycle tracking
+        self.session_manager = SessionManager()
+
+        self.executor = TradeExecutor(client, self, trade_client, self.htf_scanner, session_manager=self.session_manager)
         self.scanner = AssetScanner(self, self.executor)
         self.diversification_enforcer = DiversificationEnforcer(
             max_simultaneous_trades=MAX_SIMULTANEOUS_TRADES,
@@ -454,7 +459,25 @@ async def main(
                                 "[RADAR] Próximo tick watchlist",
                             )
                 await bot.reconcile_pending_candidates(max_age_minutes=PENDING_RECONCILE_AGE_MIN)
-                if bot.session_stop_hit:
+
+                # Session lifecycle check via SessionManager
+                sm = bot.session_manager
+                has_open_trades = len(bot.trades) > 0
+                mgr = bot.massaniello
+                current_state = sm.tick(
+                    massaniello_is_complete=mgr.is_session_complete(),
+                    massaniello_is_failed=mgr.is_session_failed(),
+                    has_open_trades=has_open_trades,
+                )
+
+                # If session is completed, wait for user confirmation (don't scan)
+                if current_state == SessionState.COMPLETED:
+                    log.info("⏸ Sesión completada — esperando confirmación del usuario para nuevo ciclo")
+                    await asyncio.sleep(5.0)
+                    continue
+
+                # If session is stopped, break the loop
+                if current_state == SessionState.STOPPED:
                     break
             except asyncio.CancelledError:
                 break
@@ -612,7 +635,54 @@ class BotRunner:
             status["cycle_profit"] = b.cycle_profit
             status["active_trades"] = len(b.trades)
             status["account_type"] = b.account_type
+            # Session manager status
+            if hasattr(b, "session_manager") and b.session_manager is not None:
+                status["session"] = b.session_manager.get_status()
         return status
+
+    def confirm_new_cycle(self) -> dict[str, Any]:
+        """User confirmed they want a new cycle."""
+        bot = self._bot
+        if bot is None:
+            return {"error": "Bot is not running"}
+        if not hasattr(bot, "session_manager"):
+            return {"error": "Session manager not available"}
+        sm = bot.session_manager
+        if sm.state != SessionState.COMPLETED:
+            return {"error": f"Session is not completed (current: {sm.state.value})"}
+
+        # Reset Massaniello for new cycle
+        if hasattr(bot, "massaniello") and bot.massaniello is not None:
+            from massaniello_risk import MassanielloRiskManager
+            bot.massaniello = MassanielloRiskManager()
+            if bot.current_balance:
+                bot.executor.set_session_start_balance(bot.current_balance)
+
+        sm.confirm_new_cycle()
+        return {"status": "new_cycle_started", "cycle": sm.cycle_count}
+
+    def reject_new_cycle(self) -> dict[str, Any]:
+        """User declined new cycle."""
+        bot = self._bot
+        if bot is None:
+            return {"error": "Bot is not running"}
+        if not hasattr(bot, "session_manager"):
+            return {"error": "Session manager not available"}
+        sm = bot.session_manager
+        if sm.state != SessionState.COMPLETED:
+            return {"error": f"Session is not completed (current: {sm.state.value})"}
+
+        sm.reject_new_cycle()
+        return {"status": "cycle_rejected", "state": sm.state.value}
+
+    def get_session_status(self) -> dict[str, Any]:
+        """Get current session status."""
+        bot = self._bot
+        if bot is None:
+            return {"error": "Bot is not running"}
+        if hasattr(bot, "session_manager") and bot.session_manager is not None:
+            return bot.session_manager.get_status()
+        return {"error": "Session manager not available"}
 
     async def start(self) -> None:
         if self._state in ("running", "starting"):
@@ -620,12 +690,18 @@ class BotRunner:
         self._state = "starting"
         self._error = None
         self._started_at = time.time()
+        # Start session manager
+        if self._bot is not None and hasattr(self._bot, "session_manager"):
+            self._bot.session_manager.start()
         self._task = asyncio.create_task(self._run(), name="bot-runner")
 
     async def stop(self) -> None:
         if self._state not in ("running", "starting"):
             return
         self._state = "stopping"
+        # Stop session manager
+        if self._bot is not None and hasattr(self._bot, "session_manager"):
+            self._bot.session_manager.stop()
         if self._task and not self._task.done():
             self._task.cancel()
             try:

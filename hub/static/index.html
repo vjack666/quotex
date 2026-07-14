@@ -313,6 +313,126 @@
     .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-12 { grid-column: span 12; }
     .bb-kpis { grid-template-columns: repeat(2, 1fr); }
   }
+
+  /* Resizable Panels */
+  .bb-panel {
+    background: var(--surface);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .bb-panel-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; border-bottom:1px solid var(--border-2);
+    background: var(--surface-2);
+  }
+  .bb-panel-header h3 {
+    font-size:12px; font-weight:590; color:var(--silver); margin:0;
+    text-transform: uppercase; letter-spacing:.5px;
+  }
+  .bb-panel-body {
+    padding:12px 14px;
+  }
+  .bb-resize-handle {
+    height: 6px;
+    background: var(--surface-3);
+    cursor: ns-resize;
+    transition: background .15s;
+  }
+  .bb-resize-handle:hover {
+    background: var(--accent);
+  }
+
+  /* Session Info Panel */
+  .session-info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .session-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .session-info-item .label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .session-info-item .value {
+    font-size: 14px;
+    font-weight: 510;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .session-info-item .value.accent { color: var(--accent-2); }
+  .session-info-item .value.green { color: var(--emerald); }
+  .session-info-item .value.red { color: var(--red); }
+  .session-info-item .value.orange { color: var(--orange); }
+  .session-reason {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: var(--surface-3);
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--silver);
+    line-height: 1.5;
+  }
+  .session-reason .label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 4px;
+  }
+
+  /* Trade Table */
+  .trade-table-wrap {
+    max-height: 240px; /* 10 rows visible */
+    overflow-y: auto;
+  }
+  .trade-table-wrap table {
+    font-size: 11px;
+  }
+  .trade-table-wrap thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 1;
+  }
+  .trade-table-wrap .result-win { color: var(--emerald); font-weight: 590; }
+  .trade-table-wrap .result-loss { color: var(--red); font-weight: 590; }
+
+  /* Cycle Complete Modal */
+  .cycle-modal-summary {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 16px 0;
+    text-align: left;
+  }
+  .cycle-modal-summary .item {
+    background: var(--surface-3);
+    padding: 10px 12px;
+    border-radius: 6px;
+  }
+  .cycle-modal-summary .item .label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .cycle-modal-summary .item .value {
+    font-size: 16px;
+    font-weight: 590;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .cycle-modal-summary .item .value.green { color: var(--emerald); }
+  .cycle-modal-summary .item .value.red { color: var(--red); }
 </style>
 </head>
 <body>
@@ -341,8 +461,7 @@
 <div class="ctrl-bar">
   <span class="ctrl-label">Bot</span>
   <span class="ctrl-state stopped" id="ctrl-state">STOPPED</span>
-  <button class="ctrl-btn start" id="btn-start" onclick="botStart()">Start</button>
-  <button class="ctrl-btn stop" id="btn-stop" onclick="botStop()" disabled>Stop</button>
+  <button class="ctrl-btn start" id="btn-toggle" onclick="botToggle()">Iniciar</button>
   <span class="ctrl-spacer"></span>
   <button class="ctrl-btn shutdown" onclick="shutdownApp()">Finalizar</button>
   <span class="ctrl-label" id="ctrl-info" style="font-size:11px;"></span>
@@ -439,7 +558,82 @@
     <div class="bb-badge"><span class="v" id="bb-pnl">–</span><span class="l">PnL total</span></div>
   </div>
 
-  <div class="grid">
+  <!-- Panel 1: Sesión Actual -->
+  <div class="bb-panel" id="panel-session" style="height: 220px;">
+    <div class="bb-panel-header">
+      <h3>Sesión Actual</h3>
+      <span class="ctrl-label" id="session-state-label" style="font-size:10px;">STOPPED</span>
+    </div>
+    <div class="bb-panel-body">
+      <div class="session-info-grid">
+        <div class="session-info-item">
+          <span class="label">Estado</span>
+          <span class="value accent" id="si-state">–</span>
+        </div>
+        <div class="session-info-item">
+          <span class="label">Ciclo #</span>
+          <span class="value" id="si-cycle">–</span>
+        </div>
+        <div class="session-info-item">
+          <span class="label">ITM / OTM</span>
+          <span class="value" id="si-itm-otm">–</span>
+        </div>
+        <div class="session-info-item">
+          <span class="label">Entradas hoy</span>
+          <span class="value" id="si-today">–</span>
+        </div>
+        <div class="session-info-item">
+          <span class="label">Win Rate</span>
+          <span class="value green" id="si-winrate">–</span>
+        </div>
+        <div class="session-info-item">
+          <span class="label">Duración</span>
+          <span class="value" id="si-duration">–</span>
+        </div>
+      </div>
+      <div class="session-reason" id="si-reason" style="display:none;">
+        <div class="label">Último motivo</div>
+        <div id="si-reason-text"></div>
+      </div>
+    </div>
+    <div class="bb-resize-handle" data-panel="panel-session"></div>
+  </div>
+
+  <!-- Panel 2: Trading Hoy -->
+  <div class="bb-panel" id="panel-today" style="height: 280px;">
+    <div class="bb-panel-header">
+      <h3>Trading Hoy</h3>
+    </div>
+    <div class="bb-panel-body" style="padding:0;">
+      <div class="trade-table-wrap" id="today-table-wrap">
+        <table>
+          <thead><tr><th>Hora</th><th>Par</th><th>Dir</th><th>Resultado</th><th>Payout</th><th>Profit</th></tr></thead>
+          <tbody id="today-body"><tr><td class="empty" colspan="6">sin trades hoy</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bb-resize-handle" data-panel="panel-today"></div>
+  </div>
+
+  <!-- Panel 3: Historial Completo -->
+  <div class="bb-panel" id="panel-history" style="height: 280px;">
+    <div class="bb-panel-header">
+      <h3>Historial Completo</h3>
+      <button class="cfg-btn secondary" onclick="clearHistory()" style="padding:3px 10px; font-size:10px;">Limpiar</button>
+    </div>
+    <div class="bb-panel-body" style="padding:0;">
+      <div class="trade-table-wrap" id="history-table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Par</th><th>Dir</th><th>Resultado</th><th>Payout</th><th>Profit</th></tr></thead>
+          <tbody id="history-body"><tr><td class="empty" colspan="6">sin historial</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bb-resize-handle" data-panel="panel-history"></div>
+  </div>
+
+  <!-- Legacy sections (hidden by default, shown if no session data) -->
+  <div class="grid" id="bb-legacy" style="display:none;">
     <!-- Por asset -->
     <div class="card col-6">
       <h2>Win rate por activo <span class="sub2" id="bb-asset-count"></span></h2>
@@ -536,16 +730,34 @@
 
 <!-- SESSION COMPLETE MODAL -->
 <div class="modal-overlay" id="session-modal">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:500px;">
     <div class="modal-icon">🎯</div>
-    <h2>Sesión Massaniello Cumplida</h2>
-    <p>Meta alcanzada: <strong id="sm-wins">3</strong> ITM en sesión</p>
-    <p>Capital: <strong id="sm-balance">$0.00</strong> · Tiempo: <strong id="sm-time">0</strong> min</p>
-    <p style="color:var(--faint); font-size:12px;">La próxima sesión será en 4 horas</p>
-    <div class="modal-timer" id="sm-countdown"></div>
+    <h2>Ciclo Completado</h2>
+    <div class="cycle-modal-summary">
+      <div class="item">
+        <div class="label">Total Trades</div>
+        <div class="value" id="sm-trades">–</div>
+      </div>
+      <div class="item">
+        <div class="label">ITM / OTM</div>
+        <div class="value" id="sm-itm-otm">–</div>
+      </div>
+      <div class="item">
+        <div class="label">Win Rate</div>
+        <div class="value green" id="sm-wr">–</div>
+      </div>
+      <div class="item">
+        <div class="label">Ganancia/Pérdida</div>
+        <div class="value" id="sm-pnl">–</div>
+      </div>
+      <div class="item" style="grid-column: span 2;">
+        <div class="label">Duración</div>
+        <div class="value" id="sm-duration">–</div>
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-btn primary" onclick="sessionResetNow()">Abrir sesión ahora</button>
-      <button class="modal-btn secondary" onclick="sessionWait4h()">Esperar 4 horas</button>
+      <button class="modal-btn primary" onclick="sessionNewCycle()">Abrir nuevo ciclo</button>
+      <button class="modal-btn secondary" onclick="sessionStopBot()">Detener bot</button>
     </div>
   </div>
 </div>
@@ -808,8 +1020,10 @@ function renderBlackbox(d){
 let _bbTimer = null;
 function loadBlackbox(){
   fetch('/api/blackbox').then(r=>r.json()).then(renderBlackbox).catch(()=>{});
+  loadTodayTrades();
+  loadHistoryTrades();
   if(_bbTimer) clearInterval(_bbTimer);
-  _bbTimer = setInterval(()=>{ if(document.getElementById("bb-view").classList.contains("active")) loadBlackbox(); }, 5000);
+  _bbTimer = setInterval(()=>{ if(document.getElementById("bb-view").classList.contains("active")) { loadBlackbox(); loadTodayTrades(); } }, 5000);
 }
 
 // ── Bot Control ──────────────────────────────────────────────────────────────
@@ -820,10 +1034,16 @@ function updateRunnerUI(runner){
   const el = document.getElementById("ctrl-state");
   el.textContent = st.toUpperCase();
   el.className = "ctrl-state " + st;
-  const btnS = document.getElementById("btn-start");
-  const btnX = document.getElementById("btn-stop");
-  btnS.disabled = (st==="running" || st==="starting");
-  btnX.disabled = (st!=="running" && st!=="starting");
+  const btn = document.getElementById("btn-toggle");
+  if(st==="running" || st==="starting"){
+    btn.textContent = "Detener";
+    btn.className = "ctrl-btn stop";
+    btn.disabled = false;
+  } else {
+    btn.textContent = "Iniciar";
+    btn.className = "ctrl-btn start";
+    btn.disabled = false;
+  }
   // Info line
   const info = document.getElementById("ctrl-info");
   if(st==="running"){
@@ -832,22 +1052,26 @@ function updateRunnerUI(runner){
   } else {
     info.textContent = "";
   }
+  // Update session info if available
+  if(runner.session) updateSessionInfo(runner.session);
 }
 
-function botStart(){
-  document.getElementById("btn-start").disabled = true;
-  fetch("/api/bot/start",{method:"POST"}).then(r=>r.json()).then(d=>{
-    updateRunnerUI(d);
-    pollRunnerStatus();
-  }).catch(()=>{ document.getElementById("btn-start").disabled = false; });
-}
-
-function botStop(){
-  document.getElementById("btn-stop").disabled = true;
-  fetch("/api/bot/stop",{method:"POST"}).then(r=>r.json()).then(d=>{
-    updateRunnerUI(d);
-    pollRunnerStatus();
-  }).catch(()=>{ document.getElementById("btn-stop").disabled = false; });
+function botToggle(){
+  const btn = document.getElementById("btn-toggle");
+  const st = document.getElementById("ctrl-state").textContent;
+  if(st==="RUNNING" || st==="STARTING"){
+    btn.disabled = true;
+    fetch("/api/bot/stop",{method:"POST"}).then(r=>r.json()).then(d=>{
+      updateRunnerUI(d);
+      pollRunnerStatus();
+    }).catch(()=>{ btn.disabled = false; });
+  } else {
+    btn.disabled = true;
+    fetch("/api/bot/start",{method:"POST"}).then(r=>r.json()).then(d=>{
+      updateRunnerUI(d);
+      pollRunnerStatus();
+    }).catch(()=>{ btn.disabled = false; });
+  }
 }
 
 function shutdownApp(){
@@ -863,6 +1087,204 @@ function shutdownApp(){
 function pollRunnerStatus(){
   fetch("/api/bot/status").then(r=>r.json()).then(updateRunnerUI).catch(()=>{});
 }
+
+// ── Session Info Panel ───────────────────────────────────────────────────────
+
+function updateSessionInfo(session){
+  if(!session) return;
+  const stateLabels = {
+    stopped: "⏹ Detenido",
+    scanning: "🔍 Escaneando",
+    trading: "💹 Operando",
+    completed: "✅ Completado",
+    resetting: "🔄 Reiniciando",
+  };
+  setText("si-state", stateLabels[session.state] || session.state);
+  setText("si-cycle", session.cycle_count ? "#" + session.cycle_count : "–");
+  setText("si-duration", session.elapsed_minutes ? Math.round(session.elapsed_minutes) + " min" : "–");
+
+  // Update state label in header
+  const label = document.getElementById("session-state-label");
+  if(label) label.textContent = stateLabels[session.state] || session.state;
+
+  // Show trade reason if available
+  const reasonEl = document.getElementById("si-reason");
+  const reasonText = document.getElementById("si-reason-text");
+  if(session.last_trade_reason && reasonEl && reasonText){
+    reasonEl.style.display = "block";
+    reasonText.textContent = session.last_trade_reason;
+  } else if(reasonEl){
+    reasonEl.style.display = "none";
+  }
+}
+
+// ── Trade History ────────────────────────────────────────────────────────────
+
+function renderTodayTrades(trades){
+  const body = document.getElementById("today-body");
+  if(!body) return;
+  body.innerHTML = "";
+  if(!trades || trades.length === 0){
+    body.innerHTML = '<tr><td class="empty" colspan="6">sin trades hoy</td></tr>';
+    return;
+  }
+  trades.forEach(t => {
+    const tr = document.createElement("tr");
+    const time = t.created_at ? t.created_at.slice(11, 16) : "–";
+    const resultClass = t.result === "WIN" ? "result-win" : "result-loss";
+    const profitClass = t.profit >= 0 ? "result-win" : "result-loss";
+    tr.innerHTML = `<td>${time}</td>`+
+      `<td class="asset">${t.asset}</td>`+
+      `<td class="${t.direction==='CALL'?'d-call':'d-put'}">${t.direction}</td>`+
+      `<td class="${resultClass}">${t.result}</td>`+
+      `<td>${t.payout ? t.payout+'%' : '–'}</td>`+
+      `<td class="${profitClass}">${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function renderHistoryTrades(trades){
+  const body = document.getElementById("history-body");
+  if(!body) return;
+  body.innerHTML = "";
+  if(!trades || trades.length === 0){
+    body.innerHTML = '<tr><td class="empty" colspan="6">sin historial</td></tr>';
+    return;
+  }
+  trades.forEach(t => {
+    const tr = document.createElement("tr");
+    const date = t.created_at ? t.created_at.replace(" ", " ").slice(0, 16) : "–";
+    const resultClass = t.result === "WIN" ? "result-win" : "result-loss";
+    const profitClass = t.profit >= 0 ? "result-win" : "result-loss";
+    tr.innerHTML = `<td>${date}</td>`+
+      `<td class="asset">${t.asset}</td>`+
+      `<td class="${t.direction==='CALL'?'d-call':'d-put'}">${t.direction}</td>`+
+      `<td class="${resultClass}">${t.result}</td>`+
+      `<td>${t.payout ? t.payout+'%' : '–'}</td>`+
+      `<td class="${profitClass}">${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function loadTodayTrades(){
+  const today = new Date().toISOString().slice(0, 10);
+  fetch(`/api/blackbox/trades?limit=50&date_from=${today}`)
+    .then(r => r.json())
+    .then(d => renderTodayTrades(d.trades))
+    .catch(()=>{});
+}
+
+function loadHistoryTrades(){
+  fetch("/api/blackbox/trades?limit=100")
+    .then(r => r.json())
+    .then(d => renderHistoryTrades(d.trades))
+    .catch(()=>{});
+}
+
+function clearHistory(){
+  fetch("/api/blackbox/trades", {method: "DELETE"})
+    .then(r => r.json())
+    .then(d => {
+      loadHistoryTrades();
+      loadTodayTrades();
+    })
+    .catch(()=>{});
+}
+
+// ── Resizable Panels ─────────────────────────────────────────────────────────
+
+function initResizeHandles(){
+  const STORAGE_KEY = "quotex-panel-heights";
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch(e) {}
+
+  document.querySelectorAll(".bb-resize-handle").forEach(handle => {
+    const panelId = handle.dataset.panel;
+    const panel = document.getElementById(panelId);
+    if(!panel) return;
+
+    // Apply saved height
+    if(saved[panelId]){
+      panel.style.height = saved[panelId] + "px";
+    }
+
+    let startY, startH;
+    handle.addEventListener("mousedown", e => {
+      e.preventDefault();
+      startY = e.clientY;
+      startH = panel.offsetHeight;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+
+    function onMove(e){
+      const delta = e.clientY - startY;
+      const newH = Math.max(120, startH + delta);
+      panel.style.height = newH + "px";
+    }
+
+    function onUp(){
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      // Save to localStorage
+      try {
+        saved[panelId] = panel.offsetHeight;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      } catch(e) {}
+    }
+  });
+}
+
+// ── Session Modal ────────────────────────────────────────────────────────────
+
+function showCycleModal(data){
+  document.getElementById("sm-trades").textContent = data.trades || "–";
+  document.getElementById("sm-itm-otm").textContent = (data.itm || 0) + " / " + (data.otm || 0);
+  const wr = data.win_rate ? data.win_rate.toFixed(1) + "%" : "–";
+  const wrEl = document.getElementById("sm-wr");
+  wrEl.textContent = wr;
+  wrEl.className = "value " + (data.win_rate >= 50 ? "green" : "red");
+  const pnl = data.pnl != null ? (data.pnl >= 0 ? "+" : "") + data.pnl.toFixed(2) : "–";
+  const pnlEl = document.getElementById("sm-pnl");
+  pnlEl.textContent = pnl;
+  pnlEl.className = "value " + (data.pnl >= 0 ? "green" : "red");
+  document.getElementById("sm-duration").textContent = data.duration ? Math.round(data.duration) + " min" : "–";
+  document.getElementById("session-modal").classList.add("show");
+}
+
+function sessionNewCycle(){
+  document.getElementById("session-modal").classList.remove("show");
+  fetch("/api/session/new-cycle", {method: "POST"})
+    .then(r => r.json())
+    .then(d => {
+      if(d.error) console.warn("New cycle failed:", d.error);
+      else console.log("New cycle started:", d);
+      pollRunnerStatus();
+    })
+    .catch(()=>{});
+}
+
+function sessionStopBot(){
+  document.getElementById("session-modal").classList.remove("show");
+  fetch("/api/session/reject-cycle", {method: "POST"})
+    .then(r => r.json())
+    .then(d => {
+      if(d.error) console.warn("Reject cycle failed:", d.error);
+      else console.log("Cycle rejected:", d);
+      pollRunnerStatus();
+    })
+    .catch(()=>{});
+}
+
+// Listen for session_completed events via the main WS
+ws.addEventListener("message", (e)=>{
+  try{
+    const m = JSON.parse(e.data);
+    if(m.type==="session_complete" || m.type==="session_completed"){
+      showCycleModal(m.data || m);
+    }
+  }catch(_){}
+});
 
 // ── Config Panel ─────────────────────────────────────────────────────────────
 
@@ -930,7 +1352,11 @@ function connectLogWs(){
       appendLog(entry);
     }catch(_){}
   };
-  _logWs.onclose = ()=>{ setTimeout(connectLogWs, 3000); };
+  _logWs.onclose = (e)=>{
+    // Don't retry on 403 (policy拒否)
+    if(e.code===1008 || e.code===1006) return;
+    setTimeout(connectLogWs, 3000);
+  };
   _logWs.onerror = ()=>{};
 }
 
@@ -971,60 +1397,9 @@ function clearLogs(){
 pollRunnerStatus();
 setInterval(pollRunnerStatus, 5000);
 connectLogWs();
+initResizeHandles();
 
-// ── Session Complete Modal ───────────────────────────────────────────────────
-
-let _sessionModalTimer = null;
-
-function showSessionModal(data){
-  document.getElementById("sm-wins").textContent = (data.wins||3) + "/" + (data.expected_wins||3);
-  document.getElementById("sm-balance").textContent = "$" + (data.balance||0).toFixed(2);
-  document.getElementById("sm-time").textContent = Math.round(data.elapsed_min||0);
-  document.getElementById("session-modal").classList.add("show");
-  document.getElementById("sm-countdown").textContent = "";
-  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); _sessionModalTimer=null; }
-}
-
-function sessionResetNow(){
-  document.getElementById("session-modal").classList.remove("show");
-  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); _sessionModalTimer=null; }
-  fetch("/api/session/reset",{method:"POST"}).then(r=>r.json()).then(d=>{
-    if(d.error) console.warn("Reset failed:", d.error);
-    else console.log("Session reset:", d);
-  }).catch(()=>{});
-}
-
-function sessionWait4h(){
-  const cd = document.getElementById("sm-countdown");
-  let remaining = 4*3600; // 4 hours in seconds
-  if(_sessionModalTimer){ clearInterval(_sessionModalTimer); }
-  _sessionModalTimer = setInterval(()=>{
-    remaining--;
-    if(remaining<=0){
-      clearInterval(_sessionModalTimer);
-      _sessionModalTimer=null;
-      document.getElementById("sm-countdown").textContent = "Tiempo cumplido — sesión disponible";
-      document.getElementById("session-modal").classList.add("show");
-      return;
-    }
-    const h = Math.floor(remaining/3600);
-    const m = Math.floor((remaining%3600)/60);
-    const s = remaining%60;
-    cd.textContent = `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
-  }, 1000);
-  // Start countdown display immediately
-  const h = Math.floor(remaining/3600);
-  const m = Math.floor((remaining%3600)/60);
-  cd.textContent = `${h}h ${String(m).padStart(2,'0')}m 00s`;
-}
-
-// Listen for session_complete events via the main WS
-ws.addEventListener("message", (e)=>{
-  try{
-    const m = JSON.parse(e.data);
-    if(m.type==="session_complete") showSessionModal(m.data||m);
-  }catch(_){}
-});
+// ── Session Modal ────────────────────────────────────────────────────────────
 </script>
 </body>
 </html>
