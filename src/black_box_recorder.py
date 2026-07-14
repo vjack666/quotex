@@ -176,10 +176,13 @@ CREATE TABLE IF NOT EXISTS maintenance_log (
 class BlackBoxRecorder:
     """Registra TODA la actividad de las estrategias."""
     
+    RETENTION_DAYS = 30  # Caducidad: 1 mes
+
     def __init__(self):
         self.db_path = BLACK_BOX_DB
         self.log_path = BLACK_BOX_LOG
         self._init_db()
+        self._cleanup_old_files()
     
     def _init_db(self) -> None:
         """Crea tablas si no existen."""
@@ -228,6 +231,34 @@ class BlackBoxRecorder:
             con.close()
         except Exception as e:
             print(f"❌ Error inicializando DB: {e}")
+
+    def _cleanup_old_files(self) -> None:
+        """Elimina archivos DB y JSONL de caja negra con más de RETENTION_DAYS."""
+        try:
+            cutoff = datetime.now() - timedelta(days=self.RETENTION_DAYS)
+            cutoff_str = cutoff.strftime("%Y-%m-%d")
+            removed = 0
+            for folder in [DB_DIR, LOGS_DIR]:
+                if not hasattr(folder, "exists") or not folder.exists():
+                    continue
+                for f in folder.iterdir():
+                    if not f.is_file():
+                        continue
+                    import re
+                    match = re.search(r"(\d{4}-\d{2}-\d{2})", f.name)
+                    if not match:
+                        continue
+                    date_str = match.group(1)
+                    if date_str < cutoff_str:
+                        try:
+                            f.unlink()
+                            removed += 1
+                        except Exception:
+                            pass
+            if removed:
+                log.info("🧹 Caja negra: %d archivos antiguos eliminados (>%d días)", removed, self.RETENTION_DAYS)
+        except Exception:
+            pass  # Silently skip cleanup in test environments
     
     def record_scan_start(
         self,
