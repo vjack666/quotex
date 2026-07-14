@@ -318,6 +318,21 @@ async def main(
         state = bot.massaniello_persistence.load()
         if state:
             bot.massaniello_persistence.apply(bot.massaniello, state)
+            # Session rollover: si la sesión previa ya está completa o fallida,
+            # arrancar una nueva automáticamente (no esperar confirmación).
+            mgr = bot.massaniello
+            if mgr.is_session_complete() or mgr.is_session_failed() or mgr.is_session_exhausted():
+                log.info(
+                    "🔄 Session rollover — sesión previa %s, arrancando nueva",
+                    "completa" if mgr.is_session_complete() else "fallida" if mgr.is_session_failed() else "agotada",
+                )
+                from massaniello_risk import MassanielloRiskManager
+                bot.massaniello = MassanielloRiskManager()
+                vcap = bot.executor._massaniello_virtual()
+                if vcap is not None:
+                    bot.executor.set_session_start_balance(vcap)
+                elif bot.current_balance:
+                    bot.executor.set_session_start_balance(bot.current_balance)
         else:
             log.info("Sin estado Massaniello previo — arrancando con defaults")
     else:
