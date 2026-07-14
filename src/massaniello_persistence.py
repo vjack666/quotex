@@ -82,12 +82,26 @@ class MassanielloPersistence:
         """Restaura campos de *manager* desde *state*.
 
         No modifica si el estado es inválido (valores negativos, tipos incorrectos).
+        Si la sesión previa ya estaba completa/fallida, NO restaura contadores —
+        solo recupera el balance para que la nueva sesión empiece limpia.
         """
         validated = self._validate_state(state)
         if validated is None:
             log.warning("Estado Massaniello inválido — arrancando con defaults")
             return
 
+        # Si la sesión previa ya estaba completa/fallida/agotada → NO restaurar
+        # contadores. Solo recuperamos el balance y dejamos el manager en defaults.
+        if validated.get("session_active", 1) == 0:
+            log.info("Sesión Massaniello previa estaba completa — arrancando nueva sesión limpia")
+            if validated.get("current_balance") is not None:
+                manager.current_balance = validated["current_balance"]
+                manager._initial_capital = validated.get("initial_capital") or validated["current_balance"]
+            # wins, losses, entries, session_start_time quedan en 0/None (defaults del __init__)
+            log.info("  → Contadores en cero (nueva sesión), balance recuperado: %s", manager.current_balance)
+            return
+
+        # Sesión activa → restaurar todo normal
         manager.operations = validated["operations"]
         manager.expected_wins = validated["expected_wins"]
         manager.session_max_min = validated["session_max_min"]
@@ -97,9 +111,6 @@ class MassanielloPersistence:
         manager.losses = validated["losses"]
         manager.current_balance = validated.get("current_balance")
         manager._initial_capital = validated.get("initial_capital")
-
-        if validated.get("session_active", 1) == 0:
-            log.info("Sesión Massaniello previa estaba completa — arrancando nueva sesión")
 
         log.info(
             "Estado Massaniello restaurado: %dW/%dL  ops=%d/%d  balance=%s",

@@ -169,6 +169,10 @@ class TradeExecutor:
                 from massaniello_risk import MassanielloRiskManager
                 self.bot.massaniello = MassanielloRiskManager()
                 self.set_session_start_balance(vcap)
+                # Guardar estado limpio en DB para que el próximo restart no
+                # cargue una sesión completa
+                if hasattr(self.bot, "massaniello_persistence"):
+                    self.bot.massaniello_persistence.save(self.bot.massaniello)
             log.info("🛑 Sesión Massaniello finalizada — %s (escaneo detenido)", reason)
 
     def _massaniello_virtual(self) -> Optional[float]:
