@@ -13,4 +13,6 @@
 | 05 | `05_ejemplos_aplicados_binarias.md` | Ejemplos aplicados a binarias OTC, temporalidad 15m, expiry 3m, y cómo grabarlo en la caja negra. |
 | 06 | `06_papel_en_escanner.md` | Papel del estocástico como FILTRO de temporalidad mayor en el escáner multi-TF (investigado en internet). |
 
-Última actualización: 2026-07-13
+| 07 | `07_analisis_divergencias_blackbox.md` | Framework de análisis: taxonomía de divergencias, métricas, plan de experimentos y qué NO hacer. |
+
+Última actualización: 2026-07-15
