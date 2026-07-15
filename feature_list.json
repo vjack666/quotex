@@ -136,7 +136,26 @@
         4,
         5,
         6
-      ]
+      ],
+      "name": "hub_strat_f_replacement"
+    },
+    {
+      "id": 8,
+      "name": "schedule_auto",
+      "title": "Schedule auto full (Consola)",
+      "phase": "hub_ops",
+      "priority": 8,
+      "description": "Modo manual/auto_full: expiracion en min, sesiones seguidas, horas trabajo/descanso, max sesiones/dia; persist data/hub_schedule.json; ScheduleController.",
+      "acceptance": [
+        "UI Consola sin monto base / max loss / concurrent / daily / STRAT-F Only",
+        "duration_min -> duration_sec en servidor",
+        "hub_schedule.json load/save",
+        "auto_full: work block stop + rest + auto resume",
+        "tests verdes"
+      ],
+      "status": "in_progress",
+      "sdd": true,
+      "spec_path": "specs/schedule_auto/"
     }
   ]
 }

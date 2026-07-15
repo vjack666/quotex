@@ -253,10 +253,12 @@ async def _connect_hub_after_start():
 
 @_hub_app.post("/api/bot/stop")
 async def bot_stop():
-    """Stop the trading bot gracefully."""
+    """Stop the trading bot gracefully (user action → disarm schedule)."""
     if _runner.state not in ("running", "starting"):
+        # Still disarm schedule if user hits Detener while already stopped
+        await _runner.stop(user=True)
         return {"status": "already_stopped", "state": _runner.state}
-    await _runner.stop()
+    await _runner.stop(user=True)
     return {"status": "stopped", "state": _runner.state}
 
 
@@ -297,6 +299,12 @@ async def update_config(body: dict[str, Any]):
         "massaniello_virtual_capital",
         "min_payout",
         "session_max_min",
+        "schedule_mode",
+        "duration_min",
+        "max_consecutive_sessions",
+        "work_block_hours",
+        "rest_hours",
+        "max_sessions_per_day",
     )
     interesting = {k: body.get(k) for k in keys_of_interest if k in body}
     if interesting:
@@ -305,11 +313,13 @@ async def update_config(body: dict[str, Any]):
     cfg = _runner.get_config()
     log.info(
         "HUB config aplicada → Massaniello %s ops / %s ITM | capital=$%s | "
-        "min_payout=%s%% (escáner + stake)",
+        "min_payout=%s%% | schedule=%s duration_min=%s",
         cfg.get("massaniello_ops"),
         cfg.get("massaniello_wins"),
         cfg.get("massaniello_virtual_capital"),
         cfg.get("min_payout"),
+        cfg.get("schedule_mode"),
+        cfg.get("duration_min"),
     )
     return {"status": "updated", "config": cfg}
 

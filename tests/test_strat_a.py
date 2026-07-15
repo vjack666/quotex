@@ -239,6 +239,50 @@ def test_evaluate_strat_a_breakout_below_with_volume():
     assert ev.skip_zone_age_check is True
 
 
+def test_credible_break_accepts_normal_breakout():
+    from strat_a import is_credible_zone_break
+
+    zone = _zone(ceiling=1.1000, floor=1.0950)
+    history = [
+        Candle(ts=i, open=1.0975, high=1.0980, low=1.0970, close=1.0975)
+        for i in range(14)
+    ]
+    breakout = Candle(ts=14, open=1.0945, high=1.0950, low=1.0930, close=1.0935)
+    ok, why = is_credible_zone_break(
+        breakout, history + [breakout], zone, side="below",
+    )
+    assert ok is True
+    assert why == ""
+
+
+def test_credible_break_rejects_otc_glitch_like_nzdjpy():
+    """93→83 style spike must NOT kill the zone as BROKEN_BELOW."""
+    from strat_a import is_credible_zone_break, evaluate_strat_a
+
+    zone = _zone(ceiling=93.125, floor=92.826)
+    history = [
+        Candle(ts=i, open=92.90, high=92.95, low=92.85, close=92.90)
+        for i in range(14)
+    ]
+    glitch = Candle(ts=14, open=83.14, high=83.53, low=83.03, close=83.36)
+    ok, why = is_credible_zone_break(glitch, history + [glitch], zone, side="below")
+    assert ok is False
+    assert "spike" in why
+
+    ev = evaluate_strat_a(
+        candles_5m=history + [glitch],
+        candles_1m=[],
+        zone=zone,
+        blocks={"bull": [], "bear": []},
+        ma_state=None,
+        dynamic_touch_tolerance=0.001,
+        h1_confirm_enabled=False,
+    )
+    # No breakout signal / no zone kill path
+    assert ev.entry_mode != "breakout_below"
+    assert ev.stage != "breakout" or not ev.has_signal
+
+
 def test_evaluate_strat_a_rejects_young_zone_rebound():
     zone = _zone(age_min=5.0)
     candles_5m = _base_5m_history() + [

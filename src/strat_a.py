@@ -1,6 +1,7 @@
 """Estrategia A: consolidación en 5m (señal pura, sin I/O)."""
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from statistics import mean
@@ -30,8 +31,12 @@ from config import (
     VOLUME_MULTIPLIER,
     ZONE_AGE_BREAKOUT_MIN,
     ZONE_AGE_REBOUND_MIN,
+    ZONE_BREAK_MAX_GAP_PCT,
+    ZONE_BREAK_MAX_ZONE_WIDTHS,
 )
 from models import Candle, ConsolidationZone, MAState, OrderBlock
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -207,6 +212,56 @@ def broke_above(candle: Candle, ceiling: float) -> bool:
 
 def broke_below(candle: Candle, floor: float) -> bool:
     return candle.close < floor * (1 - TOUCH_TOLERANCE_PCT)
+
+
+def is_credible_zone_break(
+    last: Candle,
+    candles_5m: List[Candle],
+    zone: ConsolidationZone,
+    *,
+    side: str,
+    max_gap_pct: float = ZONE_BREAK_MAX_GAP_PCT,
+    max_zone_widths: float = ZONE_BREAK_MAX_ZONE_WIDTHS,
+) -> tuple[bool, str]:
+    """Return (ok, reason). Blocks only absurd OTC glitches, not normal breaks.
+
+    Rules (both must pass):
+    1) Gap vs previous close < max_gap_pct (default 2.5%).
+    2) Distance past floor/ceiling < max_zone_widths × zone width (default 5×).
+
+    Example NZDJPY glitch 93→83: gap ~10% and ~30 zone-widths → rejected.
+    Normal break a few pips past the edge → accepted.
+    """
+    if len(candles_5m) < 2:
+        return True, ""
+
+    prev = candles_5m[-2]
+    prev_close = float(prev.close)
+    if prev_close <= 0:
+        return True, ""
+
+    gap_open = abs(float(last.open) - prev_close) / prev_close
+    gap_close = abs(float(last.close) - prev_close) / prev_close
+    gap = max(gap_open, gap_close)
+    if gap >= float(max_gap_pct):
+        return False, f"gap={gap*100:.2f}%≥{float(max_gap_pct)*100:.1f}% (spike)"
+
+    zone_width = float(zone.ceiling) - float(zone.floor)
+    if zone_width <= 0:
+        zone_width = prev_close * 1e-4
+    if side == "below":
+        beyond = float(zone.floor) - float(last.close)
+    else:
+        beyond = float(last.close) - float(zone.ceiling)
+    if beyond < 0:
+        beyond = 0.0
+    widths = beyond / zone_width if zone_width > 0 else 0.0
+    if widths >= float(max_zone_widths):
+        return (
+            False,
+            f"beyond={widths:.1f}×zone≥{float(max_zone_widths):.0f}× (spike)",
+        )
+    return True, ""
 
 
 def required_rebound_strength(direction: str) -> float:
@@ -543,8 +598,16 @@ def _resolve_entry_direction(
     if price_at_floor(price, zone.floor, dynamic_touch_tolerance):
         return "call", "rebound_floor", "initial", False
     if broke_above(last, zone.ceiling) and is_high_volume_break(last, candles_5m):
+        ok, why = is_credible_zone_break(last, candles_5m, zone, side="above")
+        if not ok:
+            log.info("⚠ SPIKE ignore BROKEN_ABOVE: %s (zona se conserva)", why)
+            return None, "none", "initial", False
         return "call", "breakout_above", "breakout", True
     if broke_below(last, zone.floor) and is_high_volume_break(last, candles_5m):
+        ok, why = is_credible_zone_break(last, candles_5m, zone, side="below")
+        if not ok:
+            log.info("⚠ SPIKE ignore BROKEN_BELOW: %s (zona se conserva)", why)
+            return None, "none", "initial", False
         return "put", "breakout_below", "breakout", True
     return None, "none", "initial", False
 

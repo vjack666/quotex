@@ -110,6 +110,7 @@ class ConsolidationBot:
         self.current_balance: Optional[float] = None
         self.massaniello = MassanielloRiskManager()
         self.session_stop_hit = False
+        self.last_session_summary: Optional[dict] = None
         self.cycle_id = 1
         self.cycle_ops = 0
         self.cycle_wins = 0
@@ -341,6 +342,21 @@ async def main(
                 bot.executor.set_session_start_balance(bot.current_balance)
         else:
             log.info("Sin estado Massaniello previo — arrancando con defaults")
+        # Hub bankroll (Ops/ITM) wins when session has no progress.
+        # SQLite used to re-apply old 5/3 and ignore Guardar bankroll.
+        try:
+            from hub_bankroll_store import apply_bankroll_shape_to_manager
+            apply_bankroll_shape_to_manager(bot.massaniello, force=False)
+        except Exception as exc:
+            log.warning("No se pudo aplicar bankroll shape: %s", exc)
+        log.info(
+            "Massaniello al arrancar: %d ops / %d ITM | capital=%s | %dW/%dL",
+            bot.massaniello.operations,
+            bot.massaniello.expected_wins,
+            bot.massaniello.current_balance,
+            bot.massaniello.wins,
+            bot.massaniello.losses,
+        )
     else:
         log.debug("Risk manager no es Massaniello — persistencia omitida")
 
@@ -602,6 +618,7 @@ class BotRunner:
         self._state: str = "stopped"  # stopped | starting | running | stopping | error
         self._error: str | None = None
         self._started_at: float | None = None
+        self._user_stop: bool = False
         self._config: dict[str, Any] = {
             "dry_run": False,
             "real_account": False,
@@ -621,9 +638,49 @@ class BotRunner:
             # Scanner payout
             "strat_f_min_score": _config.STRAT_F_MIN_SCORE,
             "strat_f_zone_min_age": _config.STRAT_F_ZONE_MIN_AGE,
-            # Duration
+            # Duration + schedule (Consola)
             "duration_sec": _config.DURATION_SEC,
+            "duration_min": max(1, int(_config.DURATION_SEC) // 60),
+            "schedule_mode": "manual",
+            "max_consecutive_sessions": 3,
+            "work_block_hours": 2.0,
+            "rest_hours": 1.0,
+            "max_sessions_per_day": 0,
         }
+        from schedule_controller import ScheduleController
+        self._schedule = ScheduleController(
+            on_request_start=self._schedule_request_start,
+            on_request_stop=self._schedule_request_stop,
+        )
+        # Restore last Guardar bankroll (survives hub restart)
+        try:
+            from hub_bankroll_store import load_bankroll
+            saved = load_bankroll()
+            if saved:
+                for k, v in saved.items():
+                    if k in self._config:
+                        self._config[k] = v
+                self._apply_config_to_module()
+                log.info("Bankroll hub cargado desde disco: %s", saved)
+        except Exception as exc:
+            log.warning("No se pudo cargar bankroll hub: %s", exc)
+        # Restore schedule / auto-full settings
+        try:
+            from hub_schedule_store import duration_min_to_sec, load_schedule
+            saved_sch = load_schedule()
+            if saved_sch:
+                for k, v in saved_sch.items():
+                    if k in self._config:
+                        self._config[k] = v
+                if "duration_min" in saved_sch:
+                    self._config["duration_sec"] = duration_min_to_sec(
+                        saved_sch["duration_min"]
+                    )
+                self._apply_config_to_module()
+                self._schedule.configure(self._config)
+                log.info("Schedule hub cargado desde disco: %s", saved_sch)
+        except Exception as exc:
+            log.warning("No se pudo cargar schedule hub: %s", exc)
 
     @property
     def state(self) -> str:
@@ -643,11 +700,58 @@ class BotRunner:
         return cfg
 
     def update_config(self, **kwargs: Any) -> None:
+        # duration_min (UI minutes) → duration_sec for the order expiry
+        if "duration_min" in kwargs:
+            from hub_schedule_store import duration_min_to_sec
+            dm = max(1, int(kwargs["duration_min"]))
+            kwargs = dict(kwargs)
+            kwargs["duration_min"] = dm
+            kwargs["duration_sec"] = duration_min_to_sec(dm)
         for k, v in kwargs.items():
             if k in self._config:
                 self._config[k] = v
         self._apply_config_to_module()
         self._apply_config_to_bot()
+        self._schedule.configure(self._config)
+        # Persist bankroll keys so next hub/bot start keeps Ops/ITM/capital/payout
+        try:
+            from hub_bankroll_store import BANKROLL_KEYS, save_bankroll
+            if any(k in kwargs for k in BANKROLL_KEYS):
+                save_bankroll(self._config)
+                # If bot is stopped, also write a clean Massaniello SQLite row with
+                # the NEW shape so the next Iniciar does not restore old 5/3.
+                if self._state not in ("running", "starting"):
+                    self._persist_clean_massaniello_for_next_start()
+        except Exception as exc:
+            log.warning("No se pudo persistir bankroll hub: %s", exc)
+        # Persist schedule keys (Consola)
+        try:
+            from hub_schedule_store import SCHEDULE_KEYS, save_schedule
+            if any(k in kwargs for k in SCHEDULE_KEYS):
+                save_schedule(self._config)
+        except Exception as exc:
+            log.warning("No se pudo persistir schedule hub: %s", exc)
+
+    def _persist_clean_massaniello_for_next_start(self) -> None:
+        """Write inactive/clean Massaniello state using hub shape (ops/ITM/capital)."""
+        from massaniello_persistence import MassanielloPersistence
+        from massaniello_risk import MassanielloRiskManager
+
+        mgr = MassanielloRiskManager()  # reads live config ops/ITM
+        vcap = float(self._config.get("massaniello_virtual_capital") or 0.0)
+        if vcap > 0:
+            mgr.set_balance(vcap)
+        # Zero progress so next apply can still re-assert hub shape
+        mgr.wins = 0
+        mgr.losses = 0
+        mgr.entries = 0
+        MassanielloPersistence().save(mgr)
+        log.info(
+            "Massaniello SQLite limpio para próximo Iniciar: %d ops / %d ITM capital=%s",
+            mgr.operations,
+            mgr.expected_wins,
+            mgr.current_balance,
+        )
 
     def _apply_config_to_module(self) -> None:
         """Push _config values into the config module so imports see updated values."""
@@ -710,6 +814,7 @@ class BotRunner:
             "state": self._state,
             "config": self._config,
             "uptime_sec": (time.time() - self._started_at) if self._started_at else None,
+            "schedule": self._schedule.snapshot(),
         }
         if self._error:
             status["last_error"] = self._error
@@ -778,19 +883,42 @@ class BotRunner:
         self._bot = bot
         self._client = getattr(bot, "client", None)
 
-    async def start(self) -> None:
+    async def _schedule_request_start(self) -> None:
+        """Callback from ScheduleController — auto start without browser."""
         if self._state in ("running", "starting"):
             return
+        log.info("SCHEDULE request start (auto)")
+        await self.start(user=False)
+
+    async def _schedule_request_stop(self) -> None:
+        """Callback from ScheduleController — stop for work-block expiry / rest."""
+        log.info("SCHEDULE request stop (auto)")
+        await self.stop(user=False)
+
+    async def start(self, *, user: bool = True) -> None:
+        if self._state in ("running", "starting"):
+            return
+        self._user_stop = False
         self._state = "starting"
         self._error = None
         self._started_at = time.time()
+        self._schedule.configure(self._config)
+        if user:
+            self._schedule.arm(self._config)
+            if self._config.get("schedule_mode") == "auto_full":
+                self._schedule.on_user_start()
         # Session bootstrap runs inside main() after Massaniello load + bot create.
         # Do NOT call session_manager.start() here: self._bot is still None / stale.
         self._task = asyncio.create_task(self._run(), name="bot-runner")
 
-    async def stop(self) -> None:
+    async def stop(self, *, user: bool = True) -> None:
         if self._state not in ("running", "starting"):
+            if user:
+                self._schedule.on_user_stop()
             return
+        self._user_stop = user
+        if user:
+            self._schedule.on_user_stop()
         self._state = "stopping"
         # Persist incomplete session before tearing down
         if self._bot is not None:
@@ -813,6 +941,7 @@ class BotRunner:
 
     async def _run(self) -> None:
         """Wrapper que ejecuta main() y maneja el lifecycle."""
+        natural_exit = False
         try:
             # Ensure ops/ITM/capital from hub are in config module BEFORE
             # MassanielloRiskManager() is constructed inside main().
@@ -830,6 +959,7 @@ class BotRunner:
                 loop_forever=True,
                 hub_scanner=None,  # se conecta después via app.py
             )
+            natural_exit = not self._user_stop
         except asyncio.CancelledError:
             log.info("BotRunner: task cancelada — shutdown limpio")
         except SystemExit as exc:
@@ -844,10 +974,20 @@ class BotRunner:
             if self._state not in ("error",):
                 self._state = "stopped"
             self._started_at = None
+            # Massaniello session terminal → next cycle or rest (auto_full only)
+            if (
+                natural_exit
+                and self._schedule.mode == "auto_full"
+                and self._schedule.phase == "working"
+            ):
+                try:
+                    self._schedule.on_session_terminal({})
+                except Exception as exc:
+                    log.warning("SCHEDULE on_session_terminal failed: %s", exc)
 
     async def shutdown(self) -> None:
         """Shutdown forzado — llamado desde FastAPI lifespan."""
-        await self.stop()
+        await self.stop(user=True)
         if self._client is not None:
             try:
                 await asyncio.wait_for(self._client.close(), timeout=3.0)

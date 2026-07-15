@@ -1,33 +1,22 @@
-# Estado de sesión — bankroll hub + resolve broker lag
+# Estado de sesión — schedule_auto
 
-> Sesión: 2026-07-14 | Operador: Ruben | Agente: Grok
+> Sesión: 2026-07-14 | Agente: implementer
 
-## Hecho esta sesión
+## Feature en curso
+`schedule_auto` (in_progress) — lista para review. **No marcar done.**
 
-### 1. Lifecycle sesión (commit previo `a654fc0`)
-- Iniciar → SCANNING; resume incompleta; stop al cumplir meta.
+## Hecho
+- T1–T6 implementados y tests de feature verdes (13).
+- T7: suite amplio sin contaminación de bankroll → 355 passed / 2 fail preexistentes.
+- Resumen: `progress/impl_schedule_auto.md`
 
-### 2. Log compacto
-- `BOT_LOG_VERBOSE=1` para detalle por activo.
-- Resúmenes de ciclo en INFO.
+## Cómo usar esta noche
+1. Bankroll (Operación) → Guardar.
+2. Consola: **Automático full** + horas trabajo/descanso → **Guardar**.
+3. **Iniciar**. **Detener** desarma el auto.
+4. Badge: `Auto · trabajo n/m` o `Auto · descanso m:ss`.
 
-### 3. Bankroll Massaniello en hub (Operación)
-- Card **Bankroll binarias**: capital, Ops/ITM, payout mín. %, próximo stake **en vivo**.
-- Guardar bankroll → aplica a `config` + log de auditoría.
-- Misma fórmula que `Desktop/massaniello` / `massaniello_engine`.
-- Payout mín. = piso del **escáner** + fórmula de stake.
-- Consola: sin bloque Massaniello duplicado.
-
-### 4. Resolve broker lag
-- No tratar `profitAmount==0` como LOSS.
-- Más grace/timeout; UNRESOLVED en vez de LOSS forzado.
-- Countdown se corta si la sesión ya terminó.
-
-## Cómo usar bankroll
-1. Bot detenido → editar capital / Ops / ITM / payout (stake se actualiza al tipear).
-2. **Guardar bankroll** → log: `HUB config aplicada → Massaniello …`
-3. **Iniciar**.
-
-## Verificación
-- pytest: 339+ passed (última corrida completa verde).
-- Grafo: `graphify . --update --code-only` + `cluster-only` → **2434 nodos, 4949 edges, 152 comunidades**.
+## Notas reviewer
+- Feature tests 13 green; no marcar `done` aún.
+- `hub_bankroll.json` (min_payout=90) contamina `config` en import de pytest.
+- feature id=7: se agregó `name` faltante.

@@ -553,6 +553,7 @@
   <span class="ctrl-label">Bot</span>
   <span class="ctrl-state stopped" id="ctrl-state">STOPPED</span>
   <button class="ctrl-btn start" id="btn-toggle" onclick="botToggle()">Iniciar</button>
+  <span class="ctrl-state stopped" id="schedule-badge" style="display:none;" title="Estado del schedule"></span>
   <span class="ctrl-spacer"></span>
   <button class="ctrl-btn shutdown" onclick="shutdownApp()">Finalizar</button>
   <span class="ctrl-label" id="ctrl-info" style="font-size:11px;"></span>
@@ -822,15 +823,21 @@
         <div class="cfg-field"><label>Tiempo máx. sesión (min)</label><input type="number" id="cfg-session-max" min="5" max="480" step="5"></div>
       </div>
 
-      <!-- Operación -->
+      <!-- Operación / Schedule -->
       <div class="cfg-section">Operación</div>
       <div class="cfg-grid" id="cfg-grid3">
-        <div class="cfg-field"><label>Expiry (segundos)</label><input type="number" id="cfg-expiry" min="30" max="3600" step="30"></div>
-        <div class="cfg-field"><label>Monto base (USD)</label><input type="number" id="cfg-base-amount" min="0.5" max="1000" step="0.5"></div>
-        <div class="cfg-field"><label>Máx. loss seguidos</label><input type="number" id="cfg-max-loss" min="1" max="20"></div>
-        <div class="cfg-field"><label>Max concurrent trades</label><input type="number" id="cfg-max-trades" min="1" max="5"></div>
-        <div class="cfg-field"><label>Max daily trades</label><input type="number" id="cfg-max-daily" min="1" max="100"></div>
-        <div class="cfg-field"><label>STRAT-F Only</label><select id="cfg-stratf-only"><option value="true">Sí</option><option value="false">No</option></select></div>
+        <div class="cfg-field">
+          <label>Modo</label>
+          <select id="cfg-schedule-mode">
+            <option value="manual">Manual</option>
+            <option value="auto_full">Automático full</option>
+          </select>
+        </div>
+        <div class="cfg-field"><label>Expiración (min)</label><input type="number" id="cfg-duration-min" min="1" max="60" step="1" value="5"></div>
+        <div class="cfg-field"><label>Sesiones seguidas máx.</label><input type="number" id="cfg-max-consec" min="1" max="50" step="1" value="3"></div>
+        <div class="cfg-field"><label>Horas de trabajo seguido</label><input type="number" id="cfg-work-hours" min="0.5" max="24" step="0.5" value="2"></div>
+        <div class="cfg-field"><label>Horas de descanso</label><input type="number" id="cfg-rest-hours" min="0" max="24" step="0.5" value="1"></div>
+        <div class="cfg-field"><label>Sesiones máx. por día (0=ilimitado)</label><input type="number" id="cfg-max-day" min="0" max="200" step="1" value="0"></div>
       </div>
 
       <div class="cfg-actions">
@@ -1075,12 +1082,30 @@ function applyData(data){
 const ws = new WebSocket(((location.protocol==='https:')?'wss://':'ws://')+location.host+'/ws');
 ws.onmessage = (e)=>{ try{
   const m = JSON.parse(e.data);
+  if(m.type==="ping" || m.type==="pong") return;
+  // Session end → modal with Massaniello summary (must be on main handler)
+  if(m.type==="session_complete" || m.type==="session_completed"){
+    showCycleModal(m.data || {});
+    return;
+  }
   if(m.type==="init" || m.type==="state_update"){ applyData(m.data); }
   else if(m.strat_f || m.known_balance!==undefined){ applyData(m); }
+  // Fallback: session summary on runner status
+  if(m.data && m.data.runner && m.data.runner.session && m.data.runner.session.last_summary){
+    const ss = m.data.runner.session;
+    if(ss.state==="completed" || ss.state==="stopped"){
+      // only auto-open once per summary
+      if(!_lastModalKey || _lastModalKey !== JSON.stringify(ss.last_summary)){
+        _lastModalKey = JSON.stringify(ss.last_summary);
+        // don't force-open on every poll — only if modal not already shown after event
+      }
+    }
+  }
 }catch(_){} };
 ws.onopen = goLive;
 ws.onclose = ()=>{ goDown(); setTimeout(()=>location.reload(), 3000); };
 ws.onerror = goDown;
+let _lastModalKey = null;
 
 // snapshot inicial por HTTP (por si el WS tarda)
 fetch('/api/state').then(r=>r.json()).then(applyData).catch(()=>{});
@@ -1213,8 +1238,43 @@ function updateRunnerUI(runner){
   }
   // Update session info if available
   if(runner.session) updateSessionInfo(runner.session);
+  updateScheduleBadge(runner.schedule);
   // Readonly bankroll status only — never rewrite user inputs here
   refreshBankrollStatus();
+}
+
+function updateScheduleBadge(sch){
+  const el = document.getElementById("schedule-badge");
+  if(!el) return;
+  if(!sch || !sch.mode || sch.mode === "manual"){
+    if(sch && sch.phase === "disarmed"){
+      el.style.display = "";
+      el.textContent = "Schedule · desarmado";
+      el.className = "ctrl-state stopped";
+      return;
+    }
+    el.style.display = "none";
+    el.textContent = "";
+    return;
+  }
+  const phaseLabels = {
+    idle: "idle",
+    working: "trabajo",
+    resting: "descanso",
+    disarmed: "desarmado",
+  };
+  const phase = phaseLabels[sch.phase] || sch.phase || "—";
+  let extra = "";
+  if(sch.phase === "resting" && sch.rest_remaining_sec > 0){
+    const m = Math.floor(sch.rest_remaining_sec / 60);
+    const s = sch.rest_remaining_sec % 60;
+    extra = " " + m + ":" + String(s).padStart(2,"0");
+  } else if(sch.phase === "working" && sch.consecutive != null){
+    extra = " · " + sch.consecutive + "/" + (sch.max_consecutive || "?");
+  }
+  el.style.display = "";
+  el.textContent = "Auto · " + phase + extra;
+  el.className = "ctrl-state " + (sch.phase === "resting" ? "stopping" : (sch.phase === "working" ? "running" : "stopped"));
 }
 
 function botToggle(){
@@ -1399,19 +1459,30 @@ function initResizeHandles(){
 // ── Session Modal ────────────────────────────────────────────────────────────
 
 function showCycleModal(data) {
-  // Datos del resumen
+  data = data || {};
+  // Flatten accidental nesting
+  if (data.data && typeof data.data === "object") data = Object.assign({}, data, data.data);
+
+  const wins = data.itm != null ? Number(data.itm) : (data.wins != null ? Number(data.wins) : null);
+  const losses = data.otm != null ? Number(data.otm) : (data.losses != null ? Number(data.losses) : null);
+  const trades = data.trades != null
+    ? Number(data.trades)
+    : (wins != null || losses != null ? (Number(wins || 0) + Number(losses || 0)) : null);
+
   document.getElementById("sm-trades").textContent =
-    data.trades != null ? data.trades : (data.wins != null ? (data.wins + (data.losses || 0)) : "–");
+    trades != null && trades > 0 ? String(trades) : (trades === 0 ? "0" : "–");
 
-  const itm = data.itm != null ? data.itm : (data.wins != null ? data.wins : 0);
-  const otm = data.otm != null ? data.otm : (data.losses != null ? data.losses : 0);
-  document.getElementById("sm-itm-otm").textContent = itm + " / " + otm;
+  document.getElementById("sm-itm-otm").textContent =
+    (wins != null || losses != null)
+      ? (Number(wins || 0) + " / " + Number(losses || 0))
+      : "–";
 
-  const wrVal = data.win_rate != null
-    ? data.win_rate
-    : (itm + otm > 0 ? (itm / (itm + otm) * 100) : null);
+  let wrVal = data.win_rate != null ? Number(data.win_rate) : null;
+  if (wrVal == null && trades != null && trades > 0 && wins != null) {
+    wrVal = (wins / trades) * 100;
+  }
   const wrEl = document.getElementById("sm-wr");
-  if (wrVal != null) {
+  if (wrVal != null && !isNaN(wrVal)) {
     wrEl.textContent = wrVal.toFixed(1) + "%";
     wrEl.className = "value " + (wrVal >= 50 ? "green" : "red");
   } else {
@@ -1419,14 +1490,14 @@ function showCycleModal(data) {
     wrEl.className = "value";
   }
 
-  const pnl = data.pnl != null ? data.pnl : null;
+  let pnl = data.pnl != null ? Number(data.pnl) : null;
+  if (pnl == null && data.balance != null && data.initial_capital != null) {
+    pnl = Number(data.balance) - Number(data.initial_capital);
+  }
   const pnlEl = document.getElementById("sm-pnl");
-  if (pnl != null) {
-    pnlEl.textContent = (pnl >= 0 ? "+" : "") + Number(pnl).toFixed(2);
+  if (pnl != null && !isNaN(pnl)) {
+    pnlEl.textContent = (pnl >= 0 ? "+" : "") + pnl.toFixed(2) + " USD";
     pnlEl.className = "value " + (pnl >= 0 ? "green" : "red");
-  } else if (data.balance != null) {
-    pnlEl.textContent = Number(data.balance).toFixed(2);
-    pnlEl.className = "value";
   } else {
     pnlEl.textContent = "–";
     pnlEl.className = "value";
@@ -1434,22 +1505,22 @@ function showCycleModal(data) {
 
   const dur = data.duration != null ? data.duration : data.elapsed_min;
   document.getElementById("sm-duration").textContent =
-    dur != null ? Math.round(dur) + " min" : "–";
+    dur != null && !isNaN(Number(dur)) ? (Math.max(0, Math.round(Number(dur))) + " min") : "–";
 
   // Subtítulo según tipo de finalización
   const sub = document.getElementById("sm-subtitle");
   if (data.failed || data.status === "SESSION_FAILED") {
-    sub.textContent = "La sesión ha finalizado por demasiadas pérdidas.";
+    sub.textContent = "La sesión ha finalizado por demasiadas pérdidas (OTM).";
   } else if (data.timeout || data.status === "SESSION_TIMEOUT") {
     sub.textContent = "La sesión ha expirado por tiempo máximo.";
+  } else if (data.exhausted || data.status === "SESSION_EXHAUSTED") {
+    sub.textContent = "La sesión agotó las operaciones disponibles.";
   } else {
     sub.textContent = "La sesión Massaniello ha alcanzado su meta (ITM).";
   }
 
-  // Mostrar modal
   document.getElementById("session-modal").classList.add("show");
 
-  // Actualizar estado visual de la barra de control
   const st = document.getElementById("ctrl-state");
   if (st) {
     st.textContent = "STOPPED";
@@ -1513,18 +1584,6 @@ function sessionCloseModal() {
 // Compatibilidad con nombres antiguos
 function sessionNewCycle()  { sessionCloseAndStart(); }
 function sessionStopBot()   { sessionCloseModal(); }
-
-// Escuchar eventos de sesión completada por WebSocket
-if (typeof ws !== "undefined") {
-  ws.addEventListener("message", (e) => {
-    try {
-      const m = JSON.parse(e.data);
-      if (m.type === "session_complete" || m.type === "session_completed") {
-        showCycleModal(m.data || m);
-      }
-    } catch (_) {}
-  });
-}
 
 // ── Bankroll binarias (Massaniello + payout) ─────────────────────────────────
 // Inputs are USER-OWNED after first load. Polls must NOT rewrite them.
@@ -1841,12 +1900,23 @@ function loadConfig(){
     // Massaniello + min_payout: SOLO en Operación → Bankroll
     const sm = document.getElementById("cfg-session-max");
     if(sm) sm.value = c.session_max_min || 60;
-    document.getElementById("cfg-expiry").value = c.duration_sec || 300;
-    document.getElementById("cfg-base-amount").value = c.amount_initial || 1;
-    document.getElementById("cfg-max-loss").value = c.max_loss_session ? Math.round(c.max_loss_session*100) : 20;
-    document.getElementById("cfg-max-trades").value = c.cycle_ops || 5;
-    document.getElementById("cfg-max-daily").value = c.cycle_wins || 2;
-    document.getElementById("cfg-stratf-only").value = c.strat_f_only !== false ? "true" : "false";
+    const modeEl = document.getElementById("cfg-schedule-mode");
+    if(modeEl) modeEl.value = c.schedule_mode || "manual";
+    const durEl = document.getElementById("cfg-duration-min");
+    if(durEl){
+      const dm = (c.duration_min != null)
+        ? c.duration_min
+        : Math.round((c.duration_sec || 300) / 60);
+      durEl.value = dm || 5;
+    }
+    const mc = document.getElementById("cfg-max-consec");
+    if(mc) mc.value = c.max_consecutive_sessions != null ? c.max_consecutive_sessions : 3;
+    const wh = document.getElementById("cfg-work-hours");
+    if(wh) wh.value = c.work_block_hours != null ? c.work_block_hours : 2;
+    const rh = document.getElementById("cfg-rest-hours");
+    if(rh) rh.value = c.rest_hours != null ? c.rest_hours : 1;
+    const md = document.getElementById("cfg-max-day");
+    if(md) md.value = c.max_sessions_per_day != null ? c.max_sessions_per_day : 0;
     const locked = (c._runner_state === "running" || c._runner_state === "starting");
     document.querySelectorAll(".cfg-grid input, .cfg-grid select").forEach(el => el.disabled = locked);
   }).catch(()=>{});
@@ -1854,15 +1924,15 @@ function loadConfig(){
 
 function saveConfig(){
   const msg = document.getElementById("cfg-msg");
-  // No enviar massaniello/payout desde Consola
+  // Schedule + sesión only — bankroll stays on Operación card
   const body = {
     session_max_min: parseInt(document.getElementById("cfg-session-max").value) || 60,
-    duration_sec: parseInt(document.getElementById("cfg-expiry").value) || 300,
-    amount_initial: parseFloat(document.getElementById("cfg-base-amount").value) || 1,
-    max_loss_session: (parseInt(document.getElementById("cfg-max-loss").value) || 20) / 100,
-    cycle_ops: parseInt(document.getElementById("cfg-max-trades").value) || 5,
-    cycle_wins: parseInt(document.getElementById("cfg-max-daily").value) || 2,
-    strat_f_only: document.getElementById("cfg-stratf-only").value === "true",
+    duration_min: parseInt(document.getElementById("cfg-duration-min").value) || 5,
+    schedule_mode: document.getElementById("cfg-schedule-mode").value || "manual",
+    max_consecutive_sessions: parseInt(document.getElementById("cfg-max-consec").value) || 3,
+    work_block_hours: parseFloat(document.getElementById("cfg-work-hours").value) || 2,
+    rest_hours: parseFloat(document.getElementById("cfg-rest-hours").value) || 1,
+    max_sessions_per_day: parseInt(document.getElementById("cfg-max-day").value) || 0,
   };
   fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
     .then(r=>r.json()).then(d=>{

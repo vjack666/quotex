@@ -155,23 +155,90 @@ class TradeExecutor:
             return True, "sesión Massaniello no admite más entradas"
         return False, ""
 
+    def _build_session_end_summary(self, reason: str) -> dict:
+        """Snapshot for hub modal — capture BEFORE resetting Massaniello."""
+        mgr = self.bot.massaniello
+        st = mgr.session_status() if hasattr(mgr, "session_status") else {}
+        wins = int(st.get("wins", getattr(mgr, "wins", 0) or 0))
+        losses = int(st.get("losses", getattr(mgr, "losses", 0) or 0))
+        entries = int(st.get("entries", getattr(mgr, "entries", 0) or 0))
+        trades = entries if entries > 0 else (wins + losses)
+        bal = st.get("balance", getattr(mgr, "current_balance", None))
+        init = st.get("initial_capital", getattr(mgr, "_initial_capital", None))
+        pnl = None
+        if bal is not None and init is not None:
+            try:
+                pnl = float(bal) - float(init)
+            except (TypeError, ValueError):
+                pnl = None
+        wr = (wins / trades * 100.0) if trades > 0 else None
+        elapsed = float(st.get("elapsed_min") or 0.0)
+        failed = bool(st.get("failed") or mgr.is_session_failed())
+        complete = bool(st.get("complete") or mgr.is_session_complete())
+        timeout = bool(st.get("timeout") or mgr.is_session_timeout())
+        exhausted = bool(st.get("exhausted") or mgr.is_session_exhausted())
+        if failed:
+            status = "SESSION_FAILED"
+        elif timeout:
+            status = "SESSION_TIMEOUT"
+        elif exhausted:
+            status = "SESSION_EXHAUSTED"
+        elif complete:
+            status = "SESSION_COMPLETE"
+        else:
+            status = "SESSION_ENDED"
+        return {
+            "reason": reason,
+            "status": status,
+            "wins": wins,
+            "losses": losses,
+            "itm": wins,
+            "otm": losses,
+            "entries": entries,
+            "trades": trades,
+            "win_rate": wr,
+            "pnl": pnl,
+            "balance": bal,
+            "initial_capital": init,
+            "elapsed_min": elapsed,
+            "duration": elapsed,
+            "failed": failed,
+            "complete": complete,
+            "timeout": timeout,
+            "exhausted": exhausted,
+            "expected_wins": int(st.get("expected_wins", getattr(mgr, "expected_wins", 0) or 0)),
+            "operations": int(st.get("operations", getattr(mgr, "operations", 0) or 0)),
+        }
+
     def _maybe_stop_massaniello_session(self) -> None:
         if not self._uses_massaniello():
             return
         blocked, reason = self._massaniello_session_blocks_entry()
         if blocked:
             # Meta cumplida / fallida / timeout / sin ops: detener scan.
-            # Notify SessionManager BEFORE resetting counters so the main loop
-            # and hub modal see COMPLETED (not a ghost STOPPED with empty mgr).
+            # Capture summary BEFORE reset so hub modal is not empty (0/0).
             self.bot.session_stop_hit = True
-            summary = {
-                "reason": reason,
-                "wins": self.bot.massaniello.wins,
-                "losses": self.bot.massaniello.losses,
-                "entries": self.bot.massaniello.entries,
-            }
+            summary = self._build_session_end_summary(reason)
+            self.bot.last_session_summary = summary  # type: ignore[attr-defined]
+            log.info(
+                "📊 Resumen sesión: trades=%s ITM/OTM=%s/%s WR=%s pnl=%s dur=%.1fmin (%s)",
+                summary.get("trades"),
+                summary.get("itm"),
+                summary.get("otm"),
+                f"{summary['win_rate']:.1f}%" if summary.get("win_rate") is not None else "–",
+                f"{summary['pnl']:+.2f}" if summary.get("pnl") is not None else "–",
+                float(summary.get("elapsed_min") or 0.0),
+                summary.get("status"),
+            )
             if self.session_manager is not None:
                 self.session_manager.session_completed(summary)
+            else:
+                # Fallback: still notify hub if SessionManager missing
+                try:
+                    from hub.events import event_bus
+                    event_bus.publish("session_completed", summary)
+                except Exception:
+                    pass
             vcap = self._massaniello_virtual()
             if vcap is not None:
                 from massaniello_risk import MassanielloRiskManager

@@ -90,10 +90,15 @@ class SessionManager:
         self._last_trade_info: Optional[dict] = None
         self._session_start_time: Optional[float] = None
         self._last_bootstrap_mode: Optional[str] = None
+        self._last_summary: Optional[dict] = None
 
     @property
     def state(self) -> SessionState:
         return self._state
+
+    @property
+    def last_summary(self) -> Optional[dict]:
+        return self._last_summary
 
     @property
     def cycle_count(self) -> int:
@@ -156,17 +161,37 @@ class SessionManager:
         Emits session_completed event for the dashboard modal.
         """
         if self._state in (SessionState.COMPLETED, SessionState.STOPPED):
+            # If we already completed with empty payload, allow one enriching publish
+            if summary and not self._last_summary:
+                self._last_summary = dict(summary)
+                bus = _get_event_bus()
+                if bus is not None:
+                    bus.publish("session_completed", self._last_summary)
+                    bus.publish("session_complete", self._last_summary)
             return
         self._state = SessionState.COMPLETED
         self._cycle_count += 1
+        if summary:
+            self._last_summary = dict(summary)
         self._emit_state_changed()
 
         bus = _get_event_bus()
+        payload = self._last_summary or summary or {}
         if bus is not None:
-            bus.publish("session_completed", summary or {})
+            # Both event names: modal listens to either
+            bus.publish("session_completed", payload)
+            bus.publish("session_complete", payload)
         log.info(
-            "✅ Session completed (cycle #%d) — waiting for user confirmation",
+            "✅ Session completed (cycle #%d) — waiting for user confirmation | summary=%s",
             self._cycle_count,
+            {
+                "trades": payload.get("trades"),
+                "itm": payload.get("itm", payload.get("wins")),
+                "otm": payload.get("otm", payload.get("losses")),
+                "pnl": payload.get("pnl"),
+            }
+            if payload
+            else {},
         )
 
     def confirm_new_cycle(self) -> None:
@@ -300,10 +325,18 @@ class SessionManager:
         if self._state == SessionState.TRADING:
             if not has_open_trades:
                 self.exit_trade()
-            # Still evaluate terminal after trade exits
-            if force_complete or massaniello_is_terminal or massaniello_is_complete or massaniello_is_failed:
-                if not has_open_trades:
-                    self.session_completed()
+            # Terminal end is owned by executor._maybe_stop (rich summary).
+            # Only complete here if still open and terminal — without wiping summary.
+            if (
+                not has_open_trades
+                and (
+                    force_complete
+                    or massaniello_is_terminal
+                    or massaniello_is_complete
+                    or massaniello_is_failed
+                )
+            ):
+                self.session_completed(self._last_summary)
             return self._state
 
         # SCANNING state
@@ -317,7 +350,7 @@ class SessionManager:
             or massaniello_is_complete
             or massaniello_is_failed
         ):
-            self.session_completed()
+            self.session_completed(self._last_summary)
             return self._state
 
         return self._state
@@ -336,6 +369,7 @@ class SessionManager:
             "last_trade_reason": self._last_trade_reason,
             "last_trade_info": self._last_trade_info,
             "bootstrap_mode": self._last_bootstrap_mode,
+            "last_summary": self._last_summary,
         }
 
     def _emit_state_changed(self) -> None:

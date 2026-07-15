@@ -168,15 +168,8 @@ class MassanielloRiskManager:
                 self.expected_wins,
             )
             alerter.alert_session_complete(self.wins, self.current_balance or 0.0)
-            bus = _get_event_bus()
-            if bus is not None:
-                bus.publish("session_complete", {
-                    "wins": self.wins,
-                    "expected_wins": self.expected_wins,
-                    "balance": self.current_balance,
-                    "session_max_min": self.session_max_min,
-                    "elapsed_min": (time.time() - self.session_start_time) / 60.0 if self.session_start_time else 0,
-                })
+            # Full modal payload is published later by executor._maybe_stop
+            # (session_completed) so the hub gets wins/losses/pnl/duration.
         return self.current_balance, status
 
     def register_loss(self, amount: float) -> Tuple[float, str]:

@@ -91,19 +91,25 @@ class MassanielloPersistence:
             return
 
         # Si la sesión previa ya estaba completa/fallida/agotada → NO restaurar
-        # contadores. Solo recuperamos el balance y dejamos el manager en defaults.
+        # contadores. Solo recuperamos el balance y dejamos el manager en defaults
+        # (ops/ITM vienen del hub bankroll / config en vivo vía __init__).
         if validated.get("session_active", 1) == 0:
             if validated.get("current_balance") is not None:
                 manager.current_balance = validated["current_balance"]
                 manager._initial_capital = validated.get("initial_capital") or validated["current_balance"]
             # wins, losses, entries, session_start_time quedan en 0/None (defaults del __init__)
+            # Do NOT overwrite operations/expected_wins from SQLite — hub bankroll is source of truth.
             log.info(
-                "Massaniello: sesión previa completa → nueva limpia (balance=%s)",
+                "Massaniello: sesión previa completa → nueva limpia "
+                "(balance=%s, shape hub=%d ops/%d ITM)",
                 manager.current_balance,
+                manager.operations,
+                manager.expected_wins,
             )
             return
 
-        # Sesión activa → restaurar todo normal
+        # Sesión activa con progreso → restaurar contadores y shape de ESA secuencia.
+        # (cambiar 5/3→7/4 a mitad de camino rompería Massaniello)
         manager.operations = validated["operations"]
         manager.expected_wins = validated["expected_wins"]
         manager.session_max_min = validated["session_max_min"]

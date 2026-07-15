@@ -13,7 +13,7 @@ MIN_CONSOLIDATION_BARS = 12
 MAX_RANGE_PCT = 0.003
 TOUCH_TOLERANCE_PCT = 0.00035
 MAX_CONSOLIDATION_MIN = 0
-MIN_PAYOUT = 80
+MIN_PAYOUT = 80  # web → min_payout (Bankroll card); fallback primer arranque
 DURATION_SEC = 300  # expiración de la orden: 5 min (antes 180s = 3 min)
 SCAN_INTERVAL_SEC = 60
 CONNECT_RETRIES = 3
@@ -30,16 +30,23 @@ CYCLE_MAX_OPERATIONS = 5
 CYCLE_TARGET_WINS = 3
 CYCLE_TARGET_PROFIT_PCT = 0.10
 
-MASSANIELLO_OPERATIONS = 5
-MASSANIELLO_EXPECTED_WINS = 3
-SESSION_MAX_MIN = 60
+# =============================================================================
+# BANKROLL MASSANIELLO — incógnitas rellenadas desde la WEB
+# -----------------------------------------------------------------------------
+# Fuente de verdad: pestaña Operación → card "Bankroll binarias" → Guardar.
+# Persistido en: data/hub_bankroll.json
+#
+# NO edites estos números a mano para operar en demo: usá el hub.
+# Los valores de abajo son SOLO fallback de primer arranque (si nunca guardaste).
+# Al importar este módulo se hidratan desde hub_bankroll.json si existe.
+# =============================================================================
+MASSANIELLO_OPERATIONS = 5              # web → massaniello_ops
+MASSANIELLO_EXPECTED_WINS = 3           # web → massaniello_wins  (ITM objetivo)
+SESSION_MAX_MIN = 60                    # web → session_max_min
 SESSION_COOLDOWN_MINUTES = 0  # Minutes to wait between cycles (0 = immediate)
 RISK_MANAGER = "massaniello"
-# Saldo virtual de referencia para la calculadora Massaniello. Si > 0, el bot
-# IGNORA el saldo real de la cuenta para dimensionar los stakes y usa este
-# capital fijo, reiniciandolo a este valor al terminar cada secuencia 5/3.
-# Pensado para DEMO: la progresion Massaniello se calcula sobre $30 aunque la
-# cuenta tenga $1. En REAL debe ponerse en 0.0 para usar el saldo real.
+# Capital de riesgo asignado a binarias (no el balance completo de la cuenta).
+# web → massaniello_virtual_capital. Si > 0, Massaniello dimensiona sobre esto.
 MASSANIELLO_VIRTUAL_CAPITAL = 30.0
 
 USE_DYNAMIC_ATR_RANGE = True
@@ -90,6 +97,11 @@ ZONE_AGE_REBOUND_MIN = 20
 ZONE_AGE_BREAKOUT_MIN = 8
 ZONE_MIN_AGE_MIN = ZONE_AGE_REBOUND_MIN
 FORCE_EXECUTE_STRONG_BREAKOUT = True
+# Glitch guard for zone BROKEN_* (OTC bad ticks). Conservative: only blocks
+# absurd jumps (e.g. 93→83). Normal breakouts stay valid.
+# gap 2.5% vs previous close OR close farther than 5 zone-widths past edge.
+ZONE_BREAK_MAX_GAP_PCT = 0.025
+ZONE_BREAK_MAX_ZONE_WIDTHS = 5.0
 GREYLIST_ASSETS = {"USDDZD_otc"}
 PATTERN_PUT_BLACKLIST = {"bearish_engulfing"}
 STRICT_PATTERN_CHECK = True
@@ -140,6 +152,7 @@ MARTIN_RESOLVE_TIMEOUT_SEC = 90.0
 MARTIN_RESOLVE_RETRY_SEC = 8.0
 MARTIN_RESOLVE_MAX_ATTEMPTS = 6
 
+# Aligned to MIN_PAYOUT when hub saves bankroll (same floor for all strats).
 STRAT_A_MIN_PAYOUT = 87
 STRAT_A_MIN_SCORE = 75
 STRAT_A_ZONE_MIN_AGE_REBOUND = 30
@@ -156,7 +169,7 @@ STRAT_MOMENTUM_ENABLED = False
 # STRAT-F (Fractal / Wyckoff) — marco M15/M5/M1
 STRAT_F_ENABLED = True
 STRAT_F_ONLY = True  # opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
-STRAT_F_MIN_PAYOUT = 80
+STRAT_F_MIN_PAYOUT = 80  # overridden by web min_payout on Guardar bankroll
 STRAT_F_MIN_SCORE = 60
 STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona antes de operar
 
@@ -181,3 +194,35 @@ MAX_ENTRIES_PER_ASSET = 1
 # Compatibilidad con main.py (_apply_runtime_config)
 AMOUNT_INITIAL = 1.0
 AMOUNT_MARTIN = 3.0
+
+
+def _hydrate_bankroll_from_web() -> None:
+    """Fill bankroll unknowns from data/hub_bankroll.json (written by the hub)."""
+    global MASSANIELLO_OPERATIONS, MASSANIELLO_EXPECTED_WINS
+    global MASSANIELLO_VIRTUAL_CAPITAL, SESSION_MAX_MIN, MIN_PAYOUT
+    global STRAT_A_MIN_PAYOUT, STRAT_F_MIN_PAYOUT
+    try:
+        # Local import: hub_bankroll_store must not import config at module level
+        from hub_bankroll_store import load_bankroll
+
+        data = load_bankroll()
+        if not data:
+            return
+        if "massaniello_ops" in data:
+            MASSANIELLO_OPERATIONS = int(data["massaniello_ops"])
+        if "massaniello_wins" in data:
+            MASSANIELLO_EXPECTED_WINS = int(data["massaniello_wins"])
+        if "massaniello_virtual_capital" in data:
+            MASSANIELLO_VIRTUAL_CAPITAL = float(data["massaniello_virtual_capital"])
+        if "session_max_min" in data:
+            SESSION_MAX_MIN = int(data["session_max_min"])
+        if "min_payout" in data:
+            MIN_PAYOUT = max(50, min(98, int(data["min_payout"])))
+            STRAT_A_MIN_PAYOUT = MIN_PAYOUT
+            STRAT_F_MIN_PAYOUT = MIN_PAYOUT
+    except Exception:
+        # First boot / tests without data dir — keep fallbacks
+        pass
+
+
+_hydrate_bankroll_from_web()
