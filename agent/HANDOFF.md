@@ -63,7 +63,7 @@ Lectura mínima:
 | 2026-07-16 | #9 stoch help hard; #10 smart order |
 | 2026-07-16/17 | 24/7 Massaniello; align 5m; countdown 1 línea; quiet trade wait |
 | 2026-07-17 | **FIX RUNTIME**: cuelgue por WS caído en espera multi-leg. Eliminado trade_client (2ª instancia, Pitfall J CORRECTION); reconexión en _resolve_trade + wait_while_trade_open vía bot.ensure_connection (socket único). Ver `progress/current.md`. |
-| 2026-07-17 | **Mejoras operativas**: (1) arranque inmediato sin despertador; (2) `SESSION_MAX_MIN=0` (sin corte a 60 min, Massaniello continuo); (3) `ALIGN_SCAN_TO_CANDLE=False` (scan cada 60s con countdown, no alineado a vela); (4) **parallel_scan_fase3** (id 15, done): STRAT-F de FASE 3 en ProcessPool 10 workers (50% CPU), speedup 2.19x. STRAT-A intacto. |
+| 2026-07-17 | **parallel_scan_fase3 (id 15) AUDITADO + CORREGIDO en vivo**: la 1ra entrega (commit e59be7e) tenía STRAT-F MUERTA en producción a pesar de 4 tests verdes — el dispatch `_run_strat_f_parallel` quedó tras el `return` de `_scan_phase_evaluate_assets` y en método equivocado (`radar_watch_tick`). 2do bug: `upsert_young` con dict posicional vs kw-only. Auditoría en vivo detectó ambos; corregido y re-validado (`STRAT-F ok=1..5`/ciclo, 0 errores maturing). (1) arranque inmediato; (2) `SESSION_MAX_MIN=0`; (3) `ALIGN_SCAN_TO_CANDLE=False`; (4) **parallel_scan_fase3** (id 15, done, auditado). |
 
 ---
 
@@ -74,12 +74,20 @@ Lectura mínima:
   solo por completitud (SESSION_AUTO_RESET_ON_COMPLETE) en modo continuo.
 - **Scan profesional**: `config.py ALIGN_SCAN_TO_CANDLE = False` → cada 60s
   (`SCAN_INTERVAL_SEC`) con cuenta regresiva en 1 línea, cuando no hay trade abierto.
-- **parallel_scan_fase3** (feature id 15, status done):
+- **parallel_scan_fase3** (feature id 15, status done, AUDITADO+CORREGIDO 2026-07-17):
   - Solo STRAT-F se saca del `for` a `_evaluate_strat_f_serial(ctx)` (pura, picklable)
     y se evalúa en ProcessPool (10 workers = cpu//2). STRAT-A y el resto del `for` INTACTOS.
   - `_run_strat_f_parallel` aplica deltas al loop (caja negra, maturing, logs,
     candidates, reject_counts, batch, stats). `gather(return_exceptions=True)`:
     un worker que falla → `log.error` + `continue`, no aborta el ciclo.
+  - ⚠ **BUG CERRADO POR AUDITORÍA EN VIVO**: la 1ra entrega (e59be7e) tenía el
+    dispatch `_run_strat_f_parallel` FUERA del flujo real — quedaba tras el `return`
+    de `_scan_phase_evaluate_assets` y en `radar_watch_tick`. STRAT-F NO se evaluaba
+    (`STRAT-F ok=0` siempre). Corregido: dispatch en `_scan_phase_evaluate_assets`
+    ~línea 1437 (antes del `Eval`).
+  - ⚠ **BUG 2 CERRADO**: `upsert_young` se llamaba con `dict` posicional pero el
+    método real es keyword-only → `_apply_strat_f_result` ahora usa `**args` para
+    `upsert_young`. Sin esto, las zonas jóvenes no entraban a maturing (6 errores/ciclo).
   - Degrada a serial si no hay pool (`get_scan_pool() is None`).
   - 4 tests verdes (`tests/test_parallel_scan_fase3.py`); benchmark 2.19x
     (`scripts/bench_parallel_scan_fase3.py`, N=40).

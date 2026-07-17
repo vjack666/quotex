@@ -56,7 +56,7 @@ lo prohíbe explícitamente.
 
 ---
 
-## Feature completada: parallel_scan_fase3 (id 15, status: done)
+## Feature completada: parallel_scan_fase3 (id 15, status: done, AUDITADA+CORREGIDA 2026-07-17)
 
 - **T1** loop_utils: ProcessPool global 10 workers (cpu//2).
 - **T2** consolidation_bot: init al arranque, shutdown en finally.
@@ -67,4 +67,10 @@ lo prohíbe explícitamente.
 - **T7** degradación a serial si no hay pool.
 - **T8** 4 tests verdes + benchmark 2.19x (N=40).
 - **T9** pytest feature 4 passed; módulos importan OK; sin fallos nuevos.
+- ⚠ **AUDITORÍA EN VIVO (2026-07-17) detectó 2 bugs** que los tests unitarios no
+  cubrían: (1) el dispatch `_run_strat_f_parallel` quedó tras el `return` de
+  `_scan_phase_evaluate_assets` / en método equivocado → STRAT-F no se evaluaba
+  (`STRAT-F ok=0` siempre); (2) `upsert_young` con dict posicional vs kw-only →
+  `_apply_strat_f_result` ahora usa `**args`. Ambos corregidos y re-validados en
+  vivo (`STRAT-F ok=1..5`/ciclo, 0 errores maturing).
 - Documentación: specs/parallel_scan_fase3/{requirements,design,tasks}.md.

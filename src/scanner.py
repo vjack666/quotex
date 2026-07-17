@@ -1428,6 +1428,20 @@ class AssetScanner:
             self.bot.stats["maturing_watchlist"] = snap.get("counters", {})
             self.bot.stats["maturing_active"] = snap.get("count", 0)
 
+        # parallel_scan_fase3: evaluar STRAT-F en paralelo (ProcessPool) sobre los
+        # ctx acumulados en el for. STRAT-A y el resto del for quedan intactos.
+        if pending_f_ctxs:
+            _batch = getattr(self, "_strat_f_batch", None)
+            if _batch is None:
+                _batch = [[], []]
+                self._strat_f_batch = _batch
+            _accepts = await _run_strat_f_parallel(
+                pending_f_ctxs, _bb, _mw_pre, log, candidates, reject_counts, _batch
+            )
+            strat_f_accepts += _accepts
+            self.bot.stats.setdefault("strat_f_signals", 0)
+            self.bot.stats["strat_f_signals"] += _accepts
+
         # One compact line instead of dozens of per-asset skip rows
         n_assets = len(assets)
         n_rej = sum(reject_counts.values())
@@ -1644,20 +1658,6 @@ class AssetScanner:
                 log.warning("[HUB] No se pudo registrar STRAT-F: %s", _hub_err)
             finally:
                 self._strat_f_batch = None
-
-        # parallel_scan_fase3: evaluar STRAT-F en paralelo (ProcessPool) y aplicar
-        # los deltas al loop. STRAT-A y el resto del for quedan intactos.
-        if pending_f_ctxs:
-            _batch = getattr(self, "_strat_f_batch", None)
-            if _batch is None:
-                _batch = [[], []]
-                self._strat_f_batch = _batch
-            _accepts = await _run_strat_f_parallel(
-                pending_f_ctxs, _bb, _mw_pre, log, candidates, reject_counts, _batch
-            )
-            strat_f_accepts += _accepts
-            self.bot.stats.setdefault("strat_f_signals", 0)
-            self.bot.stats["strat_f_signals"] += _accepts
 
         eval_result = {
             "candidates": candidates,
@@ -2260,7 +2260,6 @@ class StratFEvalResult:
 
 
 def _maturing_find_active(entries: list, asset: str, direction: str | None = None):
-    """Versión pura de MaturingWatchlist.find_active sobre un snapshot picklable."""
     out = []
     d = (direction or "").upper() if direction else None
     for e in entries:
@@ -2316,7 +2315,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 payout=payout,
                 min_payout=int(MIN_PAYOUT),
             )
-        stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
+            stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
         _stoch_k = (stoch_m15 or {}).get("k") if stoch_m15 else None
         _stoch_help = apply_stoch_help(_stoch_k, f_eval.direction or "", _stoch_mode)
         if stoch_m15 is not None:
@@ -2521,7 +2520,11 @@ def _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, 
         batch[1].extend(res.strat_f_batch_delta[1])
     for op, args in res.maturing_ops:
         try:
-            getattr(maturing_wl, op)(*args)
+            if op == "upsert_young":
+                # MaturingWatchlist.upsert_young es keyword-only: recibe un dict de kwargs
+                getattr(maturing_wl, op)(**args)
+            else:
+                getattr(maturing_wl, op)(*args)
         except Exception as exc:  # neveras la watchlist no debe tumbar el scan
             log.error("[STRAT-F][maturing] op %s falló: %s", op, exc)
     for msg in res.logs:

@@ -78,7 +78,7 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 | — | **Arranque inmediato** | ✅ ad-hoc | `consolidation_bot.py` escanea al conectar (sin despertador) |
 | — | **Sin límite 60 min** | ✅ ad-hoc | `config.py SESSION_MAX_MIN=0`; Massaniello continuo |
 | — | **Scan cada 1 min** | ✅ ad-hoc | `ALIGN_SCAN_TO_CANDLE=False`; cada 60s con countdown |
-| 15 | **`parallel_scan_fase3`** | ✅ done | STRAT-F de FASE 3 en ProcessPool 10 workers (50% CPU); speedup 2.19x; STRAT-A intacto |
+| 15 | **`parallel_scan_fase3`** | ✅ done (auditado+corregido 2026-07-17) | STRAT-F de FASE 3 en ProcessPool 10 workers (50% CPU); speedup 2.19x; STRAT-A intacto; dispatch vivificado + fix firma `upsert_young` |
 
 > Detalle: `docs/CHANGELOG_2026-07-16.md`
 
@@ -189,7 +189,8 @@ Hipótesis a validar (no son features todavía):
 
 | Fecha | Cambio |
 |-------|--------|
-| 2026-07-17 | **parallel_scan_fase3 (id 15) done**: STRAT-F de FASE 3 del scanner evaluada en ProcessPool (10 workers = 50% de 20 cores); STRAT-A intacta. Speedup 2.19x (benchmark N=40). 4 tests verdes. Mejoras operativas: arranque inmediato (sin despertador), `SESSION_MAX_MIN=0` (sin corte 60 min), `ALIGN_SCAN_TO_CANDLE=False` (scan cada 60s con countdown). Fix WS runtime (reconexión en _resolve_trade + wait_while_trade_open) cerrado en sesión previa. Ver `agent/HANDOFF.md` + `specs/parallel_scan_fase3/`. |
+| 2026-07-17 | **parallel_scan_fase3 (id 15) AUDITADO + CORREGIDO en vivo**: la entrega inicial (commit e59be7e) tenía STRAT-F MUERTA en producción a pesar de 4 tests verdes — el dispatch `_run_strat_f_parallel` quedó DESPUÉS del `return` de `_scan_phase_evaluate_assets` y en método equivocado (`radar_watch_tick`), así que `pending_f_ctxs` se llenaba pero nunca se evaluaba (`STRAT-F ok=0` siempre). 2do bug: `upsert_young` llamada con dict posicional vs firma keyword-only → 6 errores/ciclo. Auditoría en vivo (log de diagnóstico temporal + correr el bot 1 ciclo) detectó ambos. Corregido: dispatch movido a `_scan_phase_evaluate_assets` antes del `Eval` (línea ~1437); `_apply_strat_f_result` desempaqueta `upsert_young(**args)`. Re-validado en vivo: `STRAT-F ok=1..5`/ciclo, 0 errores maturing. Ver `agent/HANDOFF.md`. |
+| 2026-07-17 | **parallel_scan_fase3 (id 15) done (PRIMERA ENTREGA)**: STRAT-F de FASE 3 del scanner evaluada en ProcessPool (10 workers = 50% de 20 cores); STRAT-A intacta. Speedup 2.19x (benchmark N=40). 4 tests verdes. Mejoras operativas: arranque inmediato (sin despertador), `SESSION_MAX_MIN=0` (sin corte 60 min), `ALIGN_SCAN_TO_CANDLE=False` (scan cada 60s con countdown). Fix WS runtime (reconexión en _resolve_trade + wait_while_trade_open) cerrado en sesión previa. |
 | 2026-07-15 | **Doc sync:** STRAT-F marcada operativa; Fase 6 = datos + estocástico en entrada; G3 cerrado por validación humana; ops (`schedule_auto`, `duration_live`) documentados aparte. |
 | 2026-07-14 | **Hub bankroll Massaniello**: capital/Ops/ITM/payout en Operación; stake en vivo; `GET /api/massaniello/preview`; min_payout unificado en escáner. **Resolve lag**: no forzar LOSS con profit=0; grace/timeout amplios. Lifecycle session bootstrap (Iniciar/resume). Log compacto (`BOT_LOG_VERBOSE`). |
 
