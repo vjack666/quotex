@@ -277,6 +277,8 @@ class Journal:
             self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_ok INTEGER")
         if "pre_objectives_note" not in cols:
             self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_note TEXT")
+        if "spring_confirmed" not in cols:
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN spring_confirmed INTEGER")
         # Migración: tabla expired_zones (bases anteriores sin ella)
         self.conn.executescript(
             "CREATE TABLE IF NOT EXISTS expired_zones ("
@@ -466,20 +468,23 @@ class Journal:
         zone_age = getattr(z, "age_minutes", 0.0) or 0.0
 
         cur = self.conn.execute(
-            """INSERT INTO candidates (
+            """
+            INSERT INTO candidates (
                 scanned_at, asset, direction, payout, amount, stage,
                 score, score_compression, score_bounce, score_trend, score_payout,
                 reversal_pattern, reversal_strength,
                 zone_ceiling, zone_floor, zone_range_pct, zone_bars_inside, zone_age_min,
                 decision, reject_reason, order_id, outcome, candles_json, strategy_json,
-                strategy_origin
+                strategy_origin, spring_confirmed
             ) VALUES (
-                ?,?,?,?,?,?,
-                ?,?,?,?,?,
-                ?,?,
-                ?,?,?,?,?,
-                ?,?,?,?,?,?,?
-            )""",
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?
+            )
+            """,
             (
                 _now(),
                 entry.asset, entry.direction, entry.payout, amount, stage,
@@ -495,6 +500,7 @@ class Journal:
                 json.dumps(candles_data),
                 json.dumps(strategy_payload, ensure_ascii=False),
                 getattr(entry, "_strategy_origin", "STRAT-A"),
+                getattr(entry, "_spring_confirmed", None),
             ),
         )
         self.conn.commit()

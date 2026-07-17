@@ -2333,6 +2333,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             "strength": round(f_eval.strength * 100.0, 1),
             "ctx": f_eval.m15_context,
             "event": f_eval.m5_event,
+            "spring_confirmed": f_eval.spring_confirmed,
             "skip_reason": f_eval.skip_reason,
             "candles_5m": candles,
             "candles_1m": candles_1m,
@@ -2389,6 +2390,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 setattr(f_candidate, "_reversal_pattern", f_eval.pattern_name)
                 setattr(f_candidate, "_reversal_strength", f_eval.strength)
                 setattr(f_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                setattr(f_candidate, "_spring_confirmed", f_eval.spring_confirmed)
                 setattr(f_candidate, "_amount", ctx.initial_amount)
                 setattr(f_candidate, "_stage", "initial")
                 if _mw_entries:
@@ -2409,7 +2411,8 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 _batch[0].append(_rec)
                 res.logs.append(
                     f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
-                    f"ctx={f_eval.m15_context} event={f_eval.m5_event}"
+                    f"ctx={f_eval.m15_context} event={f_eval.m5_event} "
+                    f"spring={f_eval.spring_confirmed}"
                 )
         elif f_eval.skip_reason:
             _rec["decision"] = "REJECTED_STRAT_F"

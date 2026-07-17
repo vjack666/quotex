@@ -74,3 +74,37 @@ lo prohíbe explícitamente.
   `_apply_strat_f_result` ahora usa `**args`. Ambos corregidos y re-validados en
   vivo (`STRAT-F ok=1..5`/ciclo, 0 errores maturing).
 - Documentación: specs/parallel_scan_fase3/{requirements,design,tasks}.md.
+
+---
+
+## Feature observacional: spring_confirmed (heurística, NO SSD)
+2026-07-17 — logging acotado, SIN alterar decisión/dirección/score.
+
+Objetivo: etiquetar cada señal STRAT-F aceptada con `spring_confirmed`
+(INTEGER 1/0/NULL en trade_journal.candidates) para cruzar después
+spring_confirmed vs outcome (WIN/LOSS) sin leer logs a mano.
+
+- Campo en DB: **INTEGER** (1/0/NULL), NO TEXT. Razón: permitir
+  `AVG(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END)` directo por grupo.
+- Función auxiliar: **`_spring_heuristic_5m1m`** (nombre explícito de
+  HEURÍSTICA, NO el StochasticSpringDetector real de SMC-SYSTEMS). No
+  confundir en el futuro con el SSD validado.
+  Regla: CALL (fractal_down) → mínimo de candles_5m[i+1:i+4] vs band
+  (low fractal). Si mínimo >= band → 1 (spring, no rompió suelo). Si
+  rompió por debajo → 0. Si no hay velas 5m post-fractal suficientes
+  (fractal_idx == last_idx), usar candles_1m recientes (mínimo 2-3).
+  Si tampoco alcanza → NULL. Espejo para PUT (fractal_up, high fractal).
+- Punto de integración: `evaluate_strat_f` return (strat_fractal.py:261)
+  + log `[STRAT-F] ✓` (scanner.py:2411) + `_rec` dict (scanner.py:2330)
+  + `log_candidate` INSERT (trade_journal.py) + ALTER COLUMN.
+
+### PROTOCOLO DE ANÁLISIS (fijado ANTES de tener datos — 2026-07-17)
+- **Umbral de decisión para portar SSD**: ≥8pp de mejora en win rate
+  entre spring_confirmed=1 vs spring_confirmed=0.
+- **Muestra mínima por grupo**: 30 registros (cada grupo debe tener ≥30).
+- **Manejo de spring_confirmed=NULL** (sin velas suficientes para decidir):
+  se EXCLUYEN del análisis de comparación 1-vs-0 (no cuentan como
+  "no confirmado"). Se reportan aparte como "indeterminados".
+- NO se ajusta el umbral de éxito según lo que salga. Esto está fijado.
+
+
