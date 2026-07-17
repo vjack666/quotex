@@ -2523,6 +2523,9 @@ def _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, 
             if op == "upsert_young":
                 # MaturingWatchlist.upsert_young es keyword-only: recibe un dict de kwargs
                 getattr(maturing_wl, op)(**args)
+            elif op == "mark_promoted":
+                # mark_promoted(self, key, *, mode=...) -> mode es keyword-only
+                getattr(maturing_wl, op)(args[0], mode=args[1])
             else:
                 getattr(maturing_wl, op)(*args)
         except Exception as exc:  # neveras la watchlist no debe tumbar el scan
