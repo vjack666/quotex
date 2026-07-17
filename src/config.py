@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import timedelta, timezone
 from pathlib import Path
 
@@ -15,15 +16,34 @@ TOUCH_TOLERANCE_PCT = 0.00035
 MAX_CONSOLIDATION_MIN = 0
 MIN_PAYOUT = 80  # web → min_payout (Bankroll card); fallback primer arranque
 DURATION_SEC = 300  # expiración de la orden: 5 min (antes 180s = 3 min)
+# Multi-duration data collection: one signal → N parallel expiries for A/B.
+# When True, each entry places orders for every MULTI_DURATION_SECS value.
+MULTI_DURATION_DATA_COLLECTION = True
+MULTI_DURATION_SECS = (60, 300, 600, 900)  # 1m, 5m, 10m, 15m
+# Massaniello: only register win/loss on this duration so session ops don't burn 4x.
+MULTI_DURATION_MASSANIELLO_PRIMARY_SEC = 300
+# Fire all legs via asyncio.gather after a single open-sync/prewarm/M1 check.
+MULTI_DURATION_PARALLEL = True
+# Data mode: do not abort the multi batch when Massaniello session is complete/exhausted.
+# Resolve still registers only the primary duration (see MULTI_DURATION_MASSANIELLO_PRIMARY_SEC).
+MULTI_DURATION_IGNORE_SESSION_BLOCKS = True
 SCAN_INTERVAL_SEC = 60
 CONNECT_RETRIES = 3
-MAX_CONCURRENT_TRADES = 1
+# Concurrent capacity must cover multi-duration legs when enabled.
+MAX_CONCURRENT_TRADES = 4 if MULTI_DURATION_DATA_COLLECTION else 1
 COOLDOWN_BETWEEN_ENTRIES = 30
 ENTRY_SYNC_TO_CANDLE = True
 ENTRY_MAX_LAG_SEC = 0.3
 ENTRY_REJECT_LAST_SEC = 2.0
+# Entry order sync: fire buy/sell at this candle open (seconds).
+# 300 = 5m open (aligns STRAT-F structure + DURATION_SEC often 300).
+# 60 = legacy 1m open.
+ENTRY_SYNC_TF_SEC = TF_5M
+# Align scan loop to the 5m candle open (TF_5M=300). Lead 0 = fire exactly at open.
+# False ⇒ escanea cada SCAN_INTERVAL_SEC (60s) en cuanto no hay trade abierto,
+# sin esperar el open de vela (pedido usuario: "apenas no hay operación, escanea").
 ALIGN_SCAN_TO_CANDLE = False
-SCAN_LEAD_SEC = 35.0
+SCAN_LEAD_SEC = 0.0  # exactamente en el open de la vela 5m
 MAX_LOSS_SESSION = 0.20
 
 CYCLE_MAX_OPERATIONS = 5
@@ -42,7 +62,7 @@ CYCLE_TARGET_PROFIT_PCT = 0.10
 # =============================================================================
 MASSANIELLO_OPERATIONS = 5              # web → massaniello_ops
 MASSANIELLO_EXPECTED_WINS = 3           # web → massaniello_wins  (ITM objetivo)
-SESSION_MAX_MIN = 60                    # web → session_max_min
+SESSION_MAX_MIN = 0                     # web → session_max_min  (0 = sin límite; modo recolección de data)
 SESSION_COOLDOWN_MINUTES = 0  # Minutes to wait between cycles (0 = immediate)
 RISK_MANAGER = "massaniello"
 # Capital de riesgo asignado a binarias (no el balance completo de la cuenta).
@@ -61,11 +81,16 @@ H1_CANDLES_LOOKBACK = 80
 H1_EMA_FAST = 20
 H1_EMA_SLOW = 50
 H1_FETCH_TIMEOUT_SEC = 12.0
+# Pre-buy M1 micro-trend gate (default ON). Blocks only when last M1 candle
+# is clearly against the intended CALL/PUT direction. Fail-open on data gaps.
+M1_MICRO_CONFIRM_ENABLED = True
 CANDLE_FETCH_TIMEOUT_SEC = 8.0
 CANDLE_FETCH_1M_TIMEOUT_SEC = 12.0
 FETCH_RETRIES = 2
 FETCH_RETRY_BACKOFF_SEC = 0.35
 ORDER_SEND_RETRIES = 1
+# Hard order fails (timeout / unexpected / connection) quarantine length in scan cycles.
+ORDER_FAIL_QUARANTINE_CYCLES = 5
 RECONNECT_TIMEOUT_SEC = 12.0
 SCAN_MAX_ASSETS_PER_CYCLE = 40
 # Logging verbosity: set BOT_LOG_VERBOSE=1 for per-asset noise + phase markers.
@@ -172,6 +197,15 @@ STRAT_F_ONLY = True  # opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
 STRAT_F_MIN_PAYOUT = 80  # overridden by web min_payout on Guardar bankroll
 STRAT_F_MIN_SCORE = 60
 STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona antes de operar
+# Maturing zone watchlist: hold R3 "zona muy joven" until re-eval admits or drops.
+# Mode off|shadow|live (default live). Invalid env → treated as off by normalize_mode.
+MATURING_WATCHLIST_MODE = os.getenv("MATURING_WATCHLIST_MODE", "live").strip().lower()
+MATURING_WATCHLIST_MAX_AGE_BARS = 12
+MATURING_WATCHLIST_TTL_SEC = 3600
+MATURING_WATCHLIST_MAX_ENTRIES = 40
+# M15 stoch help over STRAT-F: off | soft | hard (default hard = boosts + extreme veto).
+# Invalid env values are treated as off by apply_stoch_help (fail-safe).
+STOCH_HELP_MODE = os.getenv("STOCH_HELP_MODE", "hard").strip().lower()
 
 STRAT_ORDER_BLOCK_ENABLED = False
 STRAT_ORDER_BLOCK_MIN_STRENGTH = 30
@@ -186,14 +220,62 @@ BROKEN_CAPTURE_DIR = Path(__file__).resolve().parent.parent / "data" / "vela_ops
 BROKEN_FOLLOWUP_DELAY_SEC = 15 * 60
 BROKEN_FOLLOWUP_1M_COUNT = 40
 
+# =============================================================================
+# CONTINUOUS DATA COLLECTION MODE — 24/7 scanning for black-box data gathering
+# -----------------------------------------------------------------------------
+# Purpose: run the bot endlessly in PRACTICE to accumulate STRAT-F trades
+# with stoch_m15 recorded in the black box. NOT for live/real accounts.
+#
+# Default ON for 24/7 PRACTICE data collection. Cycle end does NOT stop the bot:
+# continuous orchestrator + SESSION_AUTO_RESET keep scanning without pressing
+# Iniciar again. Safety guardrails (consecutive losses, daily loss limit) stay.
+#
+# Also activated via CLI flag --continuous or env CONTINUOUS_DATA_COLLECTION_MODE=1.
+# When active:
+#   - Massaniello session limits (ops/wins/timeout) roll into a new cycle.
+#   - Safety guardrails apply (consecutive loss cap, daily loss limit).
+#   - Black box recording continues normally.
+# =============================================================================
+CONTINUOUS_DATA_COLLECTION_MODE = True
+CONTINUOUS_MAX_CONSECUTIVE_LOSSES = 8   # pause after N losses in a row
+CONTINUOUS_PAUSE_AFTER_LOSSES_MIN = 15  # minutes to pause after hitting loss cap
+CONTINUOUS_DAILY_LOSS_LIMIT = 0.30      # max fraction of virtual capital lost per day
+CONTINUOUS_MIN_TRADE_INTERVAL_SEC = 30  # minimum seconds between entries (rate limit)
+
+# ── Session auto-reset ─────────────────────────────────────────────────
+# When True, Massaniello session completion (wins/losses/timeout) does NOT
+# stop the scan loop. Instead it resets Massaniello and keeps scanning.
+# Together with CONTINUOUS_DATA_COLLECTION_MODE this is the 24/7 path:
+# cycle end does not stop the bot; user does not need to press Iniciar.
+# Set both to False to restore "stop and wait for user" behavior.
+SESSION_AUTO_RESET_ON_COMPLETE = True
+
 # Diversification
-MAX_SIMULTANEOUS_TRADES = 3
-MIN_ASSET_SPREAD = 2
-MAX_ENTRIES_PER_ASSET = 1
+# Multi-duration places N legs on the same asset; raise per-asset / simultaneous caps.
+MAX_SIMULTANEOUS_TRADES = 4 if MULTI_DURATION_DATA_COLLECTION else 3
+MIN_ASSET_SPREAD = 1 if MULTI_DURATION_DATA_COLLECTION else 2
+MAX_ENTRIES_PER_ASSET = (
+    len(MULTI_DURATION_SECS) if MULTI_DURATION_DATA_COLLECTION else 1
+)
 
 # Compatibilidad con main.py (_apply_runtime_config)
 AMOUNT_INITIAL = 1.0
 AMOUNT_MARTIN = 3.0
+
+
+def _in_test_mode() -> bool:
+    """True when running under pytest / explicit test isolation.
+
+    Prevents data/hub_bankroll.json (e.g. min_payout=90) from contaminating
+    suite defaults like MIN_PAYOUT=80.
+    """
+    if os.environ.get("QUOTEX_TEST_MODE", "").strip() in ("1", "true", "yes"):
+        return True
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    if "pytest" in sys.modules:
+        return True
+    return False
 
 
 def _hydrate_bankroll_from_web() -> None:
@@ -201,6 +283,9 @@ def _hydrate_bankroll_from_web() -> None:
     global MASSANIELLO_OPERATIONS, MASSANIELLO_EXPECTED_WINS
     global MASSANIELLO_VIRTUAL_CAPITAL, SESSION_MAX_MIN, MIN_PAYOUT
     global STRAT_A_MIN_PAYOUT, STRAT_F_MIN_PAYOUT
+    if _in_test_mode():
+        # Keep code defaults (MIN_PAYOUT=80, etc.) during tests.
+        return
     try:
         # Local import: hub_bankroll_store must not import config at module level
         from hub_bankroll_store import load_bankroll

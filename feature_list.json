@@ -3,9 +3,11 @@
   "description": "Bot de opciones binarias en Quotex. Estrategias vivas: consolidación (STRAT-A), momentum 1m, reversal swing, order block. NUEVA: STRAT-F (Fractal/Wyckoff, marco M15/M5/M1). Gestión Massaniello.",
   "note": "Strategy B (Wyckoff Spring/Sweep) fue ELIMINADA físicamente el 2026-07-11. Este roadmap reemplaza al anterior (feature_list.json viejo + docs/ROADMAP*.md borrados).",
   "roadmap": {
-    "version": "2026-07-11",
+    "version": "2026-07-15",
     "strategy_focus": "strat_f",
-    "next_recommended": "none (STRAT-F + dashboard cerrados)"
+    "strat_f_status": "live_and_stable",
+    "next_recommended": "smart_order_place (#10) done. Resume schedule_auto (#8) review/close; collect black-box data under active stoch help.",
+    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done: zone-based help active (default hard) without changing evaluate_strat_f. #10 smart_order_place done."
   },
   "rules": {
     "one_feature_at_a_time": true,
@@ -155,7 +157,99 @@
       ],
       "status": "in_progress",
       "sdd": true,
-      "spec_path": "specs/schedule_auto/"
+      "spec_path": "specs/schedule_auto/",
+      "note": "Paused: human prioritized stoch_entry_help (id 9). Resume after #9."
+    },
+    {
+      "id": 9,
+      "name": "stoch_entry_help",
+      "title": "Capa de ayuda del estocástico M15 sobre STRAT-F (zonas + flag)",
+      "phase": "strat_f",
+      "priority": 9,
+      "description": "Prender el estocástico M15 como ayuda de dirección/timing sobre señales STRAT-F ya formadas, sin tocar evaluate_strat_f. Cinco zonas por %K; veto solo en extremo contrario; boost en extremo a favor; medio pasa. Flag STOCH_HELP_MODE=off|soft|hard.",
+      "acceptance": [
+        "src/stochastic_zones.py puro: zone from k (Z1 0-20, Z2 20-40, Z3 40-60, Z4 60-80, Z5 80-100) + action for CALL/PUT",
+        "strat_fractal.evaluate_strat_f no se modifica",
+        "scanner: tras evaluate_strat_f + compute_stoch, aplica apply_stoch_help si mode != off",
+        "hard: CALL+Z5 o PUT+Z1 no generan candidato (reject reason stoch_extreme_against); soft: solo score adjust",
+        "boost: CALL Z1 +10, CALL Z2 +5, PUT Z5 +10, PUT Z4 +5; resto 0; no cruces ni divergencias en decision v1",
+        "config STOCH_HELP_MODE default hard (off = medicion actual); apagable sin redeploy de logica STRAT-F",
+        "black box: zona + action + score_delta grabados junto a stoch_m15",
+        "tests unitarios zonas + integracion scanner mock; pytest verde en tests nuevos"
+      ],
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/stoch_entry_help/",
+      "depends_on": [2, 3],
+      "approved_at": "2026-07-16",
+      "note": "Done 2026-07-16. Default STOCH_HELP_MODE=hard — stoch ACTIVE help layer on STRAT-F."
+    },
+    {
+      "id": 10,
+      "name": "smart_order_place",
+      "title": "Colocacion de orden mas inteligente (prewarm, reintentos, feedback hub)",
+      "phase": "reliability",
+      "priority": 10,
+      "description": "Silent place-order: buy_timeout, unexpected, no hub feedback. Prewarm trade_client, smarter alt retries, real reasons, last_order_attempt on hub.",
+      "acceptance": [
+        "Prewarm trade_client before/during 1m open wait",
+        "Alt retries skip open wait when lag still OK",
+        "Real reject_reason in logs (not hardcoded unexpected)",
+        "bot.last_order_attempt exposed on /api/state",
+        "Hub shows last order action line",
+        "ORDER_FAIL_QUARANTINE_CYCLES default 5",
+        "tests green for new behavior"
+      ],
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/smart_order_place/",
+      "approved_at": "2026-07-16",
+      "note": "Done 2026-07-16. Prewarm trade_client, skip_open_wait alt, last_order_attempt hub feedback, hard-fail quarantine."
+    },
+    {
+      "id": 11,
+      "name": "maturing_zone_watchlist",
+      "title": "Watchlist de zonas STRAT-F muy jóvenes (madurar → entrada)",
+      "phase": "strat_f",
+      "priority": 11,
+      "description": "Capturar rechazos R3 'zona muy joven', mantener watchlist in-memory, re-evaluar cada scan y promover a candidato STRAT-F (live) o solo métricas (shadow). No altera la fórmula de edad en strat_fractal.py.",
+      "acceptance": [
+        "src/maturing_watchlist.py puro con upsert/promote/drop/TTL/cap",
+        "MATURING_WATCHLIST_MODE off|shadow|live (default live)",
+        "Scanner captura solo R3 young y re-evalúa activos en watchlist",
+        "live produce CandidateEntry al madurar; shadow no opera",
+        "Hub expone entradas madurando",
+        "tests unit + scanner mocks verdes",
+        "specs/maturing_zone_watchlist/ completo"
+      ],
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/maturing_zone_watchlist/",
+      "approved_at": "2026-07-17",
+      "depends_on": [4, 9],
+      "note": "Done 2026-07-17. Reviewer APPROVE. Watchlist R3 young → re-eval → live/shadow. See progress/impl_maturing_zone_watchlist.md + review_maturing_zone_watchlist.md."
+    },
+    {
+      "id": 15,
+      "name": "parallel_scan_fase3",
+      "title": "Parallelizar FASE 3 del scanner (ProcessPool, 50% CPU)",
+      "phase": "scanner_hardening",
+      "priority": 15,
+      "description": "Mover _scan_phase_evaluate_assets (for serial sobre 40 activos) a ProcessPoolExecutor global de max(1, cpu_count()//2) workers para liberar el loop WS durante la evaluación. FASE 2 (fetch) ya concurrente; no se toca. EJE B (event-driven) fuera de alcance.",
+      "acceptance": [
+        "Loop WS no bloqueado durante evaluación (R4)",
+        "Mismos candidatos que la evaluación serial (R3)",
+        "Worker error no aborta ciclo (R5)",
+        "Degrada a serial si no hay pool (R6)",
+        "tests/test_parallel_scan_fase3.py verde",
+        "benchmark local muestra mejora vs serial (R7)"
+      ],
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/parallel_scan_fase3/",
+      "approved_at": "2026-07-17",
+      "done_at": "2026-07-17",
+      "implementation_note": "OPTION 1: solo el bloque STRAT-F se extrae a funcion pura (_evaluate_strat_f_serial) y se evalua en ProcessPool; STRAT-A intacto. 4 tests verdes; benchmark 2.19x speedup (N=40, 10 workers)."
     }
   ]
 }

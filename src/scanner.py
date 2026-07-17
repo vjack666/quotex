@@ -61,8 +61,10 @@ from config import (
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets
+from loop_utils import get_scan_pool
 from black_box_recorder import get_black_box
 from stochastic_m15 import compute_stoch
+from stochastic_zones import apply_stoch_help
 from entry_decision_engine import (
     _check_htf_available_and_aligned,
     _check_zone_memory_no_wall,
@@ -100,9 +102,16 @@ from strat_a_radar import (
 )
 from strat_support import find_strong_support_2m
 from strat_momentum import detect_momentum_1m
-from strat_fractal import evaluate_strat_f
+from strat_fractal import evaluate_strat_f, StratFEvaluation
 from strat_order_block import detect_order_block_entry
 from strat_reversal_swing import detect_reversal_swing
+from maturing_watchlist import (
+    direction_from_m5_event,
+    fractal_band_and_age,
+    is_r3_young_skip,
+    normalize_mode,
+    parse_bars_age_from_skip,
+)
 from trade_journal import get_journal
 from zone_memory import query_nearby_zones, score_zone_memory
 
@@ -911,6 +920,13 @@ class AssetScanner:
 
     async def _scan_phase_prepare(self) -> list[tuple[str, int]] | None:
         """FASE 1/5 — martin, assets, filtros iniciales."""
+        # Safety net: main loop owns quiet wait while trades are open.
+        # Return before SCAN# / asset fetch so we never spam during a position.
+        _open = getattr(self.bot, "trades", None)
+        if isinstance(_open, dict) and _open:
+            log.debug("Skip prepare — trade(s) open: %s", list(_open.keys()))
+            return None
+
         self._phase_log("1/5", "Preparación — martin, assets, filtros")
 
         min_payout = int(getattr(_runtime_config, "MIN_PAYOUT", MIN_PAYOUT))
@@ -937,18 +953,6 @@ class AssetScanner:
             len(assets),
             min_payout,
         )
-
-        # ── GESTIÓN DE RIESGO: pausa total mientras hay trade abierto ──
-        # No escaneamos, no gastamos CPU/API. Esperamos a que el trade se
-        # resuelva en _resolve_trade_after_expiry y retomamos en el próximo ciclo.
-        if self.bot.trades:
-            activos_abiertos = ", ".join(self.bot.trades.keys())
-            log.info(
-                "⏳ Operación activa [%s] — pausa de gestión de riesgo. "
-                "Esperando resultado antes de escanear.",
-                activos_abiertos,
-            )
-            return
 
         # ── Limpiar candidatos vigilados stale al inicio de cada ciclo limpio ──
         if self.bot.watched_candidates:
@@ -1048,6 +1052,12 @@ class AssetScanner:
             {"market_state": "unknown", "volatility_atr": 0.0},
         )
         _bb_session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        pending_f_ctxs: list[StratFEvalContext] = []
+        _mw_pre = getattr(self.bot, "maturing_watchlist", None)
+        maturing_snapshot = (
+            list(getattr(_mw_pre, "_entries", {}).values()) if _mw_pre is not None else []
+        )
 
         for idx, (sym, payout) in enumerate(assets, start=1):
             if SCAN_PROGRESS_EVERY > 0 and (
@@ -1234,126 +1244,38 @@ class AssetScanner:
                     ob_high,
                 )
 
-            # ── STRAT-F (Fractal / Wyckoff, marco M15/M5/M1) ──
+            # ── STRAT-F: acumular ctx para evaluación paralela (parallel_scan_fase3) ──
+            # El bloque F se evalúa FUERA del loop vía ProcessPool (see
+            # _run_strat_f_parallel). Aquí solo se recolecta el contexto.
+            # STRAT-A y el resto del for quedan intactos.
             if (
                 not _runtime_config.STRAT_A_ONLY
                 and (STRAT_F_ENABLED or _strat_f_only_mode)
                 and sym not in self.bot.trades
             ):
-                candles_15m = candles_15m_by_asset.get(sym, [])
-                f_eval = evaluate_strat_f(
-                    candles_15m,
-                    candles,
-                    candles_1m,
-                    payout=payout,
-                    min_payout=int(getattr(_runtime_config, "MIN_PAYOUT", MIN_PAYOUT)),
-                )
-                # Estocástico M15 (Fase 2/3): capa fina sobre pyquotex. Modo medición.
-                stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
-                _batch = getattr(self, "_strat_f_batch", None)
-                if _batch is None:
-                    _batch = [[], []]
-                    self._strat_f_batch = _batch
-                _rec = {
-                    "asset": sym,
-                    "payout": payout,
-                    "direction": f_eval.direction,
-                    "strength": round(f_eval.strength * 100.0, 1),
-                    "ctx": f_eval.m15_context,
-                    "event": f_eval.m5_event,
-                    "skip_reason": f_eval.skip_reason,
-                    "candles_5m": candles,
-                    "candles_1m": candles_1m,
-                    "candles_15m": candles_15m,
-                    "stoch_m15": stoch_m15,
-                    "zone": f_eval.zone,
-                    "decision": None,
-                }
-                f_candidate = None
-                if f_eval.has_signal and f_eval.direction and f_eval.zone:
-                    f_amount, _ = self.executor._compute_initial_amount(payout)
-                    f_candidate = CandidateEntry(
-                        asset=sym,
+                candles_15m_f = candles_15m_by_asset.get(sym, [])
+                f_amount, _ = self.executor._compute_initial_amount(payout)
+                pending_f_ctxs.append(
+                    StratFEvalContext(
+                        sym=sym,
                         payout=payout,
-                        zone=f_eval.zone,
-                        direction=f_eval.direction,
-                        candles=candles_1m,
-                        score=round(f_eval.strength * 100.0, 1),
-                        mode=SignalMode.REBOUND,
-                        score_breakdown={
-                            "compression": 0.0,
-                            "fractal": round(f_eval.strength * 35.0, 2),
-                            "context": round(f_eval.strength * 25.0, 2),
-                            "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
+                        candles_5m=candles,
+                        candles_1m=candles_1m,
+                        candles_15m=candles_15m_f,
+                        strat_f_only_mode=_strat_f_only_mode,
+                        flags={
+                            "STRAT_A_ONLY": _runtime_config.STRAT_A_ONLY,
+                            "STRAT_F_ENABLED": STRAT_F_ENABLED,
+                            "MIN_PAYOUT": MIN_PAYOUT,
+                            "STOCH_HELP_MODE": getattr(_runtime_config, "STOCH_HELP_MODE", "hard"),
+                            "MATURING_WATCHLIST_MODE": getattr(_runtime_config, "MATURING_WATCHLIST_MODE", "live"),
                         },
+                        maturing_snapshot=maturing_snapshot,
+                        bb_scan_id=_bb_scan_id,
+                        session_id=_bb_session_id,
+                        initial_amount=f_amount,
                     )
-                    setattr(f_candidate, "_strategy_origin", "STRAT-F")
-                    setattr(f_candidate, "_reversal_pattern", f_eval.pattern_name)
-                    setattr(f_candidate, "_reversal_strength", f_eval.strength)
-                    setattr(f_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
-                    setattr(f_candidate, "_amount", f_amount)
-                    setattr(f_candidate, "_stage", "initial")
-                    score_candidate(f_candidate)
-                    candidates.append(f_candidate)
-                    self.bot.stats.setdefault("strat_f_signals", 0)
-                    self.bot.stats["strat_f_signals"] += 1
-                    _rec["decision"] = "ACCEPTED"
-                    _batch[0].append(_rec)
-                    strat_f_accepts += 1
-                    log.info(
-                        "[STRAT-F] ✓ %s %s strength=%.2f ctx=%s event=%s",
-                        sym,
-                        f_eval.direction.upper(),
-                        f_eval.strength,
-                        f_eval.m15_context,
-                        f_eval.m5_event,
-                    )
-                elif f_eval.skip_reason:
-                    _rec["decision"] = "REJECTED_STRAT_F"
-                    _batch[1].append(_rec)
-                    key = f"F:{short_reason(f_eval.skip_reason)}"
-                    reject_counts[key] += 1
-                    asset_detail(log, "[STRAT-F] %s skip: %s", sym, f_eval.skip_reason)
-
-                # Caja negra STRAT-F (Fase 3): grabar cada decisión ANTES de ejecutar.
-                # Modo medición: registra siempre, no filtra por estocástico.
-                if _rec.get("decision"):
-                    _bb_cid = _bb.record_candidate(
-                        _bb_scan_id,
-                        "STRAT-F",
-                        {
-                            "asset": sym,
-                            "direction": f_eval.direction or "",
-                            "score": round(f_eval.strength * 100.0, 1),
-                            "payout": payout,
-                            "decision": _rec["decision"],
-                            "decision_reason": f_eval.m5_event or "",
-                            "reject_reason": f_eval.skip_reason or "",
-                            "strategy_details": {
-                                "strength": round(f_eval.strength * 100.0, 1),
-                                "ctx": f_eval.m15_context,
-                                "event": f_eval.m5_event,
-                                "pattern": f_eval.pattern_name,
-                            },
-                            "candles_1m": [
-                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
-                                for c in (candles_1m or [])[-5:]
-                            ],
-                            "candles_5m": [
-                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
-                                for c in (candles or [])[-3:]
-                            ],
-                            "candles_15m": [
-                                {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
-                                for c in (candles_15m or [])[-20:]
-                            ],
-                            "session_id": _bb_session_id,
-                            "stoch_m15": stoch_m15,
-                        },
-                    )
-                    # Vincular el candidate_id al winner para resolución exacta en Fase 4.
-                    if f_candidate is not None:
-                        setattr(f_candidate, "_black_box_cid", _bb_cid)
+                )
 
 
             strat_a_floor = int(getattr(_runtime_config, "STRAT_A_MIN_PAYOUT", STRAT_A_MIN_PAYOUT))
@@ -1480,6 +1402,31 @@ class AssetScanner:
 
         if radar_entries_from_cycle:
             self._update_radar_watchlist(radar_entries_from_cycle)
+
+        # Maturing watchlist: TTL / max-age maintenance once per eval cycle.
+        _mw_end = getattr(self.bot, "maturing_watchlist", None)
+        if _mw_end is not None and normalize_mode(
+            getattr(_runtime_config, "MATURING_WATCHLIST_MODE", "live")
+        ) != "off":
+            bars_by_key: dict[str, int] = {}
+            for _me in _mw_end.active():
+                _c5 = candles_5m_by_asset.get(_me.asset) or []
+                _b, _age, _ = fractal_band_and_age(_c5, _me.m5_event)
+                if _age > 0:
+                    bars_by_key[_me.key] = int(_age)
+                    _me.bars_age = int(_age)
+            _dropped = _mw_end.expire_stale(bars_by_key=bars_by_key)
+            for _d in _dropped:
+                log.info(
+                    "[MATURING] expire %s reason=%s age=%d",
+                    _d.asset,
+                    _d.drop_reason,
+                    _d.bars_age,
+                )
+            # Mirror counters into bot.stats for operator visibility (R11).
+            snap = _mw_end.snapshot()
+            self.bot.stats["maturing_watchlist"] = snap.get("counters", {})
+            self.bot.stats["maturing_active"] = snap.get("count", 0)
 
         # One compact line instead of dozens of per-asset skip rows
         n_assets = len(assets)
@@ -1698,6 +1645,20 @@ class AssetScanner:
             finally:
                 self._strat_f_batch = None
 
+        # parallel_scan_fase3: evaluar STRAT-F en paralelo (ProcessPool) y aplicar
+        # los deltas al loop. STRAT-A y el resto del for quedan intactos.
+        if pending_f_ctxs:
+            _batch = getattr(self, "_strat_f_batch", None)
+            if _batch is None:
+                _batch = [[], []]
+                self._strat_f_batch = _batch
+            _accepts = await _run_strat_f_parallel(
+                pending_f_ctxs, _bb, _mw_pre, log, candidates, reject_counts, _batch
+            )
+            strat_f_accepts += _accepts
+            self.bot.stats.setdefault("strat_f_signals", 0)
+            self.bot.stats["strat_f_signals"] += _accepts
+
         eval_result = {
             "candidates": candidates,
             "cycle_ob_summary": {},
@@ -1715,7 +1676,7 @@ class AssetScanner:
         las registra en ``bot.strat_f_panel`` (que el server expone por WS).
         """
         from hub.strat_f_panel import StratFPanel
-        from hub.strat_f_state import StratFReject, StratFRow
+        from hub.strat_f_state import StratFMaturing, StratFReject, StratFRow
 
         _batch = getattr(self, "_strat_f_batch", None)
         if not _batch:
@@ -1741,10 +1702,37 @@ class AssetScanner:
             )
             for r in _batch[1]
         ]
+        _mw = getattr(self.bot, "maturing_watchlist", None)
+        mat = []
+        if _mw is not None:
+            mat = [
+                StratFMaturing(
+                    asset=r["asset"],
+                    direction=r["direction"],
+                    bars_age=int(r.get("bars_age", 0)),
+                    band=float(r.get("band", 0.0)),
+                    status=r.get("status", "maturing"),
+                )
+                for r in _mw.panel_rows()
+            ]
+        total_assets = len(_batch[0]) + len(_batch[1])
         panel.record_strat_f(
-            accepted=acc, rejected=rej,
-            total_assets=len(_batch[0]) + len(_batch[1]),
+            accepted=acc, rejected=rej, maturing=mat,
+            total_assets=total_assets,
         )
+        # Also mirror into HubScanner root so /api/state.accepted is never stuck empty
+        # while only strat_f is filled (UI used to prefer empty root arrays).
+        hub = getattr(self.bot, "_hub_scanner", None)
+        if hub is not None and hasattr(hub, "record_strat_f"):
+            try:
+                hub.record_strat_f(
+                    accepted=acc,
+                    rejected=rej,
+                    maturing=mat,
+                    total_assets=total_assets,
+                )
+            except Exception:
+                pass
 
     async def _scan_phase_select_execute(
         self,
@@ -2050,9 +2038,12 @@ class AssetScanner:
                 # reason=unexpected aunque is_open=True. En lugar de abortar el
                 # ciclo, iteramos el ranking de candidatos para encontrar uno
                 # que el broker acepte (p.ej. USDZAR_otc suele funcionar).
+                last_attempt = getattr(self.bot, "last_order_attempt", None) or {}
+                real_reason = last_attempt.get("reason") or "unknown"
                 log.warning(
-                    "⚠ Broker rechazó %s (unexpected). Probando siguiente candidato del ranking...",
+                    "⚠ Broker rechazó %s (%s). Probando siguiente candidato del ranking...",
                     winner.asset,
+                    real_reason,
                 )
                 for alt in sorted(candidates, key=lambda x: -x.score):
                     if alt is winner or alt.asset in self.bot.failed_assets:
@@ -2072,32 +2063,141 @@ class AssetScanner:
                         getattr(alt, "_stage", "initial"),
                         getattr(alt, "_amount", 0.0),
                         DURATION_SEC,
+                        skip_open_wait=True,
                     )
                     if entered:
                         log.info("✓ Entrada alternativa aceptada en %s", alt.asset)
                         break
+                    alt_attempt = getattr(self.bot, "last_order_attempt", None) or {}
+                    alt_reason = alt_attempt.get("reason") or "unknown"
+                    log.warning(
+                        "⚠ Alt rechazada %s (%s) — siguiente del ranking...",
+                        alt.asset,
+                        alt_reason,
+                    )
             if entered:
                 await sleep_with_inline_countdown(COOLDOWN_BETWEEN_ENTRIES, "⏳ Cooldown post-orden")
+
+        # Fix: mark ACCEPTED candidates that were NOT entered as trades.
+        # Without this, they stay PENDING forever in the black box because
+        # only entered trades get order_result updated.
+        # trades keys may be asset#duration — collect pure assets.
+        _entered_assets: set[str] = set()
+        for key, trade in self.bot.trades.items():
+            asset = getattr(trade, "asset", None)
+            if asset:
+                _entered_assets.add(str(asset))
+            elif isinstance(key, str) and "#" in key:
+                _entered_assets.add(key.split("#", 1)[0])
+            else:
+                _entered_assets.add(str(key))
+        for c in selected:
+            bb_cid = getattr(c, "_black_box_cid", 0)
+            if bb_cid and c.asset not in _entered_assets:
+                try:
+                    from black_box_recorder import get_black_box
+                    get_black_box().update_candidate(
+                        bb_cid,
+                        decision="ACCEPTED_NOT_ENTERED",
+                        reject_reason="not selected for entry (concurrent limit or higher score candidate)",
+                    )
+                except Exception:
+                    pass
 
         self.bot.stats["skipped"] += len(rejected)
         self.executor._record_scan_acceptances(accepted_this_scan)
 
+    def _black_box_cids_for_durations(
+        self,
+        cand,
+        durations: tuple[int, ...],
+    ) -> list[int]:
+        """One black-box row per duration (clone after the first linked cid)."""
+        base_cid = int(getattr(cand, "_black_box_cid", 0) or 0)
+        if not durations:
+            return []
+        cids: list[int] = []
+        try:
+            from black_box_recorder import get_black_box
+            bb = get_black_box()
+        except Exception:
+            return [base_cid] + [0] * (len(durations) - 1)
+
+        for i, d in enumerate(durations):
+            if i == 0:
+                if base_cid:
+                    try:
+                        bb.update_candidate(base_cid, duration_sec=int(d))
+                    except Exception:
+                        pass
+                cids.append(base_cid)
+                continue
+            new_cid = 0
+            if base_cid:
+                try:
+                    new_cid = bb.clone_candidate_for_duration(base_cid, int(d))
+                except Exception:
+                    new_cid = 0
+            cids.append(int(new_cid or 0))
+        return cids
+
     async def _enter_candidate(
-        self, journal, cand, cid, note, stage, amount, duration_sec
+        self, journal, cand, cid, note, stage, amount, duration_sec,
+        *,
+        skip_open_wait: bool = False,
     ) -> bool:
-        """Envía la orden para un candidato y devuelve True si el broker la aceptó."""
+        """Envía la orden para un candidato y devuelve True si el broker la aceptó.
+
+        When MULTI_DURATION_DATA_COLLECTION is enabled, places one order per
+        duration in MULTI_DURATION_SECS (same asset/direction/amount).
+        """
+        multi_on = bool(
+            getattr(_runtime_config, "MULTI_DURATION_DATA_COLLECTION", False)
+        )
+        signal_ts = getattr(
+            cand, "_signal_ts_1m", cand.candles[-1].ts if cand.candles else None
+        )
+        strategy_origin = getattr(cand, "_strategy_origin", "STRAT-A")
+
+        if multi_on and stage != "martin":
+            durations = tuple(
+                int(d)
+                for d in getattr(
+                    _runtime_config, "MULTI_DURATION_SECS", (60, 300, 600, 900)
+                )
+            )
+            bb_cids = self._black_box_cids_for_durations(cand, durations)
+            # One journal row for the primary leg; extras rely on black box.
+            journal_cids = [cid] + [0] * max(0, len(durations) - 1)
+            return await self.executor.enter_multi_duration(
+                cand.asset,
+                cand.direction,
+                amount,
+                cand.zone,
+                note,
+                stage,
+                durations=durations,
+                journal_cids=journal_cids,
+                signal_ts=signal_ts,
+                strategy_origin=strategy_origin,
+                payout=cand.payout,
+                score_original=cand.score,
+                black_box_cids=bb_cids,
+            )
+
         return await self.executor.enter_trade(
             cand.asset, cand.direction, amount,
             cand.zone,
             note,
             stage,
             journal_cid=cid,
-            signal_ts=getattr(cand, "_signal_ts_1m", cand.candles[-1].ts if cand.candles else None),
-            strategy_origin=getattr(cand, "_strategy_origin", "STRAT-A"),
+            signal_ts=signal_ts,
+            strategy_origin=strategy_origin,
             duration_sec=duration_sec,
             payout=cand.payout,
             score_original=cand.score,
             black_box_cid=getattr(cand, "_black_box_cid", 0),
+            skip_open_wait=skip_open_wait,
         )
 
     async def scan_all(self) -> None:
@@ -2120,4 +2220,319 @@ class AssetScanner:
         # expone por WS) tras evaluar, en cualquier modo de corrida.
         self._flush_strat_f_panel()
         await self._scan_phase_select_execute(eval_result, assets)
+
+
+# ── parallel_scan_fase3 (opción 1): bloque STRAT-F como función pura ──
+# Extrae scanner.py:1240-1473 a una función picklable que recibe datos y
+# devuelve deltas. NO se toca STRAT-A. El loop aplica los deltas (caja negra
+# y maturing_watchlist) en el proceso principal; el worker NO muta estado.
+from dataclasses import dataclass as _dc
+
+
+@_dc
+class StratFEvalContext:
+    """Entrada picklable para _evaluate_strat_f_serial (sin self/bot/executor)."""
+    sym: str
+    payout: int
+    candles_5m: list
+    candles_15m: list
+    candles_1m: list
+    strat_f_only_mode: bool
+    flags: dict
+    maturing_snapshot: list = field(default_factory=list)  # lista de MaturingEntry (picklable)
+    bb_scan_id: str | int = ""
+    session_id: str | int = ""
+    initial_amount: float = 0.0
+    _eval_override: "StratFEvaluation | None" = None  # test hook: reemplaza evaluate_strat_f
+
+
+@_dc
+class StratFEvalResult:
+    """Deltas que el bloque F hoy muta en self/bot/_bb; el loop los aplica."""
+    f_candidate: object | None = None
+    reject_counts_delta: dict = field(default_factory=dict)
+    strat_f_batch_delta: list = field(default_factory=list)
+    strat_f_accepts: int = 0
+    black_box_record: dict | None = None
+    black_box_cid: int | None = None
+    maturing_ops: list = field(default_factory=list)
+    logs: list = field(default_factory=list)
+
+
+def _maturing_find_active(entries: list, asset: str, direction: str | None = None):
+    """Versión pura de MaturingWatchlist.find_active sobre un snapshot picklable."""
+    out = []
+    d = (direction or "").upper() if direction else None
+    for e in entries:
+        if e.asset != asset:
+            continue
+        if d is not None and getattr(e, "direction", "").upper() != d:
+            continue
+        if getattr(e, "status", "maturing") == "maturing":
+            out.append(e)
+    return out
+
+
+def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
+    """Réplica pura del bloque STRAT-F (scanner.py:1240-1473).
+
+    Recibe datos (no self/bot). Devuelve StratFEvalResult con los deltas.
+    La caja negra y maturing_watchlist NO se mutan aquí: se devuelven como
+    datos para que el loop los aplique. Picklable para ProcessPool.
+    """
+    from bot_logging import asset_detail, short_reason
+    from maturing_watchlist import (
+        direction_from_m5_event,
+        fractal_band_and_age,
+        is_r3_young_skip,
+        parse_bars_age_from_skip,
+    )
+    from stochastic_m15 import compute_stoch
+    from stochastic_zones import apply_stoch_help
+    from strat_fractal import evaluate_strat_f, StratFEvaluation
+
+    res = StratFEvalResult()
+    sym = ctx.sym
+    payout = ctx.payout
+    candles = ctx.candles_5m
+    candles_1m = ctx.candles_1m
+    candles_15m = ctx.candles_15m
+    _strat_f_only_mode = ctx.strat_f_only_mode
+    flags = ctx.flags
+    STRAT_A_ONLY = flags.get("STRAT_A_ONLY", False)
+    STRAT_F_ENABLED = flags.get("STRAT_F_ENABLED", False)
+    MIN_PAYOUT = flags.get("MIN_PAYOUT", 80)
+    _stoch_mode = flags.get("STOCH_HELP_MODE", "hard")
+    _mw_mode = normalize_mode(flags.get("MATURING_WATCHLIST_MODE", "live"))
+
+    if not STRAT_A_ONLY and (STRAT_F_ENABLED or _strat_f_only_mode):
+        if ctx._eval_override is not None:
+            f_eval = ctx._eval_override
+        else:
+            f_eval = evaluate_strat_f(
+                candles_15m,
+                candles,
+                candles_1m,
+                payout=payout,
+                min_payout=int(MIN_PAYOUT),
+            )
+        stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
+        _stoch_k = (stoch_m15 or {}).get("k") if stoch_m15 else None
+        _stoch_help = apply_stoch_help(_stoch_k, f_eval.direction or "", _stoch_mode)
+        if stoch_m15 is not None:
+            stoch_m15 = {
+                **stoch_m15,
+                "zone": _stoch_help.zone,
+                "action": _stoch_help.action,
+                "score_delta": _stoch_help.score_delta,
+            }
+        _batch = [[], []]
+        _rec = {
+            "asset": sym,
+            "payout": payout,
+            "direction": f_eval.direction,
+            "strength": round(f_eval.strength * 100.0, 1),
+            "ctx": f_eval.m15_context,
+            "event": f_eval.m5_event,
+            "skip_reason": f_eval.skip_reason,
+            "candles_5m": candles,
+            "candles_1m": candles_1m,
+            "candles_15m": candles_15m,
+            "stoch_m15": stoch_m15,
+            "zone": f_eval.zone,
+            "decision": None,
+        }
+        f_candidate = None
+        _stoch_reject_reason = ""
+        _mw_entries = _maturing_find_active(ctx.maturing_snapshot, sym, f_eval.direction)
+        if f_eval.has_signal and f_eval.direction and f_eval.zone:
+            if _mw_mode == "shadow" and _mw_entries:
+                for _me in list(_mw_entries):
+                    res.maturing_ops.append(("mark_promoted", (_me.key, "shadow")))
+                _rec["decision"] = "SHADOW_PROMOTED"
+                _rec["skip_reason"] = "maturing_shadow_promoted"
+                _batch[1].append(_rec)
+                key = f"F:{short_reason('maturing_shadow_promoted')}"
+                res.reject_counts_delta[key] = res.reject_counts_delta.get(key, 0) + 1
+                res.logs.append(
+                    f"[MATURING] shadow promote {sym} {f_eval.direction} (no CandidateEntry)"
+                )
+            elif _stoch_help.action == "VETO":
+                _stoch_reject_reason = "stoch_extreme_against"
+                _rec["decision"] = "REJECTED_STOCH"
+                _rec["skip_reason"] = _stoch_reject_reason
+                _batch[1].append(_rec)
+                key = f"F:{short_reason(_stoch_reject_reason)}"
+                res.reject_counts_delta[key] = res.reject_counts_delta.get(key, 0) + 1
+                if _mw_entries:
+                    for _me in list(_mw_entries):
+                        res.maturing_ops.append(("drop", (_me.key, "invalidated")))
+                res.logs.append(
+                    f"[STRAT-F] {sym} skip: {_stoch_reject_reason} (zone={_stoch_help.zone} mode={_stoch_mode})"
+                )
+            else:
+                f_candidate = CandidateEntry(
+                    asset=sym,
+                    payout=payout,
+                    zone=f_eval.zone,
+                    direction=f_eval.direction,
+                    candles=candles_1m,
+                    score=round(f_eval.strength * 100.0, 1),
+                    mode=SignalMode.REBOUND,
+                    score_breakdown={
+                        "compression": 0.0,
+                        "fractal": round(f_eval.strength * 35.0, 2),
+                        "context": round(f_eval.strength * 25.0, 2),
+                        "payout": round(min(20.0, (payout / 95.0) * 20.0), 2),
+                    },
+                )
+                setattr(f_candidate, "_strategy_origin", "STRAT-F")
+                setattr(f_candidate, "_reversal_pattern", f_eval.pattern_name)
+                setattr(f_candidate, "_reversal_strength", f_eval.strength)
+                setattr(f_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
+                setattr(f_candidate, "_amount", ctx.initial_amount)
+                setattr(f_candidate, "_stage", "initial")
+                if _mw_entries:
+                    setattr(f_candidate, "_maturing_promoted", True)
+                    for _me in list(_mw_entries):
+                        res.maturing_ops.append(("mark_promoted", (_me.key, "live")))
+                    res.logs.append(
+                        f"[MATURING] live promote {sym} {f_eval.direction} → CandidateEntry"
+                    )
+                score_candidate(f_candidate)
+                if _stoch_help.score_delta:
+                    f_candidate.score = round(f_candidate.score + _stoch_help.score_delta, 1)
+                    if isinstance(f_candidate.score_breakdown, dict):
+                        f_candidate.score_breakdown["stoch_help"] = float(_stoch_help.score_delta)
+                res.f_candidate = f_candidate
+                res.strat_f_accepts = 1
+                _rec["decision"] = "ACCEPTED"
+                _batch[0].append(_rec)
+                res.logs.append(
+                    f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
+                    f"ctx={f_eval.m15_context} event={f_eval.m5_event}"
+                )
+        elif f_eval.skip_reason:
+            _rec["decision"] = "REJECTED_STRAT_F"
+            _batch[1].append(_rec)
+            key = f"F:{short_reason(f_eval.skip_reason)}"
+            res.reject_counts_delta[key] = res.reject_counts_delta.get(key, 0) + 1
+            res.logs.append(f"[STRAT-F] {sym} skip: {f_eval.skip_reason}")
+            if is_r3_young_skip(f_eval.skip_reason):
+                _dir = f_eval.direction or direction_from_m5_event(f_eval.m5_event)
+                _band, _age, _ev = fractal_band_and_age(candles, f_eval.m5_event)
+                if _dir and _band is not None:
+                    if _age <= 0:
+                        _parsed = parse_bars_age_from_skip(f_eval.skip_reason)
+                        _age = int(_parsed if _parsed is not None else 0)
+                    res.maturing_ops.append((
+                        "upsert_young",
+                        dict(
+                            asset=sym,
+                            direction=_dir,
+                            band=float(_band),
+                            m15_context=f_eval.m15_context or "",
+                            m5_event=_ev or (f_eval.m5_event or ""),
+                            bars_age=int(_age),
+                            payout=int(payout),
+                        ),
+                    ))
+                    res.logs.append(
+                        f"[MATURING] capture {sym} {_dir} band={float(_band)} age={int(_age)}"
+                    )
+            elif _mw_entries:
+                for _me in list(_mw_entries):
+                    res.maturing_ops.append(("drop", (_me.key, "invalidated")))
+                res.logs.append(
+                    f"[MATURING] drop {sym} reason=invalidated ({f_eval.skip_reason})"
+                )
+        # Caja negra: se graba en el LOOP (no aquí). Devolvemos el record.
+        if _rec.get("decision"):
+            res.black_box_record = {
+                "strategy": "STRAT-F",
+                "asset": sym,
+                "direction": f_eval.direction or "",
+                "score": round(f_eval.strength * 100.0, 1),
+                "payout": payout,
+                "decision": _rec["decision"],
+                "decision_reason": f_eval.m5_event or "",
+                "reject_reason": (
+                    _stoch_reject_reason
+                    if _stoch_reject_reason
+                    else (f_eval.skip_reason or "")
+                ),
+                "strategy_details": {
+                    "strength": round(f_eval.strength * 100.0, 1),
+                    "ctx": f_eval.m15_context,
+                    "event": f_eval.m5_event,
+                    "pattern": f_eval.pattern_name,
+                },
+                "candles_1m": [
+                    {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                    for c in (candles_1m or [])[-5:]
+                ],
+                "candles_5m": [
+                    {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                    for c in (candles or [])[-3:]
+                ],
+                "candles_15m": [
+                    {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
+                    for c in (candles_15m or [])[-20:]
+                ],
+                "session_id": ctx.session_id,
+                "bb_scan_id": ctx.bb_scan_id,
+                "stoch_m15": stoch_m15,
+            }
+            res.strat_f_batch_delta = _batch
+    return res
+
+
+async def _run_strat_f_parallel(ctxs, bb, maturing_wl, log, candidates, reject_counts, batch):
+    """Evalúa STRAT-F en paralelo (ProcessPool) y aplica los deltas al loop.
+
+    Degradación (R6): si no hay pool, evalúa serial en el loop. Maneja
+    excepciones por activo (return_exceptions) sin tumbar el scan.
+    Retorna la cantidad de accepts para sumar a strat_f_accepts / stats.
+    """
+    if not ctxs:
+        return 0
+    pool = get_scan_pool()
+    if pool is None:
+        results = [_evaluate_strat_f_serial(c) for c in ctxs]
+    else:
+        loop = asyncio.get_event_loop()
+        futures = [loop.run_in_executor(pool, _evaluate_strat_f_serial, c) for c in ctxs]
+        results = await asyncio.gather(*futures, return_exceptions=True)
+    accepts = 0
+    for c, res in zip(ctxs, results):
+        if isinstance(res, Exception):
+            log.error("[STRAT-F][parallel] fallo en %s: %s", c.sym, res)
+            continue
+        accepts += _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, batch)
+    return accepts
+
+
+def _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, batch):
+    """Aplica un StratFEvalResult a los acumuladores del loop. Retorna accepts."""
+    for key, val in res.reject_counts_delta.items():
+        reject_counts[key] = reject_counts.get(key, 0) + val
+    if res.strat_f_batch_delta:
+        batch[0].extend(res.strat_f_batch_delta[0])
+        batch[1].extend(res.strat_f_batch_delta[1])
+    for op, args in res.maturing_ops:
+        try:
+            getattr(maturing_wl, op)(*args)
+        except Exception as exc:  # neveras la watchlist no debe tumbar el scan
+            log.error("[STRAT-F][maturing] op %s falló: %s", op, exc)
+    for msg in res.logs:
+        log.info(msg)
+    if res.black_box_record is not None and bb is not None:
+        _bb_cid = bb.record_candidate(
+            res.black_box_record["bb_scan_id"], "STRAT-F", res.black_box_record
+        )
+        if res.f_candidate is not None:
+            setattr(res.f_candidate, "_black_box_cid", _bb_cid)
+    if res.f_candidate is not None:
+        candidates.append(res.f_candidate)
+    return res.strat_f_accepts
 

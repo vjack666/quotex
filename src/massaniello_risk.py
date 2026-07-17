@@ -102,7 +102,9 @@ class MassanielloRiskManager:
         return self.losses >= max_losses
 
     def is_session_timeout(self) -> bool:
-        if self.session_start_time is None:
+        # session_max_min <= 0 ⇒ sin límite temporal (modo recolección de data:
+        # la gestión de riesgo por tiempo está desactivada a propósito).
+        if self.session_start_time is None or self.session_max_min <= 0:
             return False
         elapsed_min = (time.time() - self.session_start_time) / 60.0
         return elapsed_min >= float(self.session_max_min)

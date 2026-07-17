@@ -1,10 +1,10 @@
 # Roadmap — quotex-hft-bot (post-Strategy B)
 
 > **Fuente de verdad:** `feature_list.json`
-> **Última actualización:** 2026-07-11
-> **Contexto:** Strategy B (Wyckoff Spring) fue eliminada físicamente. El bot
-> ahora se enfoca en una estrategia unificada **STRAT-F (Fractal / Wyckoff)**
-> basada en los libros de `boblioteca/`.
+> **Última actualización:** 2026-07-17
+> **Changelog sesión:** `docs/CHANGELOG_2026-07-16.md`
+> **Contexto:** Strategy B eliminada. **STRAT-F en producción** + stoch M15 help hard.
+> Recolección **24/7** (Massaniello solo se resetea al fin de ciclo).
 
 ---
 
@@ -12,11 +12,14 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Estrategias vivas | STRAT-A, MOMENTUM, REVERSAL_SWING, ORDER_BLOCK |
-| Nueva estrategia en construcción | **STRAT-F** (fractal M15/M5/M1) |
+| Estrategias vivas | **STRAT-F** (foco), STRAT-A, MOMENTUM, REVERSAL_SWING, ORDER_BLOCK |
+| STRAT-F | **✅ Operativa** (#1–#7) + **stoch help #9 done** |
+| Place-order | **#10 smart_order_place done** |
 | Strategy B | **ELIMINADA** (2026-07-11) |
-| Gestión de riesgo | Massaniello (5 ops / 3 ITM / 60 min / PRACTICE) |
-| Tests actuales | 286 passing |
+| Gestión de riesgo | Massaniello 24/7 (reset al fin de ciclo; no para el bot) |
+| Feature abierta en lista | #8 `schedule_auto` (pausado; cierre formal pendiente) |
+| Siguiente valor en STRAT-F | Validar stoch hard en black box; opcional gate M1 micro-tendencia |
+| Mejoras del resto del sistema | **Aplazadas** → `docs/BACKLOG_SYSTEM_IMPROVEMENTS.md` |
 
 ---
 
@@ -63,6 +66,26 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 
 > **Dashboard reemplazado** (2026-07-11). SDD: `specs/hub_strat_f_replacement/`.
 > El panel ahora muestra aceptadas vs rechazadas STRAT-F con razón. pytest 273 passed.
+
+### Fase 5 — Stoch help + ops 24/7 + place-order (2026-07-16/17)
+| ID | Feature | Estado | Notas |
+|----|---------|--------|-------|
+| 9 | `stoch_entry_help` | ✅ done | Stoch M15 hard; `specs/stoch_entry_help/` |
+| 10 | `smart_order_place` | ✅ done | Prewarm + hub last_order_attempt |
+| — | Massaniello 24/7 | ✅ ad-hoc | Solo reset; no stop al fin de ciclo |
+| — | Scan align 5m | ✅ ad-hoc | `ALIGN_SCAN_TO_CANDLE` + lead 0 |
+| — | Quiet trade wait + log countdown | ✅ ad-hoc | Ver changelog |
+| — | **Arranque inmediato** | ✅ ad-hoc | `consolidation_bot.py` escanea al conectar (sin despertador) |
+| — | **Sin límite 60 min** | ✅ ad-hoc | `config.py SESSION_MAX_MIN=0`; Massaniello continuo |
+| — | **Scan cada 1 min** | ✅ ad-hoc | `ALIGN_SCAN_TO_CANDLE=False`; cada 60s con countdown |
+| 15 | **`parallel_scan_fase3`** | ✅ done | STRAT-F de FASE 3 en ProcessPool 10 workers (50% CPU); speedup 2.19x; STRAT-A intacto |
+
+> Detalle: `docs/CHANGELOG_2026-07-16.md`
+
+### Fase 6 — Hub ops (abierto)
+| ID | Feature | Estado | Depende de |
+|----|---------|--------|------------|
+| 8 | `schedule_auto` | ⏸ in_progress (paused) | — |
 
 ---
 
@@ -121,11 +144,44 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 | 10 | `strat_f_only_mode` (G2) | ✅ done | #4, #9 |
 
 > **G1+G2 cerrados** (2026-07-11). El panel STRAT-F se muestra en el bot REAL
-> (no solo `--hub-readonly`) y `STRAT_F_ONLY=True` aisla la ejecución a STRAT-F
-> para garantizar el 1er trade demo. `tests/test_strat_f_golive.py` (4 tests,
-> TDD). pytest **286 passed**. Auditoría: `progress/audit_strat_f_go_live.md`.
-> **G3 (end-to-end en máquina de Ruben) PENDIENTE**: falta correr `main.py` en
-> demo y confirmar panel + 1er trade cerrado.
+> (no solo `--hub-readonly`) y `STRAT_F_ONLY=True` aisla la ejecución a STRAT-F.
+> `tests/test_strat_f_golive.py` (4 tests, TDD). Auditoría:
+> `progress/audit_strat_f_go_live.md`.
+> **G3 (validación humana):** STRAT-F **confirmada operativa** por el operador
+> (2026-07-15). El foco ya no es “que funcione el pipeline”.
+
+---
+
+## Fase 6 — Mejora de STRAT-F con datos (estocástico en entrada)
+
+> **Estado actual del estocástico:** se **calcula y graba** (`stoch_m15`,
+> `stoch_contradicts` en black box / scanner). **No** se usa todavía como
+> veto ni boost de score en la decisión de entrada. Eso es intencional
+> (`boblioteca/estocastico/04_`, `06_`): medir → A/B → promover.
+
+| Paso | Qué | Estado | Criterio de salida |
+|------|-----|--------|--------------------|
+| D1 | Operar y **recolectar** señales/trades con stoch en caja negra | 🔄 en curso | Volumen suficiente de WIN/LOSS con `stoch_m15` poblado |
+| D2 | **Analizar** (scripts `analyze_trades.py` / `deep_analysis.py` + queries black box) | ⏳ pendiente de datos | Informe: win_rate / expectancy por estado stoch, cruce, contradicción |
+| D3 | SDD: reglas de **entrada** que saquen provecho del stoch (boost, soft/hard veto, M5 timing si aplica) | ⏳ solo con evidencia de D2 | Spec aprobado + tests; no hardcodear fe sin datos |
+
+Hipótesis a validar (no son features todavía):
+
+- Extremos M15 (K/D ≥80 o ≤20) alineados con dirección STRAT-F suben expectancy.
+- Cruces en zona de banda refuerzan el timing de entrada (hoy se desaprovecha).
+- `stoch_contradicts=true` predice peores resultados → candidato a soft/hard veto.
+
+**No reabrir** features #1–#7. Cualquier cambio de reglas de entrada = feature nueva con SDD.
+
+---
+
+## Fase ops (paralela, no bloquea STRAT-F)
+
+| ID | Feature / fix | Estado | Notas |
+|----|---------------|--------|-------|
+| 8 | `schedule_auto` | 🔄 in_progress | Consola work/rest/day-cap; impl T1–T7 hecha |
+| — | `duration_live` | 🔄 review | DURATION_SEC live (no import congelado) |
+| — | Tests vs `hub_bankroll.json` min_payout=90 | known issue | Contamina STRAT_*_MIN_PAYOUT; ~24 fails en suite |
 
 ---
 
@@ -133,7 +189,10 @@ Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
 
 | Fecha | Cambio |
 |-------|--------|
+| 2026-07-17 | **parallel_scan_fase3 (id 15) done**: STRAT-F de FASE 3 del scanner evaluada en ProcessPool (10 workers = 50% de 20 cores); STRAT-A intacta. Speedup 2.19x (benchmark N=40). 4 tests verdes. Mejoras operativas: arranque inmediato (sin despertador), `SESSION_MAX_MIN=0` (sin corte 60 min), `ALIGN_SCAN_TO_CANDLE=False` (scan cada 60s con countdown). Fix WS runtime (reconexión en _resolve_trade + wait_while_trade_open) cerrado en sesión previa. Ver `agent/HANDOFF.md` + `specs/parallel_scan_fase3/`. |
+| 2026-07-15 | **Doc sync:** STRAT-F marcada operativa; Fase 6 = datos + estocástico en entrada; G3 cerrado por validación humana; ops (`schedule_auto`, `duration_live`) documentados aparte. |
 | 2026-07-14 | **Hub bankroll Massaniello**: capital/Ops/ITM/payout en Operación; stake en vivo; `GET /api/massaniello/preview`; min_payout unificado en escáner. **Resolve lag**: no forzar LOSS con profit=0; grace/timeout amplios. Lifecycle session bootstrap (Iniciar/resume). Log compacto (`BOT_LOG_VERBOSE`). |
+
 | 2026-07-11 | Borrado de `feature_list.json` viejo y `docs/ROADMAP*.md` (mintieron sobre strat_b) |
 | 2026-07-11 | Creación de roadmap STRAT-F (feature #1 en curso) |
 | 2026-07-11 | Reemplazo del dashboard por panel STRAT-F (#7): `hub/strat_f_state.py`, `hub/strat_f_panel.py`, `hub/parser.py`, `hub/render.py`, `hub/server.py` + `index.html` reescrito |

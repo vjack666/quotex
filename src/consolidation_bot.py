@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -29,6 +30,7 @@ from config import *  # noqa: F401,F403 — re-export para main.py
 from alerter import alerter
 from candle_cache import CandleCache
 from config import MAX_SIMULTANEOUS_TRADES, MIN_ASSET_SPREAD, MAX_ENTRIES_PER_ASSET
+from config import SESSION_AUTO_RESET_ON_COMPLETE
 from connection import (
     ConnectionManager, connect_with_retry, create_trading_client, get_open_assets,
     looks_like_connection_issue,
@@ -37,7 +39,14 @@ from diversification_enforcer import DiversificationEnforcer
 from htf_scanner import HTFScanner
 from errors import BotError
 from executor import TradeExecutor
-from loop_utils import seconds_until_next_scan, sleep_with_inline_countdown
+from loop_utils import (
+    init_scan_pool,
+    open_trades_dict,
+    seconds_until_next_scan,
+    shutdown_scan_pool,
+    sleep_with_inline_countdown,
+    wait_while_trade_open,
+)
 from massaniello_persistence import MassanielloPersistence
 from massaniello_risk import MassanielloRiskManager
 from session_manager import (
@@ -48,6 +57,7 @@ from session_manager import (
 from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeState
 from scanner import AssetScanner
 from hub.strat_f_panel import StratFPanel
+from maturing_watchlist import MaturingWatchlist
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -62,7 +72,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[
         _stdout_handler,
-        logging.FileHandler("consolidation_bot.log", encoding="utf-8"),
+        logging.handlers.RotatingFileHandler(
+            "consolidation_bot.log",
+            maxBytes=2_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        ),
     ],
 )
 logging.getLogger("pyquotex").setLevel(logging.WARNING)
@@ -123,6 +138,8 @@ class ConsolidationBot:
         self._followup_capture_tasks: set[asyncio.Task[Any]] = set()
         self.last_known_price: dict[str, float] = {}
         self.failed_assets: dict[str, int] = {}
+        # Last place-order attempt for hub UX (waiting_open|sending|accepted|failed).
+        self.last_order_attempt: Optional[dict] = None
         self.pending_reversals: dict[str, PendingReversal] = {}
         self.pending_martin: dict = {}
         self.accepted_scans_window: Deque[int] = deque(maxlen=ADAPTIVE_THRESHOLD_WINDOW_SCANS)
@@ -136,6 +153,11 @@ class ConsolidationBot:
         self.radar_watchlist: dict[str, Any] = {}
         self._trade_tasks: set[asyncio.Task[Any]] = set()
         self.strat_f_panel = StratFPanel()
+        self.maturing_watchlist = MaturingWatchlist(
+            max_entries=int(getattr(_config, "MATURING_WATCHLIST_MAX_ENTRIES", 40)),
+            max_age_bars=int(getattr(_config, "MATURING_WATCHLIST_MAX_AGE_BARS", 12)),
+            ttl_sec=float(getattr(_config, "MATURING_WATCHLIST_TTL_SEC", 3600)),
+        )
         self.greylist_assets = set(GREYLIST_ASSETS)
         if greylist_assets is not None:
             self.greylist_assets = {a.strip() for a in greylist_assets if a and a.strip()}
@@ -262,7 +284,15 @@ async def main(
     loop_forever: bool,
     greylist_assets: Optional[set[str]] = None,
     hub_scanner: Any = None,
+    continuous_mode: bool = False,
 ) -> None:
+    # Config fallback so hub/CLI stay consistent when arg is omitted/False.
+    if not continuous_mode:
+        continuous_mode = bool(
+            getattr(_config, "CONTINUOUS_DATA_COLLECTION_MODE", False)
+            or getattr(_config, "SESSION_AUTO_RESET_ON_COMPLETE", False)
+        )
+
     if not EMAIL or not PASSWORD:
         print("ERROR: Falta QUOTEX_EMAIL / QUOTEX_PASSWORD en el .env")
         sys.exit(1)
@@ -288,18 +318,12 @@ async def main(
     account_type = "REAL" if real_account else "PRACTICE"
     await client.change_account(account_type)
 
-    # Fix F6 (raíz): cliente de trading LIMPIO separado del de datos (scanner/HTF).
-    # El scanner abre streams de velas en vivo de ~29 activos en M1+M5 en el mismo
-    # socket; eso deja orders/open sin respuesta. Separar elimina la competencia.
+    # FIX B (skill Pitfall J CORRECTION): NO separate trade_client. The bot runs
+    # on ONE Quotex WebSocket (client) for scan + HTF + orders via
+    # otc_trader.enviar_orden(self.client). A second idle instance gets killed by
+    # Cloudflare's idle-timeout and causes "Connection to remote host was lost"
+    # mid-wait -> unresolved legs -> permanent hang. Orders use client directly.
     trade_client = None
-    try:
-        trade_client, tc_reason = await create_trading_client(
-            email=EMAIL, password=PASSWORD, account_type=account_type,
-        )
-        if trade_client is None:
-            log.warning("No se pudo crear cliente de trading separado: %s (usando cliente de datos para buy)", tc_reason)
-    except Exception as _tc_exc:
-        log.warning("Excepción creando cliente de trading: %s", _tc_exc)
 
     start_balance: Optional[float] = None
     try:
@@ -364,6 +388,17 @@ async def main(
     # Without this the manager stays STOPPED and the scan loop exits immediately.
     bot.session_manager.bootstrap_for_run(bot.massaniello)
     bot.session_stop_hit = False
+
+    # ── Continuous Data Collection Mode ─────────────────────────────────────
+    # Delegates to ContinuousModeOrchestrator (see continuous_mode.py).
+    # In continuous mode: Massaniello session limits are bypassed after each
+    # cycle completes, and safety guardrails (consecutive losses, daily limit)
+    # are enforced by the orchestrator's guard.
+    if continuous_mode:
+        from continuous_mode import ContinuousModeOrchestrator
+        bot.continuous = ContinuousModeOrchestrator.from_bot(bot)
+    else:
+        bot.continuous = None
 
     # Register live bot with web BotRunner (if this process is the runner task).
     if _runner.state in ("starting", "running"):
@@ -439,13 +474,23 @@ async def main(
 
     await bot.reconcile_pending_candidates()
 
+    init_scan_pool()  # ProcessPool global para FASE 3 (parallel_scan_fase3)
+
     try:
-        if loop_forever and ALIGN_SCAN_TO_CANDLE:
-            first_wait = seconds_until_next_scan(time.time())
-            await sleep_with_inline_countdown(first_wait, "Sincronizando primer escaneo")
+        # Arranque inmediato: el primer scan NO espera al open de la vela 5m.
+        # Los ciclos siguientes siguen alineados (sleep_for abajo).
+        log.info("🚀 Arranque inmediato — escaneando pares ahora")
 
         while True:
             cycle_start = time.time()
+
+            # Continuous mode: daily reset + pre-scan guard checks
+            if continuous_mode and bot.continuous is not None:
+                bot.continuous.check_daily_reset(bot)
+                if bot.continuous.should_skip_scan():
+                    await asyncio.sleep(60.0)
+                    continue
+
             try:
                 if loop_forever and not await bot.ensure_connection():
                     alerter.alert_connection_lost()
@@ -466,19 +511,49 @@ async def main(
 
                 # Meta cumplida / fallida / timeout / exhausted → detener scan.
                 # El usuario pulsa Iniciar para un ciclo nuevo (o se reanuda si quedó incompleto).
+                # En continuous mode: delegar al orchestrator (reset Massaniello + seguir).
+                # SESSION_AUTO_RESET_ON_COMPLETE: temporal override para recolección 24/7.
                 if current_state == SessionState.COMPLETED or bot.session_stop_hit:
-                    log.info(
-                        "🎯 SESIÓN MASSANIELLO FINALIZADA — "
-                        "scan detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
-                    )
-                    await asyncio.sleep(2.0)
-                    sm.stop()
-                    break
+                    if continuous_mode and bot.continuous is not None:
+                        # Check guardrails before continuing
+                        if bot.continuous.should_stop_entirely():
+                            bot.session_manager.stop()
+                            break
+                        # Reset Massaniello and keep scanning
+                        bot.continuous.reset_session(bot)
+                    elif SESSION_AUTO_RESET_ON_COMPLETE:
+                        # Temporal: auto-reset sin preguntar (recolección de datos 24/7)
+                        from massaniello_risk import MassanielloRiskManager
+                        bot.massaniello = MassanielloRiskManager()
+                        vcap = bot.executor._massaniello_virtual()
+                        if vcap is not None:
+                            bot.executor.set_session_start_balance(vcap)
+                        bot.session_manager.bootstrap_for_run(bot.massaniello, force_new=True)
+                        bot.session_stop_hit = False
+                        log.debug(
+                            "♻️ Sesión completada — auto-reset (SESSION_AUTO_RESET_ON_COMPLETE=True) "
+                            "previo: %dW/%dL",
+                            bot.massaniello.wins, bot.massaniello.losses,
+                        )
+                    else:
+                        log.info(
+                            "🎯 SESIÓN MASSANIELLO FINALIZADA — "
+                            "scan detenido. Pulsa 'Iniciar' en el hub para nueva sesión."
+                        )
+                        await asyncio.sleep(2.0)
+                        bot.session_manager.stop()
+                        break
 
                 # STOPPED only after explicit stop (user/API) — never "never started"
                 if current_state == SessionState.STOPPED:
                     log.info("Session STOPPED — ending scan loop")
                     break
+
+                # Quiet wait while a position is open: no scan, no stats, no
+                # "Próximo escaneo" noise — only a single waiting line.
+                if open_trades_dict(bot):
+                    await wait_while_trade_open(bot)
+                    continue
 
                 await bot.scan_all()
 
@@ -539,9 +614,21 @@ async def main(
             except BotError as exc:
                 log.error("Error de dominio en ciclo: %s", exc)
             except Exception as exc:
-                log.error("Error en ciclo: %s", exc, exc_info=True)
-                if looks_like_connection_issue(str(exc)):
+                exc_str = str(exc)
+                if looks_like_connection_issue(exc_str):
+                    # Conexiones WS con Quotex se caen ocasionalmente (Cloudflare
+                    # idle timeout, reconexiones del broker). No es un error del
+                    # bot — reconectar silenciosamente sin spam en terminal.
+                    log.debug("Conexión perdida: %s — reconectando…", exc_str)
                     await bot.ensure_connection()
+                else:
+                    log.error("Error en ciclo: %s", exc, exc_info=True)
+
+            # Trade opened during this cycle: wait quietly instead of stats +
+            # "Próximo escaneo" countdown spam.
+            if open_trades_dict(bot):
+                await wait_while_trade_open(bot)
+                continue
 
             bot.log_stats()
             if not loop_forever:
@@ -558,8 +645,12 @@ async def main(
                     sleep_for,
                     "Próximo escaneo",
                     should_abort=lambda: bool(
-                        bot.session_stop_hit
-                        or bot.session_manager.state == SessionState.COMPLETED
+                        (not continuous_mode)
+                        and (not SESSION_AUTO_RESET_ON_COMPLETE)
+                        and (
+                            bot.session_stop_hit
+                            or bot.session_manager.state == SessionState.COMPLETED
+                        )
                     ),
                 )
                 if aborted:
@@ -590,6 +681,7 @@ async def main(
             await asyncio.wait_for(client.close(), timeout=3.0)
         except Exception:
             pass
+        shutdown_scan_pool()  # cierra ProcessPool global (parallel_scan_fase3)
         log.info("Bot detenido.")
 
 
@@ -808,6 +900,14 @@ class BotRunner:
         # Update scanner payout threshold
         if hasattr(bot, "scanner") and bot.scanner is not None:
             pass  # scanner reads config module at import time, already updated
+        # Keep EntrySynchronizer duration in sync with hub-saved duration_sec.
+        ex = getattr(bot, "executor", None)
+        if ex is not None:
+            es = getattr(ex, "entry_sync", None)
+            if es is not None:
+                es.duration_sec = int(
+                    c.get("duration_sec", getattr(_config, "DURATION_SEC", 300))
+                )
 
     def get_status(self) -> dict[str, Any]:
         status: dict[str, Any] = {
@@ -953,11 +1053,16 @@ class BotRunner:
                 float(self._config.get("massaniello_virtual_capital", 30.0)),
             )
             self._state = "running"
+            continuous_mode = bool(
+                getattr(_config, "CONTINUOUS_DATA_COLLECTION_MODE", False)
+                or getattr(_config, "SESSION_AUTO_RESET_ON_COMPLETE", False)
+            )
             await main(
                 dry_run=self._config["dry_run"],
                 real_account=self._config["real_account"],
                 loop_forever=True,
                 hub_scanner=None,  # se conecta después via app.py
+                continuous_mode=continuous_mode,
             )
             natural_exit = not self._user_stop
         except asyncio.CancelledError:
