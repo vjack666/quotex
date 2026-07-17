@@ -277,8 +277,8 @@ class Journal:
             self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_ok INTEGER")
         if "pre_objectives_note" not in cols:
             self.conn.execute("ALTER TABLE candidates ADD COLUMN pre_objectives_note TEXT")
-        if "spring_confirmed" not in cols:
-            self.conn.execute("ALTER TABLE candidates ADD COLUMN spring_confirmed INTEGER")
+        if "spring_margin" not in cols:
+            self.conn.execute("ALTER TABLE candidates ADD COLUMN spring_margin REAL")
         # Migración: tabla expired_zones (bases anteriores sin ella)
         self.conn.executescript(
             "CREATE TABLE IF NOT EXISTS expired_zones ("
@@ -475,7 +475,7 @@ class Journal:
                 reversal_pattern, reversal_strength,
                 zone_ceiling, zone_floor, zone_range_pct, zone_bars_inside, zone_age_min,
                 decision, reject_reason, order_id, outcome, candles_json, strategy_json,
-                strategy_origin, spring_confirmed
+                strategy_origin, spring_margin
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
@@ -500,7 +500,7 @@ class Journal:
                 json.dumps(candles_data),
                 json.dumps(strategy_payload, ensure_ascii=False),
                 getattr(entry, "_strategy_origin", "STRAT-A"),
-                getattr(entry, "_spring_confirmed", None),
+                getattr(entry, "_spring_margin", None),
             ),
         )
         self.conn.commit()

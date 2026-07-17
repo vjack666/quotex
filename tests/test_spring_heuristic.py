@@ -1,8 +1,9 @@
-"""Tests de la heurística observacional spring_confirmed (NO es el SSD real).
+"""Tests de la heurística observacional spring_margin (NO es el SSD real).
 
-Solo verifica que la etiqueta se calcule y propague sin alterar la
-decisión de entrada. No bloquea ni cambia score/dirección.
+Solo verifica que la etiqueta (ahora float continuo, no bool) se calcule y
+propague sin alterar la decisión de entrada. No bloquea ni cambia score/dirección.
 """
+import pytest
 from models import Candle
 from strat_fractal import (
     _spring_heuristic_5m1m,
@@ -30,21 +31,26 @@ def _make_5m(fractal_low, post_lows, fractal_idx=2, n=6):
     return candles, fractal_idx
 
 
-def test_spring_call_true_when_min_above_band():
+def test_spring_call_positive_margin_when_min_above_band():
+    # post_min=1.0985 vs band=1.0980 -> margen = (1.0985-1.0980)/1.0980*100 ≈ +0.0455%
     candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[1.0985, 1.0990, 1.0992])
-    # mínimo post-fractal 1.0985 >= band 1.0980 -> spring True
     res = _spring_heuristic_5m1m(candles_5m, [], fidx, 1.0980, "CALL")
-    assert res is True
+    assert res is not None
+    assert res > 0
+    assert res == pytest.approx(0.0455, abs=1e-3)
 
 
-def test_spring_call_false_when_break_below_band():
+def test_spring_call_negative_margin_when_break_below_band():
+    # post_min=1.0975 vs band=1.0980 -> margen = (1.0975-1.0980)/1.0980*100 ≈ -0.0455%
     candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[1.0975, 1.0981, 1.0990])
-    # primera post-vela rompió el suelo (1.0975 < 1.0980) -> False
     res = _spring_heuristic_5m1m(candles_5m, [], fidx, 1.0980, "CALL")
-    assert res is False
+    assert res is not None
+    assert res < 0
+    assert res == pytest.approx(-0.0455, abs=1e-3)
 
 
-def test_spring_put_mirror_true():
+def test_spring_put_negative_margin_when_max_below_band():
+    # fractal_up: band=high=1.2020; post_max=1.2015 -> margen = (1.2015-1.2020)/1.2020*100 ≈ -0.0416%
     candles_5m = [
         _c(0, 1.2000, 1.2010, 1.1990, 1.2005),
         _c(300, 1.2005, 1.2015, 1.1995, 1.2000),
@@ -56,34 +62,37 @@ def test_spring_put_mirror_true():
         )
     while len(candles_5m) < 6:
         candles_5m.append(_c(len(candles_5m) * 300, 1.20, 1.201, 1.199, 1.20))
-    # máximo post-fractal <= band 1.2020 -> spring True
     res = _spring_heuristic_5m1m(candles_5m, [], 2, 1.2020, "PUT")
-    assert res is True
+    assert res is not None
+    assert res < 0
+    assert res == pytest.approx(-0.0416, abs=1e-3)
 
 
 def test_spring_none_when_insufficient():
-    candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[])
     # fractal en last_idx (sin post-velas 5m) y sin 1m -> None
+    candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[])
     candles_5m = candles_5m[:3]
     res = _spring_heuristic_5m1m(candles_5m, [], 2, 1.0980, "CALL")
     assert res is None
 
 
-def test_evaluate_strat_f_propagates_spring_confirmed():
+def test_evaluate_strat_f_propagates_spring_margin():
     candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[1.0985, 1.0990, 1.0992])
     candles_1m = [_c(i * 60, 1.10, 1.10, 1.099, 1.10) for i in range(10)]
     candles_15m = [_c(i * 900, 1.10, 1.105, 1.095, 1.10) for i in range(10)]
     ev = evaluate_strat_f(candles_15m, candles_5m, candles_1m, payout=90)
     assert ev.has_signal is True
-    assert ev.spring_confirmed is True
+    assert ev.spring_margin is not None
+    assert ev.spring_margin > 0  # margen positivo (no rompió suelo)
 
 
 def test_evaluate_strat_f_spring_true_does_not_block():
-    # Fractal válido (post-velas con low >= band) -> spring_confirmed=True.
+    # Fractal válido (post-velas con low >= band) -> spring_margin > 0.
     # La señal se acepta IGUAL (la etiqueta no bloquea).
     candles_5m, fidx = _make_5m(fractal_low=1.0980, post_lows=[1.0985, 1.0990, 1.0992])
     candles_1m = [_c(i * 60, 1.10, 1.10, 1.099, 1.10) for i in range(10)]
     candles_15m = [_c(i * 900, 1.10, 1.105, 1.095, 1.10) for i in range(10)]
     ev = evaluate_strat_f(candles_15m, candles_5m, candles_1m, payout=90)
     assert ev.has_signal is True
-    assert ev.spring_confirmed is True
+    assert ev.spring_margin is not None
+    assert ev.spring_margin > 0  # margen positivo (no rompió suelo)

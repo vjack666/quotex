@@ -80,31 +80,75 @@ lo prohíbe explícitamente.
 ## Feature observacional: spring_confirmed (heurística, NO SSD)
 2026-07-17 — logging acotado, SIN alterar decisión/dirección/score.
 
-Objetivo: etiquetar cada señal STRAT-F aceptada con `spring_confirmed`
-(INTEGER 1/0/NULL en trade_journal.candidates) para cruzar después
-spring_confirmed vs outcome (WIN/LOSS) sin leer logs a mano.
+Objetivo: etiquetar cada señal STRAT-F aceptada con `spring_margin`
+(REAL, decimal % en trade_journal.candidates) para correlacionar
+después spring_margin vs outcome (WIN/LOSS) sin leer logs a mano.
 
-- Campo en DB: **INTEGER** (1/0/NULL), NO TEXT. Razón: permitir
-  `AVG(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END)` directo por grupo.
+- Campo en DB: **REAL** (decimal, puede ser negativo), NO INTEGER bool.
+  Razón (cambio Fase 0, 2026-07-17): `spring_confirmed` bool estaba
+  estructuralmente sesgado a 1/NULL por STRAT_F_ZONE_MIN_AGE=3 (el filtro
+  de edad garantiza >=3 velas 5m post-fractal, con lo cual el mínimo post
+  casi siempre >= band -> True). El float continuo da resolución real.
 - Función auxiliar: **`_spring_heuristic_5m1m`** (nombre explícito de
   HEURÍSTICA, NO el StochasticSpringDetector real de SMC-SYSTEMS). No
   confundir en el futuro con el SSD validado.
-  Regla: CALL (fractal_down) → mínimo de candles_5m[i+1:i+4] vs band
-  (low fractal). Si mínimo >= band → 1 (spring, no rompió suelo). Si
-  rompió por debajo → 0. Si no hay velas 5m post-fractal suficientes
-  (fractal_idx == last_idx), usar candles_1m recientes (mínimo 2-3).
-  Si tampoco alcanza → NULL. Espejo para PUT (fractal_up, high fractal).
-- Punto de integración: `evaluate_strat_f` return (strat_fractal.py:261)
-  + log `[STRAT-F] ✓` (scanner.py:2411) + `_rec` dict (scanner.py:2330)
-  + `log_candidate` INSERT (trade_journal.py) + ALTER COLUMN.
+  Regla: CALL (fractal_down) → margen = (min(low post-fractal) - band)/band*100.
+  Positivo = no rompió suelo (spring más limpio). Negativo = rompió.
+  PUT (fractal_up) → margen = (max(high post-fractal) - band)/band*100.
+  Espejo. Sin velas suficientes → None.
+- Punto de integración: `evaluate_strat_f` return (strat_fractal.py:314)
+  + log `[STRAT-F] ✓ spring_margin=` (scanner.py:2415) + `_rec` dict
+  (scanner.py:2336) + `log_candidate` INSERT (trade_journal.py) + ALTER COLUMN.
 
-### PROTOCOLO DE ANÁLISIS (fijado ANTES de tener datos — 2026-07-17)
-- **Umbral de decisión para portar SSD**: ≥8pp de mejora en win rate
-  entre spring_confirmed=1 vs spring_confirmed=0.
-- **Muestra mínima por grupo**: 30 registros (cada grupo debe tener ≥30).
-- **Manejo de spring_confirmed=NULL** (sin velas suficientes para decidir):
-  se EXCLUYEN del análisis de comparación 1-vs-0 (no cuentan como
-  "no confirmado"). Se reportan aparte como "indeterminados".
-- NO se ajusta el umbral de éxito según lo que salga. Esto está fijado.
+### PLAN DE VALIDACIÓN WYCKOFF FASE C EN STRAT-F (fijado 2026-07-17)
+Protocolo experimental con puertas de decisión. Hermes NO avanza de fase
+sin confirmación explícita del operador.
+
+- **FASE 0 — Corregir la métrica (BLOQUEANTE, hecha):** reemplazar
+  spring_confirmed (bool) por spring_margin (float). Alcance: 4 archivos
+  (strat_fractal.py, scanner.py, trade_journal.py, tests). Prohibido tocar
+  if de aceptación/rechazo o score. Puerta: tests verdes + smoke DB con
+  decimales reales (NO solo 1/0/NULL). ✅ COMPLETADA (commit pendiente).
+
+- **FASE 1 — Recolección en demo (sin análisis):** correr bot en demo con
+  spring_margin logueándose en cada señal STRAT-F aceptada. Hasta >=40
+  filas con outcome resuelto (WIN/LOSS, excluyendo UNRESOLVED) y
+  spring_margin no-NULL. Regla dura: NADIE mira la tabla antes de 40.
+  Hermes reporta SOLO el conteo de filas, no win rate parcial.
+  Puerta: `SELECT COUNT(*) FROM candidates WHERE spring_margin IS NOT NULL
+  AND outcome IN ('WIN','LOSS')` >= 40.
+
+- **FASE 2 — Análisis (una vez, criterio fijado en Fase 0):**
+  1. Correlación (Pearson/Spearman) entre spring_margin y resultado binario
+     (1=WIN, 0=LOSS).
+  2. Buckets: 3-4 rangos de spring_margin (negativo / ~0 / amplio) y win
+     rate por bucket.
+  Criterio de decisión (FIJADO AHORA): si el bucket de MAYOR margen supera
+  al de MENOR por >=8pp de win rate, Y la correlación tiene signo
+  consistente con la hipótesis (margen mayor → más wins) → Fase 3A.
+  Si no → Fase 3B (no-go). Nadie ajusta el umbral de 8pp después de ver
+  los números.
+
+- **FASE 3A — GO: portar SSD** (solo si Fase 2 confirma). Portar
+  StochasticSpringDetector de smc_successer (SMC-SYSTEMS), NO reconstruir.
+  Feature SDD completa: specs/<feature>/{requirements,design,tasks}.md +
+  aprobación humana antes de código (AGENTS.md). Integración ya identificada:
+  evaluate_strat_f ~línea 255 antes del return. Validación antes de vivo:
+  walk-forward o repetir Fases 0-2 con el detector real en modo observacional
+  antes de dejarlo decidir aceptación/rechazo.
+
+- **FASE 3B — NO-GO: cerrar y documentar** (si Fase 2 no confirma).
+  Documentar en progress/history.md que Fase C no mostró edge medible con
+  esta muestra, con números exactos. NO se destruye spring_margin (campo
+  observacional pasivo, útil con más volumen/otro activo). Redirigir esfuerzo
+  al defecto ya identificado: gate m1_micro_confirm (una sola vela, sin
+  magnitud mínima del movimiento en contra).
+
+### PROTOCOLO DE ANÁLISIS (umbral fijado ANTES de datos — 2026-07-17)
+- **Umbral para portar SSD**: bucket de mayor spring_margin supera al de
+  menor por >=8pp de win rate, con correlación de signo consistente.
+- **Muestra mínima por grupo**: 30 registros.
+- **spring_margin IS NULL**: excluidos del análisis, reportados aparte.
+- NO se ajusta el umbral según lo que salga. Esto está fijado.
 
 

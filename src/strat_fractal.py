@@ -29,7 +29,7 @@ class StratFEvaluation:
     m15_context: str = "unknown"             # "range" | "uptrend" | "downtrend" | "broken"
     m5_event: str = "none"                   # "fractal_up" | "fractal_down" | "none"
     info: str = ""
-    spring_confirmed: "Optional[bool]" = None      # heurística 5m/1m: ¿el precio hizo spring sobre la banda? 1/0/NULL (None=indeterminado). SOLO observación, NO bloquea.
+    spring_margin: "Optional[float]" = None        # heurística 5m/1m: margen % del precio post-fractal vs banda del fractal. Positivo=spring limpio, negativo=rompió. None=indeterminado. SOLO observación, NO bloquea.
 
 
 def _fractal_up(candles: List[Candle], i: int) -> bool:
@@ -166,45 +166,43 @@ def _spring_heuristic_5m1m(
     fractal_idx: int,
     band: float,
     direction: str,
-) -> "Optional[bool]":
+) -> "Optional[float]":
     """Heurística OBSERVACIONAL de spring sobre la banda fractal.
 
-    NO es el StochasticSpringDetector (SSD) real de SMC-SYSTEMS. Es solo
-    una aproximación barata: ¿el precio hizo un mínimo IGUAL O MÁS ALTO
-    que la banda del fractal antes de romper al alza (CALL / fractal_down),
-    o un máximo igual o más bajo que la banda antes de romper a la baja
-    (PUT / fractal_up)?
+    NO es el StochasticSpringDetector (SSD) real de SMC-SYSTEMS. Devuelve el
+    MARGEN en % de la banda, no un bool:
+    - CALL (fractal_down, band=low): margen = (min(low post-fractal) - band) / band * 100
+        positivo = no rompió el suelo (spring más limpio cuanto más alto);
+        negativo = sí rompió por debajo de la banda.
+    - PUT (fractal_up, band=high): margen = (max(high post-fractal) - band) / band * 100
+        positivo = no rompió el techo; negativo = rompió por encima.
+    - Post-fractal = candles_5m[fractal_idx+1:fractal_idx+4]; si no hay suficientes
+      (fractal_idx == last_idx), usa las últimas 2-3 velas 1m recientes.
+    - Si tampoco alcanza -> None (NO forzar).
 
-    - CALL: mínimo de velas post-fractal >= band -> True (spring, no rompió suelo).
-            si alguna rompió por debajo -> False.
-    - PUT: espejo con el máximo.
-    - Si no hay velas 5m post-fractal suficientes (fractal_idx == last_idx),
-      usa las últimas 2-3 velas 1m recientes.
-    - Si tampoco alcanza -> None (indeterminado, NO forzar).
-
-    Devuelve Optional[bool] (1 / 0 / None). No altera ninguna decisión.
+    Devuelve Optional[float] (porcentaje) o None. No altera ninguna decisión.
     """
     if direction == "CALL":
         # fractal_down: band = low del fractal. Buscamos si rompió el suelo.
         post_5m = candles_5m[fractal_idx + 1: fractal_idx + 4]
         if len(post_5m) >= 1:
             post_min = min(c.low for c in post_5m)
-            return post_min >= band
+            return (post_min - band) / band * 100.0
         rec_1m = candles_1m[-3:] if len(candles_1m) >= 3 else candles_1m
         if len(rec_1m) >= 2:
             post_min = min(c.low for c in rec_1m)
-            return post_min >= band
+            return (post_min - band) / band * 100.0
         return None
     elif direction == "PUT":
         # fractal_up: band = high del fractal. Buscamos si rompió el techo.
         post_5m = candles_5m[fractal_idx + 1: fractal_idx + 4]
         if len(post_5m) >= 1:
             post_max = max(c.high for c in post_5m)
-            return post_max <= band
+            return (post_max - band) / band * 100.0
         rec_1m = candles_1m[-3:] if len(candles_1m) >= 3 else candles_1m
         if len(rec_1m) >= 2:
             post_max = max(c.high for c in rec_1m)
-            return post_max <= band
+            return (post_max - band) / band * 100.0
         return None
     return None
 
@@ -308,7 +306,7 @@ def evaluate_strat_f(
         detected_at=candles_5m[-1].ts if hasattr(candles_5m[-1], "ts") else 0.0,
         range_pct=0.0,
     )
-    spring_confirmed = _spring_heuristic_5m1m(
+    spring_margin = _spring_heuristic_5m1m(
         candles_5m, candles_1m, fractal_idx, band, direction
     )
     return StratFEvaluation(
@@ -321,6 +319,6 @@ def evaluate_strat_f(
         confirms=True,
         m15_context=ctx,
         m5_event=event,
-        spring_confirmed=spring_confirmed,
+        spring_margin=spring_margin,
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx}",
     )
