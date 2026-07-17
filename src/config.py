@@ -33,7 +33,7 @@ CONNECT_RETRIES = 3
 MAX_CONCURRENT_TRADES = 4 if MULTI_DURATION_DATA_COLLECTION else 1
 COOLDOWN_BETWEEN_ENTRIES = 30
 ENTRY_SYNC_TO_CANDLE = True
-ENTRY_MAX_LAG_SEC = 0.3
+ENTRY_MAX_LAG_SEC = 1.5  # ventana de entrada post-open de vela. 0.3 (commit 377c87e) era un error de unidad (creía ms, es segundos) -> rechazaba todo con lag real ~0.44s.
 ENTRY_REJECT_LAST_SEC = 2.0
 # Entry order sync: fire buy/sell at this candle open (seconds).
 # 300 = 5m open (aligns STRAT-F structure + DURATION_SEC often 300).
