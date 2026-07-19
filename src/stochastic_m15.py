@@ -107,10 +107,13 @@ def compute_stoch(
     # Contradicción con la dirección STRAT-F:
     # CALL quiere sobreventa (rebote) => SOBRECOMPRA sostenida lo contradice.
     # PUT quiere sobrecompra (rebote) => SOBREVENTA sostenida lo contradice.
+    # Normalize direction to lowercase for comparison (evaluate_strat_f returns
+    # "CALL"/"PUT" but this function expects "call"/"put").
+    _dir = (direction or "").lower()
     contradicts = 0
-    if direction == "call" and estado == "SOBRECOMPRA":
+    if _dir == "call" and estado == "SOBRECOMPRA":
         contradicts = 1
-    elif direction == "put" and estado == "SOBREVENTA":
+    elif _dir == "put" and estado == "SOBREVENTA":
         contradicts = 1
 
     return {

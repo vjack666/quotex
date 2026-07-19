@@ -96,7 +96,14 @@ def _setup_web_logging() -> None:
 
 # ── Import hub server (FastAPI app lives here) ────────────────────────────────
 from fastapi import WebSocket
-from hub.server import app as _hub_app, init as _hub_init, run_server as _hub_run_server, _open_browser, _auto_open_dashboard
+from hub.server import (
+    app as _hub_app,
+    init as _hub_init,
+    run_server as _hub_run_server,
+    _open_browser,
+    _auto_open_dashboard,
+    schedule_hub_auto_open,
+)
 from hub.hub_scanner import HubScanner
 
 # ── BotRunner import ──────────────────────────────────────────────────────────
@@ -127,25 +134,34 @@ async def lifespan(application):
 
     log.info("Hub dashboard ready. Bot is STOPPED — use /api/bot/start to begin.")
 
-    # Auto-open browser (unless disabled)
-    if os.environ.get("HUB_NO_OPEN", "").lower() not in ("1", "true", "yes"):
+    # Auto-open hub as soon as API is up (also scheduled from main(); this is backup).
+    if os.environ.get("HUB_NO_OPEN", "").strip().lower() not in ("1", "true", "yes"):
         port = getattr(application.state, "_port", 8080)
-        asyncio.create_task(_auto_open_dashboard("0.0.0.0", port))
+        schedule_hub_auto_open(int(port))
 
     yield
 
-    # Shutdown
+    # Shutdown (Ctrl+C, SIGTERM, or window close when handlers fire).
+    # Browser first; bot stop hard-capped at 2s so lifespan never hangs.
     log.info("Shutting down...")
-    await _runner.shutdown()
+    try:
+        from hub.server import kill_hub_browser_tree
+        kill_hub_browser_tree()
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(_runner.shutdown(), timeout=2.0)
+    except Exception:
+        pass
     poller.cancel()
     relay.cancel()
     try:
-        await poller
-    except asyncio.CancelledError:
+        await asyncio.wait_for(poller, timeout=0.5)
+    except (asyncio.CancelledError, Exception):
         pass
     try:
-        await relay
-    except asyncio.CancelledError:
+        await asyncio.wait_for(relay, timeout=0.5)
+    except (asyncio.CancelledError, Exception):
         pass
     log.info("App stopped.")
 
@@ -259,6 +275,9 @@ async def bot_stop():
         await _runner.stop(user=True)
         return {"status": "already_stopped", "state": _runner.state}
     await _runner.stop(user=True)
+    # Cierra también el server/app para que no quede en "reconectando…"
+    # ni procesos huérfanos (equivalente a FINALIZAR pero desde STOP).
+    _force_exit_cleanup(timeout_sec=2.0)
     return {"status": "stopped", "state": _runner.state}
 
 
@@ -324,6 +343,50 @@ async def update_config(body: dict[str, Any]):
     return {"status": "updated", "config": cfg}
 
 
+@_hub_app.post("/api/stake-mode")
+async def set_stake_mode(body: dict[str, Any]):
+    """Gestión Massaniello EN VIVO (solo monto, indep. del modo 24h).
+    body: {"mode": "fixed"|"massaniello", "stake": float}"""
+    import config as _cfg
+    mode = str(body.get("mode", "massaniello")).lower()
+    if mode not in ("fixed", "massaniello"):
+        return {"error": "mode debe ser 'fixed' o 'massaniello'"}
+    _cfg.STAKE_MODE = mode
+    if "stake" in body:
+        try:
+            _cfg.FIXED_STAKE_USD = max(0.1, float(body["stake"]))
+        except (TypeError, ValueError):
+            return {"error": "stake inválido"}
+    try:
+        _runner._config["STAKE_MODE"] = mode
+        _runner._config["FIXED_STAKE_USD"] = _cfg.FIXED_STAKE_USD
+    except Exception:
+        pass
+    logging.getLogger("app").info(
+        "STAKE MODE (Massaniello) → %s | fixed_stake=$%.2f",
+        mode, getattr(_cfg, "FIXED_STAKE_USD", 2.0),
+    )
+    return {"status": "updated", "stake_mode": mode,
+            "fixed_stake_usd": getattr(_cfg, "FIXED_STAKE_USD", 2.0)}
+
+
+@_hub_app.post("/api/daily-guard")
+async def set_daily_guard(body: dict[str, Any]):
+    """Modo 24h EN VIVO (solo frenos del guard, indep. de la gestión Massaniello).
+    body: {"enabled": true|false}  False = sin pausa por pérdida diaria (24h)."""
+    import config as _cfg
+    enabled = bool(body.get("enabled", True))
+    _cfg.DAILY_LOSS_GUARD_ENABLED = enabled
+    try:
+        _runner._config["DAILY_LOSS_GUARD_ENABLED"] = enabled
+    except Exception:
+        pass
+    logging.getLogger("app").info(
+        "DAILY LOSS GUARD (modo 24h) → %s", "ON" if enabled else "OFF"
+    )
+    return {"status": "updated", "daily_loss_guard_enabled": enabled}
+
+
 @_hub_app.get("/api/massaniello/preview")
 async def massaniello_preview(
     payout: int | None = None,
@@ -380,11 +443,22 @@ async def reset_session():
 
 @_hub_app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Shallow liveness: process is up and HTTP responds."""
     return {
         "status": "ok",
         "runner_state": _runner.state,
         "uptime_sec": (time.time() - _runner._started_at) if _runner._started_at else None,
+        "timestamp": time.time(),
+    }
+
+
+@_hub_app.get("/health/ready")
+async def health_ready():
+    """Readiness: hub HTTP works (bot may be stopped). Always 200 when app is up."""
+    return {
+        "status": "ready",
+        "runner_state": _runner.state,
+        "browser_profile": "quotex_hub_edge",
         "timestamp": time.time(),
     }
 
@@ -468,8 +542,71 @@ async def ws_logs(ws: WebSocket):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+_PID_LOCK_PATH = ROOT / "runtime" / "main.lock"
+
+
+def _stop_bot_for_exit():
+    """Return awaitable shutdown if bot is running; else None."""
+    if _runner.state in ("running", "starting"):
+        return _runner.shutdown()
+    return None
+
+
+def _force_exit_cleanup(timeout_sec: float = 2.0) -> None:
+    """Kill Edge hub tree first, then stop bot with hard timeout ≤ 2s."""
+    from hub.process_lifecycle import run_exit_cleanup
+    from hub.server import kill_hub_browser_tree
+
+    run_exit_cleanup(
+        kill_browser=kill_hub_browser_tree,
+        stop_bot_coro_or_fn=_stop_bot_for_exit,
+        timeout_sec=timeout_sec,
+    )
+    try:
+        from hub.process_lifecycle import release_pid_lock
+        release_pid_lock(_PID_LOCK_PATH)
+    except Exception:
+        pass
+
+
+def _install_exit_cleanup() -> None:
+    """On console X / Ctrl+C / atexit: hard-timeout cleanup so the process dies.
+
+    Never runs unbounded ``run_until_complete(shutdown)`` — max 2s then done.
+    CTRL_CLOSE_EVENT (window X) forces ``os._exit(0)`` within Windows' ~5s window.
+    """
+    import atexit
+
+    atexit.register(_force_exit_cleanup)
+
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            Handler = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+
+            def _ctrl_handler(ctrl_type: int) -> int:
+                # 0=Ctrl+C, 1=Ctrl+Break, 2=Close window (CTRL_CLOSE_EVENT)
+                if ctrl_type not in (0, 1, 2):
+                    return 0
+                _force_exit_cleanup(timeout_sec=2.0)
+                if ctrl_type == 2:
+                    # Window close: we handled cleanup; force exit so orphans die.
+                    os._exit(0)
+                    return 1  # noqa: unreachable — signals handled to OS
+                # Ctrl+C / Break: cleanup done; let default raise KeyboardInterrupt
+                return 0
+
+            # Keep reference so GC does not collect the callback
+            main._ctrl_handler_ref = Handler(_ctrl_handler)  # type: ignore[attr-defined]
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(main._ctrl_handler_ref, 1)
+        except Exception:
+            pass
+
+
 def main():
     import uvicorn
+    from hub.process_lifecycle import acquire_pid_lock, release_pid_lock
 
     parser = argparse.ArgumentParser(description="QUOTEX Web App")
     parser.add_argument("--port", type=int, default=8080, help="Port (default: 8080)")
@@ -479,6 +616,25 @@ def main():
 
     if args.no_browser:
         os.environ["HUB_NO_OPEN"] = "1"
+    else:
+        # Lazy default: always open hub unless user passed --no-browser.
+        os.environ.pop("HUB_NO_OPEN", None)
+
+    if not acquire_pid_lock(_PID_LOCK_PATH):
+        print(
+            f"[ERROR] Another QUOTEX webapp instance is already running "
+            f"(lock: {_PID_LOCK_PATH}). Stop it first or run stop_webapp.bat."
+        )
+        # Still try to open hub so the user lands on the running dashboard.
+        if not args.no_browser:
+            try:
+                schedule_hub_auto_open(int(args.port))
+                # Give the opener a moment, then exit this second launcher.
+                import time as _time
+                _time.sleep(1.5)
+            except Exception:
+                pass
+        sys.exit(1)
 
     # Store port in app state so lifespan can use it
     _hub_app.state._port = args.port
@@ -486,15 +642,36 @@ def main():
     print(f"  → QUOTEX Web App: http://localhost:{args.port}")
     print(f"  → Dashboard: http://localhost:{args.port}/")
     print(f"  → API docs: http://localhost:{args.port}/api/bot/status")
+    print(f"  → Hub opens automatically — no extra clicks")
+    print(f"  → Ctrl+C or close this window to stop server + hub browser")
     print()
 
-    uvicorn.run(
-        _hub_app,
-        host=args.host,
-        port=args.port,
-        log_level="info",
-        access_log=False,
-    )
+    _install_exit_cleanup()
+
+    # Start opener BEFORE uvicorn so it is already waiting when the port binds.
+    if not args.no_browser:
+        schedule_hub_auto_open(int(args.port))
+
+    try:
+        uvicorn_kwargs: dict[str, Any] = {
+            "host": args.host,
+            "port": args.port,
+            "log_level": "info",
+            "access_log": False,
+        }
+        # Graceful shutdown budget (uvicorn ≥ 0.15); ignore if unsupported.
+        try:
+            import inspect
+            if "timeout_graceful_shutdown" in inspect.signature(uvicorn.run).parameters:
+                uvicorn_kwargs["timeout_graceful_shutdown"] = 3
+        except Exception:
+            pass
+
+        uvicorn.run(_hub_app, **uvicorn_kwargs)
+    except KeyboardInterrupt:
+        _force_exit_cleanup(timeout_sec=2.0)
+    finally:
+        release_pid_lock(_PID_LOCK_PATH)
 
 
 if __name__ == "__main__":

@@ -35,11 +35,23 @@ class StratFReject:
 
 
 @dataclass
+class StratFMaturing:
+    """Zona STRAT-F en watchlist (solo R3 joven) esperando madurar."""
+
+    asset: str
+    direction: str         # CALL | PUT
+    bars_age: int
+    band: float
+    status: str = "maturing"
+
+
+@dataclass
 class StratFHubState:
     """Estado completo del panel HUB STRAT-F para un ciclo."""
 
     accepted: List[StratFRow] = field(default_factory=list)
     rejected: List[StratFReject] = field(default_factory=list)
+    maturing: List[StratFMaturing] = field(default_factory=list)
     total_assets: int = 0
     filtered_count: int = 0
     cycle: int = 0

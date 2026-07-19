@@ -74,6 +74,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Solo STRAT-A: deshabilita STRAT-MOMENTUM",
     )
+    p.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Modo recolección de datos 24/7 (solo PRACTICE, con guardas de seguridad)",
+    )
     return p
 
 
@@ -100,6 +105,12 @@ def _apply_runtime_config(args: argparse.Namespace) -> None:
         _cfg_flags.STRAT_MOMENTUM_ENABLED = False
         _cfg_flags.STRAT_A_RADAR_ENABLED = True
         cb.STRAT_A_RADAR_ENABLED = True
+
+    # Continuous data collection mode
+    if bool(args.continuous):
+        import config as _cfg_cont
+        _cfg_cont.CONTINUOUS_DATA_COLLECTION_MODE = True
+        cb.CONTINUOUS_DATA_COLLECTION_MODE = True
 
     # Modo HUB (solo lectura): fuerza escaneo por minuto y deshabilita trading.
     if bool(args.hub_readonly):
@@ -157,6 +168,10 @@ async def _run(args: argparse.Namespace) -> None:
     _apply_runtime_config(args)
     hub_readonly = bool(args.hub_readonly)
     run_once = bool(args.once)
+    # CLI --continuous OR config default (24/7 PRACTICE data collection)
+    continuous_mode = bool(args.continuous) or bool(
+        getattr(_cfg, "CONTINUOUS_DATA_COLLECTION_MODE", False)
+    )
 
     # ── Hub dashboard ──────────────────────────────────────────
     hub_scanner: Any = None
@@ -170,6 +185,14 @@ async def _run(args: argparse.Namespace) -> None:
             hub_task = start_server(port=hub_port)
         except Exception as exc:
             print(f"[main] HUB dashboard no disponible: {exc}")
+
+    # Continuous mode: force PRACTICE only
+    if continuous_mode and bool(args.real):
+        print(
+            "ERROR: --continuous solo permite cuenta PRACTICE. "
+            "El flag --real fue ignorado por seguridad.",
+        )
+        args.real = False
 
     if cb.RISK_MANAGER == "massaniello" and bool(args.real):
         print(
@@ -210,6 +233,7 @@ async def _run(args: argparse.Namespace) -> None:
             real_account=bool(args.real),
             loop_forever=not run_once,
             hub_scanner=hub_scanner,
+            continuous_mode=continuous_mode,
         )
 
 

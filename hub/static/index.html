@@ -636,6 +636,7 @@
       <div class="row"><span class="k">Precio actual</span><span class="v" id="t-cur">–</span></div>
       <div class="row"><span class="k">Variación</span><span class="v" id="t-delta">–</span></div>
       <div class="row"><span class="k">Monto / Payout</span><span class="v" id="t-amt">–</span></div>
+      <div class="row" id="order-attempt-row"><span class="k">Último intento</span><span class="v" id="t-order-attempt">–</span></div>
     </div>
   </div>
 
@@ -689,6 +690,15 @@
       <tbody id="rej-body"><tr><td class="empty" colspan="2">ninguna rechazada</td></tr></tbody>
     </table>
     <div class="barwrap rej"><i id="bar-rej" style="width:0%"></i></div>
+  </div>
+
+  <!-- MADURANDO (R3 young watchlist) -->
+  <div class="card col-12">
+    <h2>⏳ Madurando <span class="sub2" id="mat-count">0</span></h2>
+    <table>
+      <thead><tr><th>Activo</th><th>Dir</th><th>Edad M5</th><th>Banda</th><th>Estado</th></tr></thead>
+      <tbody id="mat-body"><tr><td class="empty" colspan="5">ninguna zona madurando</td></tr></tbody>
+    </table>
   </div>
 
 </div><!-- /grid op -->
@@ -838,6 +848,11 @@
         <div class="cfg-field"><label>Horas de trabajo seguido</label><input type="number" id="cfg-work-hours" min="0.5" max="24" step="0.5" value="2"></div>
         <div class="cfg-field"><label>Horas de descanso</label><input type="number" id="cfg-rest-hours" min="0" max="24" step="0.5" value="1"></div>
         <div class="cfg-field"><label>Sesiones máx. por día (0=ilimitado)</label><input type="number" id="cfg-max-day" min="0" max="200" step="1" value="0"></div>
+        <div class="cfg-field"><label>Stake fijo USD (Gestión Massaniello OFF)</label><input type="number" id="fixed-stake" min="0.1" max="1000" step="0.5" value="2"></div>
+        <button class="ctrl-btn start" id="btn-mass" type="button" onclick="toggleMassaniello()">GESTIÓN MASSANIELLO: ON</button>
+        <span class="k">Gestión Massaniello: <span class="v accent" id="mass-state">massaniello</span></span>
+        <button class="ctrl-btn start" id="btn-24h" type="button" onclick="toggle24hMode()">MODO 24H: ON</button>
+        <span class="k">Modo 24h (sin límite diario): <span class="v accent" id="guard-state">on</span></span>
       </div>
 
       <div class="cfg-actions">
@@ -943,12 +958,53 @@ function dirPill(d){
 function setText(id, v){ const e=document.getElementById(id); if(e) e.textContent = (v===null||v===undefined||v==="")?"–":v; }
 
 let lastBalance = null;
+function resolveStratF(s){
+  // Always pick the source with MORE rows. Empty [] at root used to win because
+  // in JS empty arrays are truthy — panel looked permanently empty.
+  s = s || {};
+  const nested = (s.strat_f && typeof s.strat_f === "object") ? s.strat_f : {};
+  const rA = Array.isArray(s.accepted) ? s.accepted : [];
+  const rR = Array.isArray(s.rejected) ? s.rejected : [];
+  const rM = Array.isArray(s.maturing) ? s.maturing : [];
+  const nA = Array.isArray(nested.accepted) ? nested.accepted : [];
+  const nR = Array.isArray(nested.rejected) ? nested.rejected : [];
+  const nM = Array.isArray(nested.maturing) ? nested.maturing : [];
+  const rootN = rA.length + rR.length;
+  const nestN = nA.length + nR.length;
+  // Prefer nested (bot panel) when it has at least as many rows as root.
+  if (nestN > 0 && nestN >= rootN) {
+    return {
+      accepted: nA,
+      rejected: nR,
+      maturing: nM.length ? nM : rM,
+      total_assets: nested.total_assets != null ? nested.total_assets : (s.total_assets || nestN),
+      filtered_count: nested.filtered_count != null ? nested.filtered_count : nA.length,
+      cycle: nested.cycle != null ? nested.cycle : s.cycle,
+    };
+  }
+  if (rootN > 0) {
+    return {
+      accepted: rA,
+      rejected: rR,
+      maturing: rM.length ? rM : nM,
+      total_assets: s.total_assets != null ? s.total_assets : rootN,
+      filtered_count: s.filtered_count != null ? s.filtered_count : rA.length,
+      cycle: s.cycle,
+    };
+  }
+  return {
+    accepted: [],
+    rejected: [],
+    maturing: nM.length ? nM : rM,
+    total_assets: 0,
+    filtered_count: 0,
+    cycle: 0,
+  };
+}
+
 function render(s){
   if(!s) return;
-  // Prioriza señales a nivel raíz del snapshot (lo que empuja el server en
-  // producción: scanner.get_state() => accepted/rejected). strat_f es fallback
-  // legacy. Evita elegir strat_f vacío cuando la raíz tiene datos.
-  const sf = (s.accepted || s.rejected) ? s : (s.strat_f || {});
+  const sf = resolveStratF(s);
 
   // ---- Balance ----
   const bal = s.known_balance;
@@ -983,6 +1039,25 @@ function render(s){
   } else {
     setText("t-asset","–");
     document.getElementById("trade-sub").textContent = "sin posición";
+  }
+
+  // ---- Último intento de orden ----
+  const oa = s.last_order_attempt;
+  const oaLabels = {
+    waiting_open: "esperando open",
+    sending: "enviando",
+    accepted: "aceptada",
+    failed: "fallida",
+  };
+  if(oa && oa.status){
+    const st = oaLabels[oa.status] || oa.status;
+    const bits = [st];
+    if(oa.asset) bits.push(oa.asset);
+    if(oa.direction) bits.push(String(oa.direction).toUpperCase());
+    if(oa.reason) bits.push(oa.reason);
+    setText("t-order-attempt", bits.join(" · "));
+  } else {
+    setText("t-order-attempt", "–");
   }
 
   // ---- Último resultado ----
@@ -1035,8 +1110,9 @@ function render(s){
     const tr=document.createElement("tr");
     const strength = (c.strength!=null) ? c.strength : (c.score!=null? c.score : null);
     const ctx = [c.ctx, c.event].filter(Boolean).join(" · ");
+    const dir = String(c.direction||"").toLowerCase();
     tr.innerHTML = `<td class="asset">${c.asset||""}</td>`+
-      `<td class="${(c.direction||"")==="call"?"d-call":"d-put"}">${(c.direction||"").toUpperCase()}</td>`+
+      `<td class="${dir==="call"?"d-call":"d-put"}">${dir.toUpperCase()||"–"}</td>`+
       `<td class="score">${strength!=null? (typeof strength==="number"? strength.toFixed(1): strength) : "–"}</td>`+
       `<td>${c.payout!=null?c.payout+"%":"–"}</td>`+
       `<td>${ctx||"–"}</td>`+
@@ -1055,6 +1131,32 @@ function render(s){
     rejB.appendChild(tr);
   });
 
+  // ---- STRAT-F madurando (R3 young watchlist) ----
+  const mat = sf.maturing || [];
+  const matB = document.getElementById("mat-body");
+  const matCount = document.getElementById("mat-count");
+  if(matB && matCount){
+    matB.innerHTML="";
+    matCount.textContent = mat.length;
+    if(mat.length===0){
+      matB.innerHTML='<tr><td class="empty" colspan="5">ninguna zona madurando</td></tr>';
+    } else {
+      mat.forEach(c=>{
+        const tr=document.createElement("tr");
+        const dir = String(c.direction||"").toLowerCase();
+        const band = (c.band!=null && c.band!=="")
+          ? (typeof c.band==="number" ? c.band.toFixed(5) : c.band)
+          : "–";
+        tr.innerHTML = `<td class="asset">${c.asset||""}</td>`+
+          `<td class="${dir==="call"?"d-call":"d-put"}">${dir.toUpperCase()||"–"}</td>`+
+          `<td>${c.bars_age!=null?c.bars_age:"–"}</td>`+
+          `<td>${band}</td>`+
+          `<td>${c.status||"maturing"}</td>`;
+        matB.appendChild(tr);
+      });
+    }
+  }
+
   // ---- Barras aceptadas/rechazadas ----
   const total = acc.length + rej.length;
   const pct = total ? Math.round(acc.length/total*100) : 0;
@@ -1069,10 +1171,15 @@ function goDown(){ dot.className="dot down"; txt.textContent="reconectando…"; 
 
 function applyData(data){
   if(!data) return;
-  // state_update / init llevan data = snapshot; tambien puede venir strat_f suelto
-  if(data.strat_f || data.known_balance!==undefined || data.masaniello!==undefined
-     || data.accepted || data.rejected){ render(data); }
-  else if(data.state && (data.state.strat_f || data.state.known_balance!==undefined || data.state.accepted)){ render(data.state); }
+  // Always re-render signals for any snapshot-like payload (do not gate on
+  // truthiness of accepted:[], which is truthy-but-empty in JS).
+  if(data.strat_f || data.accepted !== undefined || data.rejected !== undefined
+     || data.known_balance!==undefined || data.masaniello!==undefined
+     || data.total_scans!==undefined){
+    render(data);
+  } else if(data.state){
+    render(data.state);
+  }
   // Bot runner status
   if(data.runner) updateRunnerUI(data.runner);
   else if(data.state && data.state.runner) updateRunnerUI(data.state.runner);
@@ -1083,9 +1190,17 @@ const ws = new WebSocket(((location.protocol==='https:')?'wss://':'ws://')+locat
 ws.onmessage = (e)=>{ try{
   const m = JSON.parse(e.data);
   if(m.type==="ping" || m.type==="pong") return;
-  // Session end → modal with Massaniello summary (must be on main handler)
+  // Soft cycle roll (24/7 auto-continue) — no UI notice; bot keeps running
+  if(m.type==="session_cycle_rolled"){
+    return;
+  }
+  // Session end modal only when the bot actually stops (not auto-continue 24/7)
   if(m.type==="session_complete" || m.type==="session_completed"){
-    showCycleModal(m.data || {});
+    const payload = m.data || {};
+    if(payload.auto_continue){
+      return;
+    }
+    showCycleModal(payload);
     return;
   }
   if(m.type==="init" || m.type==="state_update"){ applyData(m.data); }
@@ -1109,7 +1224,16 @@ let _lastModalKey = null;
 
 // snapshot inicial por HTTP (por si el WS tarda)
 fetch('/api/state').then(r=>r.json()).then(applyData).catch(()=>{});
-fetch('/api/strat_f').then(r=>r.json()).then(d=>{ if(d && d.accepted) render({strat_f:d}); }).catch(()=>{});
+fetch('/api/strat_f').then(r=>r.json()).then(d=>{
+  if(!d) return;
+  // Force both root and nested so resolveStratF always sees rows.
+  render(Object.assign({}, d, {
+    accepted: Array.isArray(d.accepted) ? d.accepted : [],
+    rejected: Array.isArray(d.rejected) ? d.rejected : [],
+    maturing: Array.isArray(d.maturing) ? d.maturing : [],
+    strat_f: d,
+  }));
+}).catch(()=>{});
 _brBindDirtyHandlers();
 refreshBankroll(true); // first load only fills inputs from server
 if(typeof pollRunnerStatus==="function") pollRunnerStatus();
@@ -1341,6 +1465,49 @@ function updateSessionInfo(session){
 
 // ── Trade History ────────────────────────────────────────────────────────────
 
+async function toggleMassaniello() {
+  const stake = parseFloat(document.getElementById('fixed-stake').value) || 2;
+  const cur = document.getElementById('mass-state').textContent.trim();
+  const mode = cur === 'fixed' ? 'massaniello' : 'fixed';
+  try {
+    const r = await fetch('/api/stake-mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode, stake})
+    });
+    const j = await r.json();
+    if (j.status === 'updated') {
+      document.getElementById('mass-state').textContent = j.stake_mode;
+      const btn = document.getElementById('btn-mass');
+      btn.textContent = j.stake_mode === 'fixed' ? 'GESTIÓN MASSANIELLO: OFF' : 'GESTIÓN MASSANIELLO: ON';
+      btn.className = j.stake_mode === 'fixed' ? 'ctrl-btn start active' : 'ctrl-btn start';
+    }
+  } catch (e) {
+    console.error('toggleMassaniello falló', e);
+  }
+}
+
+async function toggle24hMode() {
+  const cur = document.getElementById('guard-state').textContent.trim();
+  const enabled = cur === 'off' ? true : false;
+  try {
+    const r = await fetch('/api/daily-guard', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled})
+    });
+    const j = await r.json();
+    if (j.status === 'updated') {
+      document.getElementById('guard-state').textContent = j.daily_loss_guard_enabled ? 'on' : 'off';
+      const btn = document.getElementById('btn-24h');
+      btn.textContent = j.daily_loss_guard_enabled ? 'MODO 24H: ON' : 'MODO 24H: OFF';
+      btn.className = j.daily_loss_guard_enabled ? 'ctrl-btn start' : 'ctrl-btn start active';
+    }
+  } catch (e) {
+    console.error('toggle24hMode falló', e);
+  }
+}
+
 function renderTodayTrades(trades){
   const body = document.getElementById("today-body");
   if(!body) return;
@@ -1457,6 +1624,11 @@ function initResizeHandles(){
 }
 
 // ── Session Modal ────────────────────────────────────────────────────────────
+
+/** Kept for compatibility; 24/7 cycle rolls are silent (no toast / no banner). */
+function showCycleRolledToast(_data) {
+  // Intentionally empty — product no longer shows "session/cycle ended" notices.
+}
 
 function showCycleModal(data) {
   data = data || {};

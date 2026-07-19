@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 
-from .strat_f_state import StratFHubState, StratFReject, StratFRow
+from .strat_f_state import StratFHubState, StratFMaturing, StratFReject, StratFRow
 
 log = logging.getLogger("hub.strat_f_panel")
 
@@ -33,6 +33,7 @@ class StratFPanel:
         *,
         accepted: list[StratFRow] | None = None,
         rejected: list[StratFReject] | None = None,
+        maturing: list[StratFMaturing] | None = None,
         total_assets: int = 0,
         cycle: int = 0,
         timestamp: float | None = None,
@@ -43,16 +44,18 @@ class StratFPanel:
         self.state = StratFHubState(
             accepted=list(accepted or []),
             rejected=list(rejected or []),
+            maturing=list(maturing or []),
             total_assets=int(total_assets),
             filtered_count=len(accepted or []),
             cycle=int(cycle) or self.cycle,
             timestamp=float(now),
         )
         log.info(
-            "STRAT-F | ciclo=%d aceptadas=%d rechazadas=%d",
+            "STRAT-F | ciclo=%d aceptadas=%d rechazadas=%d madurando=%d",
             self.state.cycle,
             len(self.state.accepted),
             len(self.state.rejected),
+            len(self.state.maturing),
         )
         return self.state
 

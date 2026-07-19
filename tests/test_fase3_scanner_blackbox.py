@@ -66,11 +66,13 @@ async def test_scan_records_accepted_and_rejected_in_black_box():
     bbr.BLACK_BOX_DB = Path(tmp) / "bb_test.db"
     bbr.BLACK_BOX_LOG = Path(tmp) / "bb_test.jsonl"
 
-    stoch_value = {"k": 20, "d": 22, "estado": "SOBREVENTA", "cruce": None, "divergencia": None, "contradicts": 0}
+    # k=50 (Z3) avoids hard-mode stoch veto (PUT+Z1 / CALL+Z5).
+    stoch_value = {"k": 50, "d": 52, "estado": "NEUTRO", "cruce": None, "divergencia": None, "contradicts": 0}
 
     with patch.object(sc, "evaluate_strat_f", side_effect=lambda *a, **k: _fake_eval("put", "ACCEPTED")), \
          patch.object(sc, "compute_stoch", return_value=stoch_value) as mock_stoch, \
-         patch.object(bbr, "get_black_box") as mock_bb:
+         patch.object(sc, "get_black_box") as mock_bb, \
+         patch.object(sc._runtime_config, "STOCH_HELP_MODE", "off"):
         rec = bbr.BlackBoxRecorder()
         mock_bb.return_value = rec
 
@@ -99,5 +101,7 @@ async def test_scan_records_accepted_and_rejected_in_black_box():
     assert decisions.get("USDCOP_otc") == "ACCEPTED"
     assert decisions.get("EURUSD_otc") == "REJECTED_STRAT_F"
     stoch_rows = [r[2] for r in rows if r[2]]
-    assert stoch_rows and "SOBREVENTA" in stoch_rows[0]
+    assert stoch_rows and "NEUTRO" in stoch_rows[0]
+    # Help fields nested in stoch_m15 even when mode is off (R15).
+    assert "zone" in stoch_rows[0]
     assert all(r[3] for r in rows)

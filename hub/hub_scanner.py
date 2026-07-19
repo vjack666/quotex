@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
-from .strat_f_state import StratFHubState, StratFReject, StratFRow
+from .strat_f_state import StratFHubState, StratFMaturing, StratFReject, StratFRow
 
 log = logging.getLogger("hub_scanner")
 
@@ -36,6 +36,7 @@ class HubScanner:
         *,
         accepted: Sequence[StratFRow] = (),
         rejected: Sequence[StratFReject] = (),
+        maturing: Sequence[StratFMaturing] = (),
         total_assets: int = 0,
         cycle: int = 0,
         timestamp: float | None = None,
@@ -50,6 +51,7 @@ class HubScanner:
         self.state = StratFHubState(
             accepted=list(accepted),
             rejected=list(rejected),
+            maturing=list(maturing),
             total_assets=int(total_assets),
             filtered_count=len(accepted),
             cycle=int(cycle) or self.scan_count,
@@ -57,10 +59,11 @@ class HubScanner:
         )
         self.scan_event.set()
         log.info(
-            "STRAT-F | ciclo=%d aceptadas=%d rechazadas=%d",
+            "STRAT-F | ciclo=%d aceptadas=%d rechazadas=%d madurando=%d",
             self.state.cycle,
             len(self.state.accepted),
             len(self.state.rejected),
+            len(self.state.maturing),
         )
         return self.state
 
@@ -69,6 +72,11 @@ class HubScanner:
     def get_state(self) -> StratFHubState:
         """Devuelve el estado actual del HUB (lo usa server.py)."""
         return self.state
+
+    def set_state(self, state: StratFHubState) -> None:
+        """Replace state without bumping scan_count (used to mirror bot panel)."""
+        self.state = state
+        self.scan_event.set()
 
     @property
     def last_state(self) -> StratFHubState:

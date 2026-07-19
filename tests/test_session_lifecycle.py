@@ -117,7 +117,7 @@ class TestTickStopOnMeta:
 
 class TestExecutorNotifiesSessionManager:
     def test_maybe_stop_marks_session_completed(self):
-        """Executor must mark COMPLETED before resetting Massaniello."""
+        """Classic path: with auto-reset OFF, mark COMPLETED and stop scan."""
         from executor import TradeExecutor
 
         bot = MagicMock()
@@ -133,11 +133,69 @@ class TestExecutorNotifiesSessionManager:
 
         client = MagicMock()
         ex = TradeExecutor(client, bot, session_manager=sm)
-        # Force virtual capital path so reset runs
+        # Force virtual capital path so reset runs; disable auto-continue
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("executor.MASSANIELLO_VIRTUAL_CAPITAL", 30.0)
             mp.setattr("executor.RISK_MANAGER", "massaniello")
+            mp.setattr("executor._cfg.SESSION_AUTO_RESET_ON_COMPLETE", False)
+            mp.setattr("executor._cfg.CONTINUOUS_DATA_COLLECTION_MODE", False)
             ex._maybe_stop_massaniello_session()
 
         assert bot.session_stop_hit is True
         assert sm.state == SessionState.COMPLETED
+
+    def test_maybe_stop_auto_reset_keeps_scanning(self):
+        """Auto-continue: reset Massaniello, no stop, no session-ended UI events."""
+        from executor import TradeExecutor
+        from unittest.mock import patch
+        import types
+
+        bot = MagicMock()
+        bot.session_stop_hit = True  # old path would leave this True
+        bot.massaniello = MassanielloRiskManager(operations=5, expected_wins=3, session_max_min=60)
+        bot.massaniello.set_balance(100.0)
+        for _ in range(3):
+            bot.massaniello.register_win(1.0, 92)
+        bot.massaniello_persistence = MagicMock()
+
+        sm = SessionManager()
+        sm.start()
+        sm.session_completed = MagicMock()  # type: ignore[method-assign]
+
+        client = MagicMock()
+        ex = TradeExecutor(client, bot, session_manager=sm)
+
+        published: list[tuple[str, dict]] = []
+
+        class _Bus:
+            def publish(self, name: str, payload=None):
+                published.append((name, payload or {}))
+
+        fake_events = types.ModuleType("hub.events")
+        fake_events.event_bus = _Bus()  # type: ignore[attr-defined]
+        fake_hub = types.ModuleType("hub")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("executor.MASSANIELLO_VIRTUAL_CAPITAL", 30.0)
+            mp.setattr("executor.RISK_MANAGER", "massaniello")
+            mp.setattr("executor._cfg.SESSION_AUTO_RESET_ON_COMPLETE", True)
+            mp.setattr("executor._cfg.CONTINUOUS_DATA_COLLECTION_MODE", True)
+            with patch.dict(
+                "sys.modules",
+                {"hub": fake_hub, "hub.events": fake_events},
+            ):
+                ex._maybe_stop_massaniello_session()
+
+        assert bot.session_stop_hit is False
+        sm.session_completed.assert_not_called()
+        # Fresh Massaniello after reset (0 wins)
+        assert bot.massaniello.wins == 0
+        assert bot.massaniello.losses == 0
+        # Session stays active for scanning (not COMPLETED waiting for user)
+        assert sm.state == SessionState.SCANNING
+        # No session-ended notices in 24/7 auto-continue
+        assert published == []
+        assert not any(
+            n in ("session_completed", "session_complete", "session_cycle_rolled")
+            for n, _ in published
+        )

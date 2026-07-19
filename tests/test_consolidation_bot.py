@@ -18,8 +18,8 @@ if str(SRC) not in sys.path:
 
 def test_consolidation_bot_under_500_lines():
     lines = (SRC / "consolidation_bot.py").read_text(encoding="utf-8").splitlines()
-    # Soft ceiling: facade grows with lifecycle/session/schedule guards.
-    assert len(lines) <= 1100
+    # Soft ceiling: facade grows with lifecycle/session/schedule/continuous guards.
+    assert len(lines) <= 1200
 
 
 def test_consolidation_bot_main_signature_unchanged():
@@ -29,7 +29,7 @@ def test_consolidation_bot_main_signature_unchanged():
         importlib.reload(cb)
         sig = inspect.signature(cb.main)
         params = list(sig.parameters.keys())
-        assert params == ["dry_run", "real_account", "loop_forever", "greylist_assets", "hub_scanner"]
+        assert params == ["dry_run", "real_account", "loop_forever", "greylist_assets", "hub_scanner", "continuous_mode"]
 
 
 def _parser_option_strings(parser: argparse.ArgumentParser) -> set[str]:
@@ -104,6 +104,7 @@ def test_apply_runtime_config_mutates_constants():
             scan_lead_sec=20.0,
             strat_a_only=False,
             hub_readonly=False,
+            continuous=False,
         )
         main_mod._apply_runtime_config(args)
         assert cb.MIN_PAYOUT == 75

@@ -18,8 +18,8 @@ MIN_PAYOUT = 80  # web → min_payout (Bankroll card); fallback primer arranque
 DURATION_SEC = 300  # expiración de la orden: 5 min (antes 180s = 3 min)
 # Multi-duration data collection: one signal → N parallel expiries for A/B.
 # When True, each entry places orders for every MULTI_DURATION_SECS value.
-MULTI_DURATION_DATA_COLLECTION = True
-MULTI_DURATION_SECS = (60, 300, 600, 900)  # 1m, 5m, 10m, 15m
+MULTI_DURATION_DATA_COLLECTION = False  # solo vencimiento 5min (300s)
+MULTI_DURATION_SECS = (300,)             # 1m/10m/15m desactivados por pedido del usuario
 # Massaniello: only register win/loss on this duration so session ops don't burn 4x.
 MULTI_DURATION_MASSANIELLO_PRIMARY_SEC = 300
 # Fire all legs via asyncio.gather after a single open-sync/prewarm/M1 check.
@@ -249,6 +249,21 @@ CONTINUOUS_MIN_TRADE_INTERVAL_SEC = 30  # minimum seconds between entries (rate 
 # cycle end does not stop the bot; user does not need to press Iniciar.
 # Set both to False to restore "stop and wait for user" behavior.
 SESSION_AUTO_RESET_ON_COMPLETE = True
+
+# ── Stake / Gestión Massaniello ──────────────────────────────────────────
+# STAKE_MODE controla SOLO el monto de la operación (gestión Massaniello):
+#   "massaniello" → monto calculado por MassanielloRiskManager (gestión ON).
+#   "fixed"       → monto fijo FIXED_STAKE_USD por operación (gestión OFF).
+# Es INDEPENDIENTE del modo 24h (DAILY_LOSS_GUARD_ENABLED de abajo).
+STAKE_MODE = "massaniello"   # "massaniello" | "fixed"
+FIXED_STAKE_USD = 2.0        # monto fijo por operación cuando STAKE_MODE="fixed"
+
+# ── Modo 24h (sin límite de pérdida diaria) ─────────────────────────────
+# Controla SOLO los frenos del ContinuousModeGuard (pausa por pérdida diaria
+# y racha de pérdidas). Es INDEPENDIENTE de STAKE_MODE:
+#   True  → guard activo (puede pausar el bot al alcanzar el límite).
+#   False → modo 24h: sin pausa, escaneo continuo (sin importar el stake).
+DAILY_LOSS_GUARD_ENABLED = True
 
 # Diversification
 # Multi-duration places N legs on the same asset; raise per-asset / simultaneous caps.

@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -81,16 +82,53 @@ def _serialize(obj: Any) -> Any:
 
 
 def _build_snapshot() -> dict:
-    if not _scanner:
-        base = {"status": "waiting"}
-    else:
+    # Prefer bot.strat_f_panel as source of truth; keep HubScanner as fallback.
+    bot = _bot_ref
+    panel = None
+    if bot is not None and getattr(bot, "strat_f_panel", None) is not None:
+        panel = bot.strat_f_panel
+    elif _panel is not None:
+        panel = _panel
+
+    if panel is not None:
+        panel_state_obj = panel.get_state()
+        panel_state = _serialize(panel_state_obj)
+        # Keep HubScanner in sync so root accepted/rejected match the bot panel.
+        if _scanner is not None and hasattr(_scanner, "set_state"):
+            try:
+                _scanner.set_state(panel_state_obj)
+            except Exception:
+                pass
+        base = dict(panel_state) if isinstance(panel_state, dict) else {}
+        base["status"] = "ok"
+        base["strat_f"] = panel_state
+        base["accepted"] = list(base.get("accepted") or [])
+        base["rejected"] = list(base.get("rejected") or [])
+        base["maturing"] = list(base.get("maturing") or [])
+    elif _scanner:
         state = _scanner.get_state()
         raw = _serialize(state)
         raw["status"] = "ok"
         base = raw
-    # Estado STRAT-F (panel nuevo, visible).
-    if _panel is not None:
-        base["strat_f"] = _serialize(_panel.get_state())
+        base["strat_f"] = {
+            "accepted": list(raw.get("accepted") or []),
+            "rejected": list(raw.get("rejected") or []),
+            "maturing": list(raw.get("maturing") or []),
+            "total_assets": raw.get("total_assets", 0),
+            "filtered_count": raw.get("filtered_count", 0),
+            "cycle": raw.get("cycle", 0),
+            "timestamp": raw.get("timestamp", 0),
+        }
+        base["maturing"] = list(raw.get("maturing") or [])
+    else:
+        base = {
+            "status": "waiting",
+            "accepted": [],
+            "rejected": [],
+            "maturing": [],
+            "strat_f": {"accepted": [], "rejected": [], "maturing": []},
+        }
+
     # Enriquecer con datos vivos del bot (balance, operación, Massaniello,
     # actividad). El bot es la fuente de verdad; StratFHubState no tiene estos
     # campos, así que se leen aquí directamente en vez de inyectarlos en el
@@ -174,6 +212,11 @@ def _enrich_with_bot(base: dict) -> None:
             "can_enter": st.get("can_enter"),
         }
 
+    # ── Último intento de orden (place-order UX) ──────────
+    attempt = getattr(bot, "last_order_attempt", None)
+    if attempt is not None:
+        base["last_order_attempt"] = attempt
+
 
 async def _broadcast(msg: str) -> None:
     stale: list[WebSocket] = []
@@ -222,7 +265,13 @@ if STATIC_DIR.exists():
 @app.get("/")
 async def index():
     if INDEX_PATH.exists():
-        return HTMLResponse(INDEX_PATH.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            INDEX_PATH.read_text(encoding="utf-8"),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
     return HTMLResponse("<h1>Quotex HUB</h1><p>index.html not found</p>")
 
 
@@ -243,9 +292,21 @@ async def api_state():
 
 @app.get("/api/strat_f")
 async def api_strat_f():
-    if _panel is None:
-        return {"status": "waiting"}
-    return _serialize(_panel.get_state())
+    bot = _bot_ref
+    panel = None
+    if bot is not None and getattr(bot, "strat_f_panel", None) is not None:
+        panel = bot.strat_f_panel
+    elif _panel is not None:
+        panel = _panel
+    if panel is None:
+        return {
+            "status": "waiting",
+            "accepted": [],
+            "rejected": [],
+            "total_assets": 0,
+            "filtered_count": 0,
+        }
+    return _serialize(panel.get_state())
 
 
 @app.get("/api/blackbox")
@@ -310,61 +371,204 @@ def used_port() -> Optional[int]:
     return _PORT_RESOLVED
 
 
-def _open_browser(url: str) -> None:
-    """Open Microsoft Edge to the dashboard URL.
+def _hub_edge_profile_dir() -> str:
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "quotex_hub_edge")
 
-    Se lanza en modo app con un perfil dedicado (--user-data-dir) para que sea
-    un proceso propio y killable: así podemos cerrar la ventana al apagar el
-    server (Ctrl+C). Con --new-window Edge delega en una instancia existente y
-    el proceso muere al instante, dejando la ventana huérfana.
+
+def _hub_edge_already_running() -> bool:
+    """True if a dedicated Edge hub window (quotex_hub_edge profile) is alive."""
+    try:
+        # Windows: avoid spawning a second app window for the same profile.
+        out = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
+                "Where-Object { $_.CommandLine -and ($_.CommandLine -like '*quotex_hub_edge*') } | "
+                "Measure-Object).Count",
+            ],
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+        )
+        return int((out or "0").strip() or "0") > 0
+    except Exception:
+        return False
+
+
+def _open_browser(url: str) -> None:
+    """Open exactly ONE Microsoft Edge app window for the dashboard.
+
+    Uses a dedicated profile (--user-data-dir=quotex_hub_edge). If that window
+    is already running, tries to raise it (second --app launch with same profile)
+    instead of silently doing nothing.
     """
     global _browser_proc
-    import tempfile
-    profile_dir = os.path.join(tempfile.gettempdir(), "quotex_hub_edge")
+    if _browser_proc is not None and _browser_proc.poll() is None:
+        print(
+            f"[HUB] Browser already tracked (pid={_browser_proc.pid}); raising {url}",
+            flush=True,
+        )
+    elif _hub_edge_already_running():
+        print(f"[HUB] Edge hub profile already running; re-focusing {url}", flush=True)
+
+    profile_dir = _hub_edge_profile_dir()
     edge_paths = [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
     ]
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        # Detach Edge from this console so it always appears as its own window.
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+        popen_kwargs["close_fds"] = True
+
     for path in edge_paths:
         if Path(path).exists():
-            _browser_proc = subprocess.Popen(
-                [path, f"--app={url}", f"--user-data-dir={profile_dir}", "--no-first-run"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return
-    # Fallback: let OS decide (no killable, no se cerrará automáticamente)
+            try:
+                _browser_proc = subprocess.Popen(
+                    [
+                        path,
+                        f"--app={url}",
+                        f"--user-data-dir={profile_dir}",
+                        "--no-first-run",
+                        "--new-window",
+                    ],
+                    **popen_kwargs,
+                )
+                print(f"[HUB] Opened Edge app window → {url}", flush=True)
+                return
+            except Exception as e:
+                print(f"[HUB] Edge launch failed: {e}", flush=True)
+                break
+    # Fallback only if Edge missing — still avoid new=1 second window when possible
     try:
         import webbrowser
         webbrowser.open(url, new=0, autoraise=True)
-    except Exception:
-        pass
+        print(f"[HUB] Opened default browser → {url}", flush=True)
+    except Exception as e:
+        print(f"[HUB] Could not open browser: {e}", flush=True)
+
+
+_hub_open_lock = threading.Lock()
+_hub_open_started = False
+
+
+def schedule_hub_auto_open(port: int) -> None:
+    """Open the hub as soon as the API answers — daemon thread, no extra window.
+
+    Called from app.py main() so lazy users get the dashboard without clicking.
+    Safe to call multiple times (only one opener runs).
+    """
+    global _hub_open_started
+    flag = (os.environ.get("HUB_NO_OPEN") or "").strip().lower()
+    if flag in ("1", "true", "yes"):
+        print("[HUB] HUB_NO_OPEN set — browser auto-open skipped.", flush=True)
+        return
+    with _hub_open_lock:
+        if _hub_open_started:
+            return
+        _hub_open_started = True
+
+    port = int(port)
+    url = f"http://127.0.0.1:{port}/"
+    status_url = f"http://127.0.0.1:{port}/api/bot/status"
+
+    def _worker() -> None:
+        import time
+        import urllib.request
+
+        print(f"[HUB] Waiting for server then opening dashboard → {url}", flush=True)
+        ready = False
+        for _ in range(80):  # ~20s
+            try:
+                with urllib.request.urlopen(status_url, timeout=1.0) as resp:
+                    if 200 <= int(getattr(resp, "status", 200)) < 500:
+                        ready = True
+                        break
+            except Exception:
+                time.sleep(0.25)
+        if not ready:
+            print(f"[HUB] Server not healthy yet; opening {url} anyway.", flush=True)
+        else:
+            time.sleep(0.2)
+        # Retry a few times if Edge is busy / profile lock
+        for attempt in range(3):
+            try:
+                _open_browser(url)
+                return
+            except Exception as exc:
+                print(f"[HUB] open attempt {attempt + 1} failed: {exc}", flush=True)
+                time.sleep(0.5)
+
+    threading.Thread(target=_worker, name="hub-auto-open", daemon=True).start()
+
+
+def kill_hub_browser_tree() -> None:
+    """Kill ALL Edge hub processes (profile quotex_hub_edge), not just Popen root.
+
+    Edge spawns child processes. Closing the server window with X often leaves
+    those orphans holding the profile and blocking a clean reopen.
+    """
+    global _browser_proc
+    proc = _browser_proc
+    _browser_proc = None
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        except Exception:
+            pass
+    # Windows: wipe entire Edge tree for this profile
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
+                    "Where-Object { $_.CommandLine -and ($_.CommandLine -like '*quotex_hub_edge*') } | "
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+                ],
+                capture_output=True,
+                timeout=8,
+                check=False,
+            )
+        except Exception:
+            pass
+
+
+def force_exit_cleanup(stop_bot_coro_or_fn=None, timeout_sec: float = 2.0) -> None:
+    """Hard-timeout exit path used by app.py (browser first, then bot stop)."""
+    from hub.process_lifecycle import run_exit_cleanup
+
+    run_exit_cleanup(
+        kill_browser=kill_hub_browser_tree,
+        stop_bot_coro_or_fn=stop_bot_coro_or_fn,
+        timeout_sec=timeout_sec,
+    )
 
 
 def _close_browser() -> None:
-    """Cierra la ventana del HUB abierta por _open_browser (si sigue viva)."""
-    global _browser_proc
-    proc = _browser_proc
-    if proc is None:
-        return
-    _browser_proc = None
-    if proc.poll() is not None:
-        return  # ya terminó
-    try:
-        proc.terminate()
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-    except Exception:
-        pass
+    """Cierra la ventana del HUB (Popen + hijos Edge del perfil dedicado)."""
+    kill_hub_browser_tree()
 
 
 async def _auto_open_dashboard(host: str, port: int) -> None:
-    """Wait a moment for server startup, then open browser."""
-    if os.environ.get("HUB_NO_OPEN", "").lower() in ("1", "true", "yes"):
-        return
-    await asyncio.sleep(1.5)
-    url = f"http://localhost:{port}"
-    _open_browser(url)
+    """Compat wrapper — prefer schedule_hub_auto_open from app main()."""
+    schedule_hub_auto_open(int(port))
 
 
 async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
@@ -388,7 +592,7 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
     try:
         await server.serve()
     finally:
-        _close_browser()
+        kill_hub_browser_tree()
         poller.cancel()
         relay.cancel()
         try:

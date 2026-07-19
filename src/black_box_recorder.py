@@ -111,6 +111,9 @@ CREATE TABLE IF NOT EXISTS scan_candidates (
     -- Post-mortem automático
     loss_reason     TEXT,                   -- por qué perdió (ANTES vs resultado)
     improvement_hint TEXT,                  -- sugerencia de calibración derivada de datos
+
+    -- Order expiry used for multi-duration A/B data collection
+    duration_sec    INTEGER,
     
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -200,12 +203,17 @@ class BlackBoxRecorder:
             _NEW_COLS = [
                 "candles_15m", "candles_post", "entry_price", "exit_price",
                 "session_id", "stoch_m15", "stoch_contradicts",
-                "loss_reason", "improvement_hint",
+                "loss_reason", "improvement_hint", "duration_sec",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
                 if col not in existing:
-                    _ctype = "INTEGER DEFAULT 0" if col == "stoch_contradicts" else "TEXT"
+                    if col == "stoch_contradicts":
+                        _ctype = "INTEGER DEFAULT 0"
+                    elif col == "duration_sec":
+                        _ctype = "INTEGER"
+                    else:
+                        _ctype = "TEXT"
                     con.execute(f"ALTER TABLE scan_candidates ADD COLUMN {col} {_ctype}")
             maintenance_cols = [
                 str(row[1]).lower()
@@ -323,17 +331,20 @@ class BlackBoxRecorder:
         candles_15m = json.dumps(data.get("candles_15m", []), ensure_ascii=False) if data.get("candles_15m") else None
         session_id = data.get("session_id", None)
         stoch_m15 = json.dumps(data.get("stoch_m15", {}), ensure_ascii=False) if data.get("stoch_m15") else None
+        duration_sec = data.get("duration_sec", None)
+        if duration_sec is not None:
+            duration_sec = int(duration_sec)
         
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-             candles_15m, session_id, stoch_m15, order_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             candles_15m, session_id, stoch_m15, order_id, duration_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-            candles_15m, session_id, stoch_m15, order_id
+            candles_15m, session_id, stoch_m15, order_id, duration_sec
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
@@ -370,6 +381,7 @@ class BlackBoxRecorder:
         loss_reason: Optional[str] = None,
         improvement_hint: Optional[str] = None,
         masaniello_snapshot: Optional[Dict[str, Any] | str] = None,
+        duration_sec: Optional[int] = None,
     ) -> None:
         """Actualiza un candidato existente con estado posterior al escaneo."""
         if candidate_id <= 0:
@@ -386,6 +398,9 @@ class BlackBoxRecorder:
         if reject_reason is not None:
             fields.append("reject_reason = ?")
             values.append(reject_reason)
+        if duration_sec is not None:
+            fields.append("duration_sec = ?")
+            values.append(int(duration_sec))
         if order_id is not None:
             fields.append("order_id = ?")
             values.append(order_id)
@@ -576,6 +591,45 @@ class BlackBoxRecorder:
             "stoch_m15": json.loads(row[2]) if row[2] else None,
             "direction": row[3] or "",
         }
+
+    def clone_candidate_for_duration(
+        self,
+        source_id: int,
+        duration_sec: int,
+    ) -> int:
+        """Clone a scan_candidate row with a new duration_sec (multi-duration A/B).
+
+        Returns new candidate id, or 0 on failure / missing source.
+        """
+        if source_id <= 0:
+            return 0
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        cur.execute("SELECT * FROM scan_candidates WHERE id = ?", (source_id,))
+        row = cur.fetchone()
+        if not row:
+            con.close()
+            return 0
+        col_names = [d[0] for d in cur.description]
+        data = dict(zip(col_names, row))
+        data.pop("id", None)
+        data["duration_sec"] = int(duration_sec)
+        data["order_id"] = None
+        data["order_result"] = None
+        data["profit"] = None
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Keep decision ACCEPTED / PENDING for the cloned leg.
+        cols = list(data.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        col_sql = ", ".join(cols)
+        cur.execute(
+            f"INSERT INTO scan_candidates ({col_sql}) VALUES ({placeholders})",
+            [data[c] for c in cols],
+        )
+        new_id = int(cur.lastrowid or 0)
+        con.commit()
+        con.close()
+        return new_id
 
     def get_pending_candidate_before(self, asset: str) -> Optional[Dict[str, Any]]:
         """Recupera las velas ANTES + stoch del candidato STRAT-F pendiente de `asset`."""

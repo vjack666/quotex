@@ -61,6 +61,17 @@ class DiversificationEnforcer:
 
         total = len(open_trades)
 
+        def _trade_asset(key: str, trade: "TradeState") -> str:
+            asset = getattr(trade, "asset", None)
+            if asset:
+                return str(asset)
+            # trade_key form: "EURUSD_otc#300"
+            if "#" in key:
+                return key.split("#", 1)[0]
+            return key
+
+        open_assets = [_trade_asset(k, t) for k, t in open_trades.items()]
+
         # ── 1) Límite global ────────────────────────────────────────────────
         if self.max_simultaneous_trades > 0 and total >= self.max_simultaneous_trades:
             reason = (
@@ -74,10 +85,10 @@ class DiversificationEnforcer:
         # Si los trades abiertos están concentrados en muy pocos activos, no
         # permitimos añadir OTRO trade al MISMO activo — forzamos diversificación.
         if total > 0 and self.min_asset_spread > 1:
-            unique_assets = set(open_trades.keys())
+            unique_assets = set(open_assets)
             if (
                 len(unique_assets) < self.min_asset_spread
-                and candidate_asset in open_trades
+                and candidate_asset in unique_assets
             ):
                 reason = (
                     f"min_asset_spread={self.min_asset_spread}: "
@@ -89,9 +100,7 @@ class DiversificationEnforcer:
 
         # ── 3) Máximo por activo ────────────────────────────────────────────
         if self.max_entries_per_asset > 0:
-            entries_for_asset = sum(
-                1 for a in open_trades if a == candidate_asset
-            )
+            entries_for_asset = sum(1 for a in open_assets if a == candidate_asset)
             if entries_for_asset >= self.max_entries_per_asset:
                 reason = (
                     f"max_entries_per_asset={self.max_entries_per_asset}: "

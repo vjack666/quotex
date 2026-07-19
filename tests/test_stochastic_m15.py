@@ -132,3 +132,53 @@ def test_insufficient_candles_returns_neutral():
         r = sm.compute_stoch(candles)
     assert r["estado"] == "NEUTRO"
     assert r["k"] is None
+
+
+def test_contradicts_uppercase_CALL_in_overbought():
+    """Bug fix: evaluate_strat_f returns 'CALL' (uppercase) but contradicts
+    check was comparing with 'call' (lowercase). Verify case-insensitive."""
+    closes = [100 + i for i in range(20)]
+    candles = _candles_from_closes(closes)
+    k_seq = [95.0] * 20
+    d_seq = [90.0] * 20
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, d_seq)
+        r = sm.compute_stoch(candles, direction="CALL")
+    assert r["contradicts"] == 1, "CALL (uppercase) + SOBRECOMPRA should contradict"
+
+
+def test_contradicts_uppercase_PUT_in_oversold():
+    """Bug fix: evaluate_strat_f returns 'PUT' (uppercase) but contradicts
+    check was comparing with 'put' (lowercase). Verify case-insensitive."""
+    closes = [200 - i for i in range(20)]
+    candles = _candles_from_closes(closes)
+    k_seq = [12.0] * 20
+    d_seq = [15.0] * 20
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, d_seq)
+        r = sm.compute_stoch(candles, direction="PUT")
+    assert r["contradicts"] == 1, "PUT (uppercase) + SOBREVENTA should contradict"
+
+
+def test_no_contradicts_call_in_oversold():
+    """CALL in oversold is aligned (rebound from floor), not a contradiction."""
+    closes = [200 - i for i in range(20)]
+    candles = _candles_from_closes(closes)
+    k_seq = [12.0] * 20
+    d_seq = [15.0] * 20
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, d_seq)
+        r = sm.compute_stoch(candles, direction="CALL")
+    assert r["contradicts"] == 0
+
+
+def test_no_contradicts_put_in_overbought():
+    """PUT in overbought is aligned (rebound from ceiling), not a contradiction."""
+    closes = [100 + i for i in range(20)]
+    candles = _candles_from_closes(closes)
+    k_seq = [95.0] * 20
+    d_seq = [90.0] * 20
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, d_seq)
+        r = sm.compute_stoch(candles, direction="PUT")
+    assert r["contradicts"] == 0

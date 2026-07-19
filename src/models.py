@@ -81,6 +81,11 @@ class CandidateEntry:
         )
 
 
+def make_trade_key(asset: str, duration_sec: int) -> str:
+    """Dict key for open trades: supports multiple expiries on the same asset."""
+    return f"{asset}#{int(duration_sec)}"
+
+
 @dataclass
 class TradeState:
     asset: str
@@ -101,6 +106,8 @@ class TradeState:
     resolved: bool = False
     score_original: float = 0.0
     black_box_cid: int = 0
+    # Open-trades dict key (asset#duration). asset stays pure symbol.
+    trade_key: str = ""
 
 
 @dataclass
