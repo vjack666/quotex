@@ -250,6 +250,30 @@
       "approved_at": "2026-07-17",
       "done_at": "2026-07-17",
       "implementation_note": "OPTION 1: solo el bloque STRAT-F se extrae a funcion pura (_evaluate_strat_f_serial) y se evalua en ProcessPool; STRAT-A intacto. 4 tests verdes; benchmark 2.19x speedup (N=40, 10 workers)."
+    },
+    {
+      "id": 16,
+      "name": "strat_f_maturing_m15_recheck",
+      "title": "Re-chequeo M15 al promover desde maturing_watchlist (evitar entradas contra-tendencia)",
+      "phase": "strat_f",
+      "priority": 16,
+      "description": "La sala de espera (maturing_watchlist) promueve zonas STRAT-F usando el m15_context de CUANDO se detectaron, no el actual. Esto deja pasar entradas contra la tendencia M15 visible (audit 2026-07-18: 13/43 operaciones aceptadas eran contra-tendencia). Al promover (mark_promoted, live/shadow) el sistema DEBE re-evaluar el contexto M15 actual y, si la direccion queda contra-tendencia, exigir confirmacion de agotamiento (stoch M5 en extremo) para promover; si no hay confirmacion, DEBE descartar (drop) en vez de operar. Aplica la teoria de 'esperar al agotamiento del contra-movimiento' en el punto real donde filtra.",
+      "acceptance": [
+        "Al promover desde maturing_watchlist se re-evalua m15_context actual (no el de deteccion)",
+        "SI direccion queda contra-tendencia M15 ENTONCES el sistema NO promueve sin confirmacion de agotamiento",
+        "Confirmacion de agotamiento = stoch M5 en extremo a favor de la direccion propuesta (CALL contra-M15-bajista -> stoch M5 <20; PUT contra-M15-alcista -> stoch M5 >80)",
+        "SI no hay confirmacion de agotamiento ENTONCES el sistema DEBE drop (no operar)",
+        "El conteo Massaniello NO se incrementa hasta el buy() real (no en la promocion)",
+        "El bot sigue escaneando otras operaciones normales mientras hay entradas en espera",
+        "tests cubren: promocion ok en tendencia alineada, drop contra-tendencia sin stoch, promocion contra-tendencia CON stoch en extremo",
+        "pytest tests/ en verde"
+      ],
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/strat_f_maturing_m15_recheck/",
+      "approved_at": "2026-07-19",
+      "done_at": "2026-07-19",
+      "implementation_note": "Re-chequeo M15 actual + stoch M5 al promover desde maturing_watchlist. R1-R5 cubiertos por tests/test_strat_f_maturing_recheck.py (13 passed). Reparado bug preexistente: stoch_m15 indefinido con _eval_override."
     }
   ]
 }

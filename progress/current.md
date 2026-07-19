@@ -1,5 +1,47 @@
 # Estado de sesión
 
+## Experimento spring_margin — Validación Wyckoff Fase C (STRAT-F)
+
+### SPRING_EXPERIMENT_START
+**2026-07-17T23:57:45Z** (UTC ISO 8601) = **2026-07-17T20:57:45-03:00** (formato
+BROKER_TZ que guarda el bot en `scanned_at`, ver trade_journal._now()).
+Todas las queries usan el formato **-03:00** (NO el Z) porque `scanned_at`
+es TEXT con offset explícito y SQLite compara lexicográficamente:
+`scanned_at >= '2026-07-17T20:57:45-03:00'`.
+NO se borra ni trunca ninguna fila de trade_journal.db bajo ninguna
+circunstancia; el filtro por scanned_at aísla el experimento.
+
+Regla de columnas (verificado contra schema real):
+- NO existe `created_at` → se usa `scanned_at` (TEXT ISO UTC, momento del
+  escaneo en log_candidate).
+- NO existe `duration_sec` → se usa `entry_duration_sec` (log_candidate
+  recibe duration_sec y lo guarda ahí).
+
+### Query de conteo FASE 1 (umbral 40 filas)
+```sql
+SELECT COUNT(*) FROM candidates
+WHERE spring_margin IS NOT NULL
+  AND outcome IN ('WIN','LOSS')
+  AND entry_duration_sec = 300
+  AND scanned_at >= '2026-07-17T20:57:45-03:00'
+```
+
+### Query de análisis FASE 2
+```sql
+SELECT spring_margin, outcome FROM candidates
+WHERE spring_margin IS NOT NULL
+  AND outcome IN ('WIN','LOSS')
+  AND entry_duration_sec = 300
+  AND scanned_at >= '2026-07-17T20:57:45-03:00'
+```
+
+Resto del protocolo igual: WIN/LOSS (excluye UNRESOLVED); NULL excluidos
+del análisis y reportados aparte; umbral de decisión 8pp (bucket mayor
+margen vs menor por >=8pp de win rate + correlación de signo consistente);
+muestra mínima 30/grupo; umbral fijado ANTES de datos, no se ajusta.
+
+---
+
 ## Feature en curso
 FIX RUNTIME — cuelgue por caída de WS durante espera de trade (multi-leg)
 
@@ -115,8 +157,16 @@ sin confirmación explícita del operador.
   filas con outcome resuelto (WIN/LOSS, excluyendo UNRESOLVED) y
   spring_margin no-NULL. Regla dura: NADIE mira la tabla antes de 40.
   Hermes reporta SOLO el conteo de filas, no win rate parcial.
-  Puerta: `SELECT COUNT(*) FROM candidates WHERE spring_margin IS NOT NULL
-  AND outcome IN ('WIN','LOSS')` >= 40.
+  **FILTRO DURACIÓN (corregido 2026-07-17):** el usuario corre múltiples
+  duraciones en paralelo (60/300/600/900s). El experimento spring_margin
+  SOLO cuenta `entry_duration_sec = 300` (leg principal 5min). Las otras
+  duraciones se guardan igual en la DB pero NO cuentan para el umbral ni
+  el análisis. NOTA: la columna NO es `duration_sec` (no existe); es
+  `entry_duration_sec` (log_candidate recibe `duration_sec` y lo guarda
+  ahí). Query:
+  `SELECT COUNT(*) FROM candidates WHERE spring_margin IS NOT NULL`
+  `AND outcome IN ('WIN','LOSS') AND entry_duration_sec = 300`.
+  Puerta: esa query >= 40.
 
 - **FASE 2 — Análisis (una vez, criterio fijado en Fase 0):**
   1. Correlación (Pearson/Spearman) entre spring_margin y resultado binario
@@ -150,5 +200,41 @@ sin confirmación explícita del operador.
 - **Muestra mínima por grupo**: 30 registros.
 - **spring_margin IS NULL**: excluidos del análisis, reportados aparte.
 - NO se ajusta el umbral según lo que salga. Esto está fijado.
+
+---
+
+## Feature #16 — Re-chequeo M15 al promover desde maturing_watchlist (STRAT-F)
+
+**Estado:** DONE (2026-07-19). Feature SDD: `specs/strat_f_maturing_m15_recheck/`
+(requirements.md / design.md / tasks.md). Aprobada y aplicada.
+
+### Problema (raíz confirmada por auditoría)
+El bot entraba en contra de la tendencia M15 visible (~30% de las operaciones
+aceptadas, 13/43 en el audit). Causa: `evaluate_strat_f` tiene el filtro R1
+(`if ctx=="downtrend" and direction=="CALL": skip`) pero la **sala de espera**
+(`maturing_watchlist`) promueve zonas usando el `m15_context` de CUANDO se
+detectó la zona, NO el actual. Si la tendencia viró mientras la zona maduraba,
+la entrada sale contra-tendencia sin re-chequeo.
+
+### Solución (tu teoría de agotamiento, aplicada donde filtra)
+Al promover desde maturing_watchlist se re-evalúa el M15 ACTUAL:
+- Alineado → promueve (R1/R5).
+- Contra-tendencia → SOLO promueve si el **stoch M5** confirma agotamiento del
+  contra-movimiento (CALL contra-M15-bajista → stoch M5 %K < 20; PUT
+  contra-M15-alcista → stoch M5 %K > 80). Si no hay confirmación → **DROP**
+  (no opera, R4). No consume Massaniello (el buy() real es el que consume).
+
+### Archivos tocados
+- `src/strat_fractal.py`: `recheck_m15_alignment()` + `stoch_m5_exhausted()`
+  (funciones puras).
+- `src/scanner.py`: import de las 2 funciones; re-chequeo en el bloque de
+  promoción `mark_promoted`; `stoch_m15 = None` al inicio del bloque F (repara
+  bug preexistente: `UnboundLocalError` con `_eval_override`).
+
+### Tests
+- `tests/test_strat_f_maturing_recheck.py` — 13 passed (R1-R5): recheck
+  alineado/contra-tendencia, stoch exhaust/none, integración promoter-vs-drop.
+- Suite completa: 21 failed pre-existentes (sin cambio vs baseline), 521 passed
+  + 13 nuevos. Sin regresiones introducidas.
 
 

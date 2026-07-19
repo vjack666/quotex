@@ -322,3 +322,37 @@ def evaluate_strat_f(
         spring_margin=spring_margin,
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx}",
     )
+
+
+def recheck_m15_alignment(candles_15m: List[Candle], direction: str) -> bool:
+    """Re-evaluación de la alineación M15 ACTUAL al promover desde maturing_watchlist.
+
+    Devuelve True si la dirección propuesta está ALINEADA con el contexto M15
+    actual (no contra-tendencia). False si quedó contra-tendencia
+    (M15=downtrend & CALL, o M15=uptrend & PUT). Esto es R1/R5 del spec
+    #16: la promoción debe usar el contexto de AHORA, no el de la detección.
+    """
+    ctx = _m15_context(candles_15m)
+    if ctx == "downtrend" and direction == "CALL":
+        return False
+    if ctx == "uptrend" and direction == "PUT":
+        return False
+    return True
+
+
+def stoch_m5_exhausted(stoch_k: Optional[float], direction: str) -> bool:
+    """Confirmación de agotamiento del contra-movimiento (R3 del spec #16).
+
+    CALL contra-M15-bajista  -> stoch M5 %K < 20 (sobreventa = el impulso
+                                            bajista se agotó).
+    PUT contra-M15-alcista   -> stoch M5 %K > 80 (sobrecompra = el impulso
+                                            alcista se agotó).
+    Cualquier otro caso (None, contra-tendencia sin extremo) -> False.
+    """
+    if stoch_k is None:
+        return False
+    if direction == "CALL":
+        return stoch_k < 20.0
+    if direction == "PUT":
+        return stoch_k > 80.0
+    return False

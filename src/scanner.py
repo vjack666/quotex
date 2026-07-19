@@ -102,7 +102,10 @@ from strat_a_radar import (
 )
 from strat_support import find_strong_support_2m
 from strat_momentum import detect_momentum_1m
-from strat_fractal import evaluate_strat_f, StratFEvaluation
+from strat_fractal import (
+    evaluate_strat_f, StratFEvaluation,
+    recheck_m15_alignment, stoch_m5_exhausted,
+)
 from strat_order_block import detect_order_block_entry
 from strat_reversal_swing import detect_reversal_swing
 from maturing_watchlist import (
@@ -2305,6 +2308,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     _mw_mode = normalize_mode(flags.get("MATURING_WATCHLIST_MODE", "live"))
 
     if not STRAT_A_ONLY and (STRAT_F_ENABLED or _strat_f_only_mode):
+        stoch_m15 = None
         if ctx._eval_override is not None:
             f_eval = ctx._eval_override
         else:
@@ -2393,27 +2397,48 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 setattr(f_candidate, "_spring_margin", f_eval.spring_margin)
                 setattr(f_candidate, "_amount", ctx.initial_amount)
                 setattr(f_candidate, "_stage", "initial")
+                # R1/R2/R3/R4/R5 — re-chequeo M15 ACTUAL al promover desde maturing_watchlist.
+                # El contexto de detección (f_eval.m15_context) puede haber vireado;
+                # al soltar la entrada debemos usar el M15 de AHORA.
+                _do_promote = True
                 if _mw_entries:
                     setattr(f_candidate, "_maturing_promoted", True)
-                    for _me in list(_mw_entries):
-                        res.maturing_ops.append(("mark_promoted", (_me.key, "live")))
+                    _aligned = recheck_m15_alignment(candles_15m, f_eval.direction)
+                    if not _aligned:
+                        # contra-tendencia: exigir confirmación de agotamiento (stoch M5 en extremo)
+                        _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
+                        _k = (_stoch_m5 or {}).get("k")
+                        _exhausted = stoch_m5_exhausted(_k, f_eval.direction)
+                        if not _exhausted:
+                            # R4: descartar, NO operar (no consume Massaniello; el buy() real sí)
+                            _do_promote = False
+                            for _me in list(_mw_entries):
+                                res.maturing_ops.append(("drop", (_me.key, "contra_tendencia_sin_agotamiento_stoch")))
+                            res.logs.append(
+                                f"[MATURING] drop {sym} {f_eval.direction} "
+                                f"(contra-tendencia M15 sin agotamiento stoch k={_k})"
+                            )
+                    if _do_promote:
+                        for _me in list(_mw_entries):
+                            res.maturing_ops.append(("mark_promoted", (_me.key, "live")))
+                        res.logs.append(
+                            f"[MATURING] live promote {sym} {f_eval.direction} → CandidateEntry"
+                        )
+                if _do_promote:
+                    score_candidate(f_candidate)
+                    if _stoch_help.score_delta:
+                        f_candidate.score = round(f_candidate.score + _stoch_help.score_delta, 1)
+                        if isinstance(f_candidate.score_breakdown, dict):
+                            f_candidate.score_breakdown["stoch_help"] = float(_stoch_help.score_delta)
+                    res.f_candidate = f_candidate
+                    res.strat_f_accepts = 1
+                    _rec["decision"] = "ACCEPTED"
+                    _batch[0].append(_rec)
                     res.logs.append(
-                        f"[MATURING] live promote {sym} {f_eval.direction} → CandidateEntry"
+                        f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
+                        f"ctx={f_eval.m15_context} event={f_eval.m5_event} "
+                        f"spring_margin={f_eval.spring_margin}"
                     )
-                score_candidate(f_candidate)
-                if _stoch_help.score_delta:
-                    f_candidate.score = round(f_candidate.score + _stoch_help.score_delta, 1)
-                    if isinstance(f_candidate.score_breakdown, dict):
-                        f_candidate.score_breakdown["stoch_help"] = float(_stoch_help.score_delta)
-                res.f_candidate = f_candidate
-                res.strat_f_accepts = 1
-                _rec["decision"] = "ACCEPTED"
-                _batch[0].append(_rec)
-                res.logs.append(
-                    f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
-                    f"ctx={f_eval.m15_context} event={f_eval.m5_event} "
-                    f"spring_margin={f_eval.spring_margin}"
-                )
         elif f_eval.skip_reason:
             _rec["decision"] = "REJECTED_STRAT_F"
             _batch[1].append(_rec)
