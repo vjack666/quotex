@@ -15,13 +15,13 @@ MAX_RANGE_PCT = 0.003
 TOUCH_TOLERANCE_PCT = 0.00035
 MAX_CONSOLIDATION_MIN = 0
 MIN_PAYOUT = 80  # web → min_payout (Bankroll card); fallback primer arranque
-DURATION_SEC = 900  # expiración de la orden: 15 min (antes 300s = 5 min, pedido usuario 2026-07-19)
+DURATION_SEC = 600  # expiración de la orden: 10 min (antes 900s = 15 min, pedido usuario 2026-07-19)
 # Multi-duration data collection: one signal → N parallel expiries for A/B.
 # When True, each entry places orders for every MULTI_DURATION_SECS value.
-MULTI_DURATION_DATA_COLLECTION = False  # solo vencimiento 15min (900s)
-MULTI_DURATION_SECS = (900,)             # 1m/5m/10m desactivados por pedido del usuario
+MULTI_DURATION_DATA_COLLECTION = False  # solo vencimiento 10min (600s)
+MULTI_DURATION_SECS = (600,)             # 1m/5m/15m desactivados por pedido del usuario
 # Massaniello: only register win/loss on this duration so session ops don't burn 4x.
-MULTI_DURATION_MASSANIELLO_PRIMARY_SEC = 900
+MULTI_DURATION_MASSANIELLO_PRIMARY_SEC = 600
 # Fire all legs via asyncio.gather after a single open-sync/prewarm/M1 check.
 MULTI_DURATION_PARALLEL = True
 # Data mode: do not abort the multi batch when Massaniello session is complete/exhausted.
@@ -263,7 +263,7 @@ FIXED_STAKE_USD = 2.0        # monto fijo por operación cuando STAKE_MODE="fixe
 # y racha de pérdidas). Es INDEPENDIENTE de STAKE_MODE:
 #   True  → guard activo (puede pausar el bot al alcanzar el límite).
 #   False → modo 24h: sin pausa, escaneo continuo (sin importar el stake).
-DAILY_LOSS_GUARD_ENABLED = True
+DAILY_LOSS_GUARD_ENABLED = False  # modo 24h por defecto (pedido usuario 2026-07-19): sin freno por pérdida diaria
 
 # Diversification
 # Multi-duration places N legs on the same asset; raise per-asset / simultaneous caps.
