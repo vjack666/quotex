@@ -55,12 +55,65 @@ def test_api_alive_false_on_error(monkeypatch):
     assert wd.api_alive() is False
 
 
+def test_bot_state_running(monkeypatch):
+    class _Resp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b'{"state": "running"}'
+    monkeypatch.setattr(wd.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    assert wd.bot_state() == "running"
+
+
+def test_bot_state_none_on_error(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("down")
+    monkeypatch.setattr(wd.urllib.request, "urlopen", _boom)
+    assert wd.bot_state() is None
+
+
+def test_main_reinstalls_when_bot_stopped(monkeypatch, tmp_path, capsys):
+    log = tmp_path / "bot.log"
+    _write_log(str(log), "14:25:00 [INFO] SCAN #1 | 15 activos\n")
+    monkeypatch.setattr(wd, "LOG_PATH", str(log))
+    monkeypatch.setattr(wd, "api_alive", lambda: True)
+    monkeypatch.setattr(wd, "bot_state", lambda: "stopped")  # detenido => bug en 24h
+    monkeypatch.setattr(wd, "recent_connection_lost", lambda: False)
+    restart_called = {"n": 0}
+
+    def _fake_restart(reason):
+        restart_called["n"] += 1
+
+    monkeypatch.setattr(wd, "restart", _fake_restart)
+    wd.main()
+    assert restart_called["n"] == 1
+
+
+def test_main_reinstalls_when_bot_error(monkeypatch, tmp_path, capsys):
+    log = tmp_path / "bot.log"
+    _write_log(str(log), "14:25:00 [INFO] SCAN #1 | 15 activos\n")
+    monkeypatch.setattr(wd, "LOG_PATH", str(log))
+    monkeypatch.setattr(wd, "api_alive", lambda: True)
+    monkeypatch.setattr(wd, "bot_state", lambda: "error")
+    monkeypatch.setattr(wd, "recent_connection_lost", lambda: False)
+    restart_called = {"n": 0}
+
+    def _fake_restart(reason):
+        restart_called["n"] += 1
+
+    monkeypatch.setattr(wd, "restart", _fake_restart)
+    wd.main()
+    assert restart_called["n"] == 1
+
+
 def test_main_does_not_restart_when_healthy(monkeypatch, tmp_path, capsys):
     log = tmp_path / "bot.log"
     _write_log(str(log), "14:25:00 [INFO] SCAN #1 | 15 activos\n")
     monkeypatch.setattr(wd, "LOG_PATH", str(log))
     monkeypatch.setattr(wd, "api_alive", lambda: True)
-    monkeypatch.setattr(wd, "proc_alive", lambda: True)
+    monkeypatch.setattr(wd, "bot_state", lambda: "running")
     monkeypatch.setattr(wd, "recent_connection_lost", lambda: False)
     restart_called = {"n": 0}
 

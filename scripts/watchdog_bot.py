@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import time
+import json
 import urllib.request
 from datetime import datetime, timezone
 
@@ -46,6 +47,21 @@ def api_alive() -> bool:
         return True
     except Exception:
         return False
+
+
+def bot_state() -> str | None:
+    """Estado del runner vía /api/bot/status. None si no responde."""
+    try:
+        with urllib.request.urlopen(API_URL + "api/bot/status", timeout=8) as r:
+            data = json.loads(r.read().decode())
+        return data.get("state")
+    except Exception:
+        return None
+
+
+# En modo 24h el bot NUNCA debe detenerse (ni por meta diaria ni por ciclo).
+# Cualquier estado que no sea running/starting se trata como bug y se reinicia.
+HEALTHY_STATES = ("running", "starting")
 
 
 def recent_connection_lost() -> bool:
@@ -125,9 +141,22 @@ def restart(reason: str) -> None:
 
 def main() -> int:
     alive = api_alive()
-    wlog(f"check: api_alive={alive} proc_alive={proc_alive()} conn_lost_reciente={recent_connection_lost()}")
-    if not alive or recent_connection_lost():
-        restart("api_down" if not alive else "conn_lost")
+    state = bot_state() if alive else None
+    conn_lost = recent_connection_lost()
+    wlog(
+        f"check: api_alive={alive} state={state} "
+        f"conn_lost_reciente={conn_lost}"
+    )
+    # Modo 24h: el bot no debe detenerse nunca. Si el server responde pero el
+    # runner no está corriendo (detenido por meta/ciclo/error), es un bug → reiniciar.
+    if not alive:
+        restart("api_down")
+        return 0
+    if state not in HEALTHY_STATES:
+        restart(f"bot_state={state}")
+        return 0
+    if conn_lost:
+        restart("conn_lost")
         return 0
     wlog("bot sano, nada que hacer.")
     return 0
