@@ -2306,6 +2306,9 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     MIN_PAYOUT = flags.get("MIN_PAYOUT", 80)
     _stoch_mode = flags.get("STOCH_HELP_MODE", "hard")
     _mw_mode = normalize_mode(flags.get("MATURING_WATCHLIST_MODE", "live"))
+    # Auditoría post-mortem (black box): estocástico M5 + funnel de filtros por capa.
+    _stoch_m5_json = None          # dict {k, d, exhausted} al promover desde maturing
+    _filter_funnel = []            # capas STRAT-F evaluadas en este ciclo (audit)
 
     if not STRAT_A_ONLY and (STRAT_F_ENABLED or _strat_f_only_mode):
         stoch_m15 = None
@@ -2349,6 +2352,13 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
         f_candidate = None
         _stoch_reject_reason = ""
         _mw_entries = _maturing_find_active(ctx.maturing_snapshot, sym, f_eval.direction)
+        # Funnel de auditoría (ruta fresca): capas STRAT-F hasta aquí.
+        _filter_funnel = [
+            f"fractal_m5:{('ok' if f_eval.has_signal else 'fail')}",
+            f"m15_context:{f_eval.m15_context}",
+            f"stoch_m15_hard:{_stoch_help.action if _stoch_help else 'n/a'}",
+            f"m1_reject:{'ok' if f_eval.m5_event else 'fail'}",
+        ]
         if f_eval.has_signal and f_eval.direction and f_eval.zone:
             if _mw_mode == "shadow" and _mw_entries:
                 for _me in list(_mw_entries):
@@ -2404,12 +2414,23 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 if _mw_entries:
                     setattr(f_candidate, "_maturing_promoted", True)
                     _aligned = recheck_m15_alignment(candles_15m, f_eval.direction)
-                    if not _aligned:
-                        # contra-tendencia: exigir confirmación de agotamiento (stoch M5 en extremo)
-                        _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
-                        _k = (_stoch_m5 or {}).get("k")
-                        _exhausted = stoch_m5_exhausted(_k, f_eval.direction)
-                        if not _exhausted:
+                    _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
+                    _k = (_stoch_m5 or {}).get("k")
+                    _exhausted = stoch_m5_exhausted(_k, f_eval.direction)
+                    _stoch_m5_json = {
+                        "k": _k,
+                        "d": (_stoch_m5 or {}).get("d"),
+                        "exhausted": bool(_exhausted),
+                    }
+                    # Funnel de auditoría (ruta promovida): capas maturing + stoch M5.
+                    _filter_funnel = [
+                        "fractal_m5:ok",
+                        f"m15_context_detect:{f_eval.m15_context}",
+                        "maturing_wait:ok",
+                        f"m15_recheck_align:{('ok' if _aligned else 'fail')}",
+                        f"m5_exhaustion:{('ok' if _exhausted else 'fail')}",
+                    ]
+                    if not _aligned and not _exhausted:
                             # R4: descartar, NO operar (no consume Massaniello; el buy() real sí)
                             _do_promote = False
                             for _me in list(_mw_entries):
@@ -2509,6 +2530,8 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 "session_id": ctx.session_id,
                 "bb_scan_id": ctx.bb_scan_id,
                 "stoch_m15": stoch_m15,
+                "stoch_m5": _stoch_m5_json,
+                "filter_funnel": _filter_funnel,
             }
             res.strat_f_batch_delta = _batch
     return res

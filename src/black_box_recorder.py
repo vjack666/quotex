@@ -204,6 +204,7 @@ class BlackBoxRecorder:
                 "candles_15m", "candles_post", "entry_price", "exit_price",
                 "session_id", "stoch_m15", "stoch_contradicts",
                 "loss_reason", "improvement_hint", "duration_sec",
+                "stoch_m5", "filter_funnel",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
@@ -331,6 +332,8 @@ class BlackBoxRecorder:
         candles_15m = json.dumps(data.get("candles_15m", []), ensure_ascii=False) if data.get("candles_15m") else None
         session_id = data.get("session_id", None)
         stoch_m15 = json.dumps(data.get("stoch_m15", {}), ensure_ascii=False) if data.get("stoch_m15") else None
+        stoch_m5 = json.dumps(data.get("stoch_m5", {}), ensure_ascii=False) if data.get("stoch_m5") else None
+        filter_funnel = json.dumps(data.get("filter_funnel", []), ensure_ascii=False) if data.get("filter_funnel") else None
         duration_sec = data.get("duration_sec", None)
         if duration_sec is not None:
             duration_sec = int(duration_sec)
@@ -339,12 +342,12 @@ class BlackBoxRecorder:
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-             candles_15m, session_id, stoch_m15, order_id, duration_sec)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-            candles_15m, session_id, stoch_m15, order_id, duration_sec
+            candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
