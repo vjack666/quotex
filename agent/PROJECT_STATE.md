@@ -1,7 +1,7 @@
 # PROJECT_STATE
 
-> Last updated: 2026-07-04 (roadmap complete — 22/22 features done)
-> Update this file at the end of every work session.
+> Last updated: 2026-07-17 (changelog session: stoch, order, 24/7, 5m align, quiet logs)
+> Full detail: `docs/CHANGELOG_2026-07-16.md`
 
 ---
 
@@ -11,94 +11,86 @@
 |-------|-------|
 | Name | quotex-hft-bot |
 | Type | HFT binary options bot for Quotex |
-| Language | Python 3.10+ (running 3.13) |
-| Risk manager | **Massaniello** (5 ops / 3 ITM / 60 min / PRACTICE) |
-| Roadmap progress | **22 / 22** features done (100 %) |
-| **Priority track** | **STRAT-A** — **6 / 6 done** ✅ |
+| Language | Python 3.10+ (running 3.13/3.14) |
+| Risk manager | **Massaniello** (ops / ITM / timeout / PRACTICE) |
+| Strategy focus | **STRAT-F** live + **stoch M15 help hard** |
+| Roadmap | #1–#7 done; #9–#10 done; #11 maturing_zone_watchlist impl complete (await review); #8 schedule_auto paused |
+| Data collection | **24/7** — cycle end resets Massaniello only |
 
 ---
 
 ## Current architecture
 
-Four-layer design (see `docs/architecture.md`):
-
 ```
-connection.py  →  scanner.py  →  strats (A / B / momentum / swing / OB)  →  executor.py
-                                                                          ↘ massaniello_risk.py
-                                                                          ↘ entry_sync.py
-                                                                          ↘ diversification_enforcer.py
-                                                                          ↘ alerter.py
+connection → scanner → strat_fractal + stoch_zones → executor
+                         ↘ massaniello (auto-reset)
+                         ↘ entry_sync / place_order prewarm
+                         ↘ black_box
 ```
 
-Performance layer:
+STRAT-F hot path:
 
 ```
-parallel_fetch.py  →  candle_cache.py (incremental prefetch)
-scan_prefetch.py   →  OB blocks precalculados
-htf_scanner.py     →  15m background + zone_memory
+prefetch 5m/1m/15m → evaluate_strat_f
+  → R3 young + MATURING_WATCHLIST_MODE≠off → maturing_watchlist upsert
+  → compute_stoch + apply_stoch_help (hard)
+  → mature re-eval: live→candidate / shadow→metrics only
+  → candidate → Massaniello → enter_trade (prewarm + 1m sync)
+  → if open trade: quiet wait (no scan)
+  → resolve → next cycle
 ```
 
-Intelligence layer:
-
-```
-backtester.py      →  grid-search sobre historial de trades
-weight_calibrator.py →  pesos dinámicos por hora/volatilidad (Sharpe)
-kelly_sizer.py     →  sizing conservador (25% fraccional Kelly)
-massaniello_persistence.py →  estado SQLite entre reinicios
-```
-
-SMC stack (invocable vía módulos / `asyncio.run(main())`):
-
-```
-smc_analysis.py → smc_decision_engine.py → smc_auto_trader.py
-filter_and_sell_otc.py (payout scan + PUT)
-```
+Scan cadence: **align to 5m candle open** (`ALIGN_SCAN_TO_CANDLE`, lead 0).
 
 ---
 
-## Implemented systems
+## Operational flags (defaults)
 
-| System | Feature | Notes |
-|--------|---------|-------|
-| Modular bot architecture | #1 | Facade + core modules |
-| Strategy A (consolidation 5m) | #1, #17–#22 | Full track complete |
-| Strategy B (Wyckoff spring/sweep) | #1 | Via `strategy_spring_sweep.py` |
-| SMC analysis + decision engine | #2 | HTF dictatorship H4/M15/M1 |
-| Entry scorer | pre-existing | Adaptive threshold |
-| Massaniello session manager | #16 | Replaces martingale runtime |
-| Parallel candle prefetch | #3 | `parallel_fetch.py` |
-| Incremental candle cache | #4 | `candle_cache.py` |
-| Entry sync precision | #5 | `EntrySynchronizer`; lag ≤ 0.3s |
-| Strategy momentum 1m | #6 | `strat_momentum.py` |
-| Strategy reversal swing | #7 | `strat_reversal_swing.py` |
-| Strategy order block | #8 | `strat_order_block.py` |
-| Backtesting engine | #9 | `backtester.py` — grid-search 5 origins |
-| Dynamic weight calibration | #10 | `weight_calibrator.py` — Sharpe optimization |
-| Massaniello persistence | #11 | `massaniello_persistence.py` — SQLite save/load |
-| Hub live WebSocket | #12 | FastAPI+WS server |
-| Kelly criterion sizing | #13 | `kelly_sizer.py` — 25% fractional Kelly |
-| Diversification enforcer | #14 | `diversification_enforcer.py` — 3 configurable limits |
-| Telegram alerts | #15 | `alerter.py` — 4 event types + cooldown |
-| STRAT-A radar watchlist | ops | `strat_a_radar.py`; tick 1m top-5 |
-| Test suite | all | 251 tests, all green |
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `STOCH_HELP_MODE` | `hard` | Stoch help on entry |
+| `CONTINUOUS_DATA_COLLECTION_MODE` | `True` | 24/7 path |
+| `SESSION_AUTO_RESET_ON_COMPLETE` | `True` | Massaniello reset, no stop |
+| `ALIGN_SCAN_TO_CANDLE` | `True` | Fire at M5 open |
+| `SCAN_LEAD_SEC` | `0.0` | Exactly at open |
+| `ORDER_FAIL_QUARANTINE_CYCLES` | `5` | Hard-fail asset skip |
+| `MATURING_WATCHLIST_MODE` | `live` | off\|shadow\|live — R3 young watchlist |
+| `MATURING_WATCHLIST_MAX_AGE_BARS` | `12` | Drop if still immature past this M5 age |
+| `MATURING_WATCHLIST_TTL_SEC` | `3600` | Wall-clock TTL |
+| `MATURING_WATCHLIST_MAX_ENTRIES` | `40` | Cap (evict oldest last_seen) |
+| `MULTI_DURATION_PARALLEL` | `True` | gather place_order after one sync (same entry time) |
+| `MULTI_DURATION_IGNORE_SESSION_BLOCKS` | `True` | data mode: multi batch ignores Massaniello session complete/exhausted |
+
+---
+
+## Feature list snapshot
+
+| ID | Name | Status |
+|----|------|--------|
+| 1–7 | STRAT-F + hub | done |
+| 8 | schedule_auto | in_progress (paused) |
+| 9 | stoch_entry_help | **done** |
+| 10 | smart_order_place | **done** |
+| 11 | maturing_zone_watchlist | **done** (2026-07-17, reviewer APPROVE) |
+
+Ad-hoc (documented in changelog, no feature id): Massaniello 24/7, scan 5m, countdown log, quiet trade wait.
 
 ---
 
 ## Known problems
 
-| ID | Problem | Severity | Owner action |
-|----|---------|----------|--------------|
-| P1 | `consolidation_bot.log` ~63 MB (rotado) | low | Rotar periódicamente |
-| P2 | `parallel_fetch` DRY para OB (opcional) | low | Feature backlog |
-| P3 | Demo #22: 0 entradas en sesión validación | low | Mercado/filtros; reject-first OK |
+| ID | Problem | Severity |
+|----|---------|----------|
+| P1 | ~~Tests fail if bankroll sets min_payout=90~~ | **fixed** — `QUOTEX_TEST_MODE` / skip hydrate under pytest |
+| P2 | M1 micro-trend pre-buy gate not implemented | low (design only) — may already be in progress |
+| P3 | schedule_auto / duration_live formal close | low |
+| P4 | ~~Log file can grow large~~ | **fixed** — RotatingFileHandler 2MB×3 |
+| P5 | ~~Console X / Ctrl+C leave orphans / hang~~ | **fixed** — foreground bat + hard-timeout cleanup + PID lock |
 
 ---
 
-## Validation status
+## Next focus
 
-| Check | Status |
-|-------|--------|
-| `.\init.ps1` | ✅ exit 0 |
-| `pytest tests/` | ✅ 251 passed |
-| Live broker connection | ✅ PRACTICE login OK |
-| Full system live validation | ⏳ **Pendiente** |
+1. Run 24/7 PRACTICE; fill black box with stoch zone/action + outcomes.
+2. Optional SDD: M1 micro-trend confirm before buy.
+3. Housekeeping: schedule_auto review.

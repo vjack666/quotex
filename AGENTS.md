@@ -30,6 +30,7 @@ completo). No modifiques código hasta recibir instrucciones.
 | `agent/PROJECT_STATE.md` | Estado arquitectura, milestone, bloqueos | Siempre, al empezar |
 | `agent/TASKS.md` | Tareas In Progress / Next / Completed | Siempre, al empezar |
 | `docs/ROADMAP.md` | Roadmap legible: fases, progreso, dependencias, bloqueos | Siempre, al empezar (humano o agente) |
+| `docs/BACKLOG_SYSTEM_IMPROVEMENTS.md` | Inventario + pendientes de mejora global (no STRAT-F) | Cuando se retome hardening del sistema; **no** es el foco actual |
 | `feature_list.json` | Lista maestra de features con estado (pending / spec_ready / in_progress / done / blocked) | Siempre, al empezar |
 | `progress/current.md` | Estado de la sesión actual | Siempre, al empezar |
 | `progress/history.md` | Bitácora append-only de sesiones anteriores | Si necesitas contexto histórico |

@@ -631,3 +631,94 @@ por lag del broker; logs más legibles.
 - pytest suite verde (~339 passed).
 
 ---
+
+## 2026-07-15 — Sync docs: STRAT-F live + estocástico como next
+
+**Contexto:** El operador confirma que STRAT-F funciona. Los docs de agente
+(HANDOFF / PROJECT_STATE / TASKS) seguían en el roadmap viejo 22/22 o en
+“G3 pendiente”, y no reflejaban el subuso del estocástico.
+
+**Qué se actualizó (solo docs / feature_list note):**
+- `agent/PROJECT_STATE.md`, `agent/HANDOFF.md`, `agent/TASKS.md`
+- `docs/ROADMAP.md` — Fase 6: recolectar datos → analizar → SDD stoch entrada
+- `feature_list.json` — `next_recommended` y `strat_f_status: live_and_stable`
+- `progress/current.md`
+
+**Estado estratégico STRAT-F:**
+- Pipeline y hub: done y estables.
+- Stoch M15: grabado en black box, **sin** veto/boost de entrada aún.
+- Next: volumen de datos + análisis; no inventar filtros de fe.
+
+**No se tocó código de trading.**
+
+---
+
+## 2026-07-16 — stoch_entry_help (#9) DONE
+
+**Contexto:** Feature SDD #9 aprobada por humano e implementada; reviewer
+APPROVED. Cierre formal de status.
+
+**Qué se entregó:**
+- `src/stochastic_zones.py` — zonas Z1–Z5 + matriz action (PASS/BOOST/VETO).
+- `STOCH_HELP_MODE` default **hard** (env: off|soft|hard).
+- Scanner: tras `compute_stoch`, aplica help; veto `REJECTED_STOCH` /
+  `stoch_extreme_against`; boost post-`score_candidate`.
+- Black box: `stoch_m15` con `zone` / `action` / `score_delta`.
+- `src/strat_fractal.py` **sin cambios**.
+- Tests: `test_stochastic_zones.py` + `test_stoch_entry_help_scanner.py`
+  (+ ajuste fase3 blackbox). Trazabilidad R→test en
+  `progress/impl_stoch_entry_help.md`.
+
+**Estado:**
+- `#9 stoch_entry_help` → **done** (help layer ACTIVE, hard).
+- `#8 schedule_auto` → sigue **in_progress** (paused; no reabierto).
+
+**Next:** reanudar review de schedule_auto; recolectar black box con stoch
+activo para validar impacto en vivo.
+
+---
+
+## 2026-07-16 — smart_order_place (#10) DONE
+
+**Contexto:** Feature SDD #10 aprobada por humano e implementada; reviewer
+APPROVED. Cierre formal de status.
+
+**Qué se entregó:**
+- Prewarm de `trade_client` antes del place-order (reduce buy_timeout).
+- Alt retries con `skip_open_wait` + razón real (no silent fail).
+- Hub: `last_order_attempt` (status/reason/asset/ts) visible en UI.
+- Hard-fail quarantine: `ORDER_FAIL_QUARANTINE_CYCLES` default 5.
+- Tests: `tests/test_smart_order_place.py` (10). Trazabilidad R→test en
+  `progress/impl_smart_order_place.md`.
+
+**Estado:**
+- `#10 smart_order_place` → **done**.
+- `#8 schedule_auto` → sigue **in_progress** (paused; no reabierto).
+
+**Next:** reanudar review/cierre de schedule_auto; validar place-order en vivo.
+
+---
+
+---
+
+## 2026-07-16/17 — Sesion ops: stoch, order, 24/7, logs, 5m (documentado)
+
+**Changelog maestro:** `docs/CHANGELOG_2026-07-16.md`
+
+**Features formales:**
+- #9 `stoch_entry_help` → done (STOCH_HELP_MODE=hard)
+- #10 `smart_order_place` → done (prewarm, last_order_attempt, quarantine)
+
+**Ad-hoc:**
+- Massaniello: fin de ciclo = solo reset; bot continua (CONTINUOUS + SESSION_AUTO_RESET)
+- Scan alineado a open vela 5m (ALIGN_SCAN_TO_CANDLE, SCAN_LEAD_SEC=0)
+- Countdown log 1 linea (sin spam)
+- Quiet wait con trade abierto (sin scan ni STATS)
+
+**Docs actualizados:**
+- docs/CHANGELOG_2026-07-16.md (nuevo)
+- agent/HANDOFF.md, agent/PROJECT_STATE.md
+- docs/ROADMAP.md (fase 5)
+
+**Next:** operar 24/7; opcional gate M1 micro-tendencia; cerrar #8 schedule_auto.
+

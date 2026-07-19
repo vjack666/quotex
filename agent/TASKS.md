@@ -1,54 +1,51 @@
 # TASKS
 
 > Maintained by agents at session end. Sync with `feature_list.json` and `docs/ROADMAP.md`.
-> Last updated: 2026-07-04 — **Roadmap completo: 22/22 features done**
+> Last updated: 2026-07-15 — STRAT-F live; foco datos + stoch entry
 
 ---
 
 ## In Progress
 
-_None._
+| ID / item | Task | Notes |
+|-----------|------|-------|
+| #8 | `schedule_auto` | Spec+impl listos (`specs/schedule_auto/`, T1–T7 `[x]`). Status `in_progress` hasta review/cierre formal. |
+| ops | `duration_live` | Fix en código + `tests/test_duration_live.py`. Awaiting reviewer. No mezclar con nueva feature. |
 
 ---
 
 ## Next
 
-**Roadmap terminado.** Ninguna feature pendiente.
-
 | Priority | Task | Notes |
 |----------|------|-------|
-| P1 | Validación live del sistema completo en PRACTICE | Probar todas las estrategias integradas |
-| P2 | Rotar `consolidation_bot.log` periódicamente | ~63 MB al rotar |
-| P3 | `parallel_fetch` DRY para OB prefetch (opcional) | Refactor menor |
+| **P0** | **STRAT-F: recolectar datos de sesión** | Black box con señal, `stoch_m15`, resultado. Volumen antes de tocar reglas. |
+| **P0** | **STRAT-F: análisis estocástico → mejora de entrada** | Hoy stoch solo se observa. Objetivo: A/B y SDD para boost/veto en extremos, cruces, divergencias (`boblioteca/estocastico/`). |
+| P1 | Reviewer: `schedule_auto` + `duration_live` | Marcar done solo con trazabilidad y tests verdes en entorno limpio. |
+| P2 | Tests: no contaminar con `hub_bankroll.json` min_payout=90 | Restaura `init.ps1` verde. |
+| P3 | Rotar `consolidation_bot.log` si crece | Mantenimiento |
 
 ---
 
-## Completed
+## Completed (tracks recientes)
+
+### STRAT-F + hub (post–Strategy B)
 
 | ID | Task | Completed | Notes |
 |----|------|-----------|-------|
-| #1 | `refactor_monolith` | 2026-06-29 | Monolith → modular; 27 tests |
-| #2 | `implement_missing_modules` | 2026-06-30 | SMC + filter_sell; 58 tests total |
-| #3 | `parallel_asset_scan` | 2026-06-30 | Prefetch 5m+1m paralelo; 61 tests total |
-| #4 | `candle_cache` | 2026-06-30 | Caché incremental; 74 tests total |
-| #5 | `entry_sync_precision` | 2026-06-30 | EntrySynchronizer; lag ≤ 0.3s |
-| #6 | `strategy_momentum_1m` | 2026-06-30 | STRAT-MOMENTUM en scanner |
-| #7 | `strategy_reversal_swing` | 2026-07-04 | `strat_reversal_swing.py` |
-| #8 | `strategy_order_block` | 2026-07-04 | `strat_order_block.py` |
-| #9 | `backtesting_engine` | 2026-07-04 | `backtester.py` — 20 tests |
-| #10 | `dynamic_weight_calibration` | 2026-07-04 | `weight_calibrator.py` — 36 tests |
-| #11 | `massaniello_persistence` | 2026-07-04 | `massaniello_persistence.py` — 13 tests |
-| #12 | `hub_live_websocket` | 2026-07-04 | Speadsheets desde docs/specs-temp/ |
-| #13 | `kelly_criterion_sizing` | 2026-07-04 | `kelly_sizer.py` — 13 tests |
-| #14 | `diversification_enforcer` | 2026-07-04 | `diversification_enforcer.py` — 13 tests |
-| #15 | `telegram_alerts` | 2026-07-04 | `alerter.py` — 11 tests |
-| #16 | `massaniello_risk` | 2026-06-29 | Replaces martingale; 40 tests at close |
-| #17 | `strat_a_evaluate` | 2026-07-02 | `evaluate_strat_a()` en strat_a.py |
-| #18 | `strat_a_test_suite` | 2026-07-02 | 16 unit + 9 E2E/pending; 109 tests total |
-| #19 | `strat_a_quality_filters` | 2026-07-02 | Reject-first payout/score/zona |
-| #20 | `strat_a_htf_zone_wiring` | 2026-07-02 | HTFScanner + zone_memory |
-| #21 | `strat_a_ob_prefetch` | 2026-07-02 | OB prefetch paralelo |
-| #22 | `strat_a_live_validation` | 2026-07-02 | Demo PRACTICE; 10 rechazos logged |
+| #1 | `scanner_multi_tf_prefetch` | 2026-07-11 | `candles_15m` en scan |
+| #2 | `strat_f_baseline` | 2026-07-11 | `strat_fractal.evaluate_strat_f` |
+| #3 | `strat_f_scanner_wiring` | 2026-07-11 | Origen `STRAT-F` en scanner |
+| #4 | `strat_f_filters` | 2026-07-11 | payout / alineación / edad |
+| #5 | `strat_f_backtest` | 2026-07-11 | Backtester reconoce STRAT-F |
+| #6 | `strat_f_live_validation` | 2026-07-11 | Demo / reject-first |
+| #7 | `hub_strat_f_replacement` | 2026-07-11 | Panel aceptadas vs rechazadas |
+| — | Go-live G1+G2 | 2026-07-11 | Panel en bot real + `STRAT_F_ONLY` |
+| — | Engineering docs | 2026-07-11 | SRS/ADR/ERD/API en `docs/engineering/` |
+| — | Hub bankroll + resolve lag | 2026-07-14 | Massaniello desde UI; UNRESOLVED vs LOSS falso |
+
+### Roadmap legacy (pre–STRAT-F, cerrado)
+
+Features #1–#22 del roadmap viejo (modular bot, Massaniello, strategies A/B/momentum/swing/OB, hub WS, Kelly, diversificación, alerts, etc.) — **done 2026-07-04**. Strategy B eliminada 2026-07-11. Detalle histórico: `progress/history.md`.
 
 ---
 
@@ -56,5 +53,6 @@ _None._
 
 1. Move to **In Progress** when `feature_list.json` status → `in_progress`.
 2. Move to **Completed** when reviewer approves and status → `done`.
-3. Never have more than one feature In Progress (Harness rule).
-4. Operational tasks (credentials, validation) stay in **Next** until resolved.
+3. Never have more than one **feature de producto** In Progress (Harness). Housekeeping/bugfix se documenta aparte.
+4. **No inventar SDD de stoch** sin datos de black box + análisis.
+5. Operational tasks (credenciales, corridas live) stay in **Next** until the human closes them.
