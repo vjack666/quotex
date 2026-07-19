@@ -91,7 +91,9 @@ async def test_executor_dry_run_order(monkeypatch):
         "EURUSD_otc", "call", 1.0, zone, "test", "initial",
     )
     assert ok is True
-    assert "EURUSD_otc" in bot.trades
+    assert any(
+        getattr(t, "asset", None) == "EURUSD_otc" for t in bot.trades.values()
+    )
 
 
 def test_executor_cycle_reset_on_target():
@@ -153,7 +155,7 @@ async def test_executor_enter_trade_strat_a_initial_sets_origin_and_monitor(monk
     )
 
     assert ok is True
-    trade = bot.trades["EURUSD_otc"]
+    trade = next(t for t in bot.trades.values() if t.asset == "EURUSD_otc")
     assert trade.strategy_origin == "STRAT-A"
     assert trade.stage == "initial"
     assert bot.stats["strat_a_signals"] == 1
@@ -196,9 +198,9 @@ async def test_executor_enter_trade_strat_a_breakout_no_monitor(monkeypatch):
     )
 
     assert ok is True
-    trade = bot.trades["EURUSD_otc"]
+    trade = next(t for t in bot.trades.values() if t.asset == "EURUSD_otc")
     assert trade.stage == "breakout"
     assert trade.strategy_origin == "STRAT-A"
     task_names = {t.get_name() for t in bot._trade_tasks}
     assert "monitor:EURUSD_otc" not in task_names
-    assert "resolve:EURUSD_otc:breakout" in task_names
+    assert any(n.startswith("resolve:EURUSD_otc#") and n.endswith(":breakout") for n in task_names)

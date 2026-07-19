@@ -316,6 +316,12 @@ class TradeExecutor:
         Calcula monto de entrada usando MassanielloRiskManager.
         Retorna (monto, ganancia_esperada).
         """
+        # Modo stake fijo 24h: ignora Massaniello, usa monto fijo del usuario.
+        if getattr(_cfg, "STAKE_MODE", "massaniello") == "fixed":
+            amount = float(getattr(_cfg, "FIXED_STAKE_USD", 2.0))
+            payout_rate = max(0.01, float(payout_pct) / 100.0)
+            expected_profit = self._round_up_to_cents(amount * payout_rate)
+            return amount, expected_profit
         vcap = self._massaniello_virtual()
         mgr = self.bot.massaniello
         played = mgr.wins + mgr.losses
