@@ -2348,6 +2348,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             "candles_1m": candles_1m,
             "candles_15m": candles_15m,
             "stoch_m15": stoch_m15,
+            "math_quality": f_eval.math_quality,
             "zone": f_eval.zone,
             "decision": None,
         }
@@ -2407,6 +2408,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 setattr(f_candidate, "_reversal_strength", f_eval.strength)
                 setattr(f_candidate, "_signal_ts_1m", candles_1m[-1].ts if candles_1m else None)
                 setattr(f_candidate, "_spring_margin", f_eval.spring_margin)
+                setattr(f_candidate, "_math_quality", f_eval.math_quality)
                 setattr(f_candidate, "_amount", ctx.initial_amount)
                 setattr(f_candidate, "_stage", "initial")
                 # R1/R2/R3/R4/R5 — re-chequeo M15 ACTUAL al promover desde maturing_watchlist.
@@ -2516,6 +2518,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     "ctx": f_eval.m15_context,
                     "event": f_eval.m5_event,
                     "pattern": f_eval.pattern_name,
+                    "math_quality": f_eval.math_quality,
                 },
                 "candles_1m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}

@@ -447,6 +447,7 @@ class Journal:
             "order_block_info": str(getattr(entry, "_ob_info", "") or ""),
             "ma_info": str(getattr(entry, "_ma_info", "") or ""),
             "score_breakdown": dict(bd),
+            "math_quality": getattr(entry, "_math_quality", None),
         }
 
         # Serializar velas (últimas 20 para no inflar la BD)
