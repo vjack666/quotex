@@ -185,6 +185,10 @@
   .ctrl-btn.stop:hover:not(:disabled) { background: #d94040; }
   .ctrl-btn.shutdown { background: #555; color:#fff; font-size:11px; padding:4px 10px; }
   .ctrl-btn.shutdown:hover { background: #333; }
+  .ctrl-btn.reconnect { background: var(--orange); color:#fff; font-size:11px; padding:4px 10px; }
+  .ctrl-btn.reconnect:hover:not(:disabled) { background: #e07830; }
+  .ctrl-btn.reconnect.reconnecting { animation: pulse-reconnect 1s ease-in-out infinite; }
+  @keyframes pulse-reconnect { 0%,100%{opacity:1} 50%{opacity:.5} }
   .ctrl-spacer { flex:1; }
 
   /* Session Complete Modal */
@@ -553,6 +557,7 @@
   <span class="ctrl-label">Bot</span>
   <span class="ctrl-state stopped" id="ctrl-state">STOPPED</span>
   <button class="ctrl-btn start" id="btn-toggle" onclick="botToggle()">Iniciar</button>
+  <button class="ctrl-btn reconnect" id="btn-reconnect" onclick="reconnectBot()" style="display:none;" title="Reconectar WebSocket al broker">🔄 Reconectar</button>
   <span class="ctrl-state stopped" id="schedule-badge" style="display:none;" title="Estado del schedule"></span>
   <span class="ctrl-spacer"></span>
   <button class="ctrl-btn shutdown" onclick="shutdownApp()">Finalizar</button>
@@ -1429,6 +1434,29 @@ function shutdownApp(){
   });
 }
 
+// ── Reconnect Bot ──────────────────────────────────────────────────────────
+function reconnectBot(){
+  const btn = document.getElementById("btn-reconnect");
+  btn.disabled = true;
+  btn.classList.add("reconnecting");
+  btn.textContent = "🔄 Reconectando…";
+  fetch("/api/bot/reconnect",{method:"POST"}).then(r=>r.json()).then(d=>{
+    btn.disabled = false;
+    btn.classList.remove("reconnecting");
+    if(d.ok){
+      btn.textContent = "🔄 Reconectar";
+      btn.style.display = "none";
+    } else {
+      btn.textContent = "⚠ Falló — reiniciar";
+    }
+    pollRunnerStatus();
+  }).catch(()=>{
+    btn.disabled = false;
+    btn.classList.remove("reconnecting");
+    btn.textContent = "⚠ Error — reiniciar";
+  });
+}
+
 function pollRunnerStatus(){
   fetch("/api/bot/status").then(r=>r.json()).then(updateRunnerUI).catch(()=>{});
 }
@@ -2173,6 +2201,12 @@ function clearLogs(){
 
 pollRunnerStatus();
 setInterval(pollRunnerStatus, 5000);
+// Show/hide reconnect button based on bot state
+setInterval(function(){
+  const st = document.getElementById("ctrl-state").textContent;
+  const rb = document.getElementById("btn-reconnect");
+  if(rb) rb.style.display = (st==="RUNNING"||st==="STARTING") ? "" : "none";
+}, 2000);
 connectLogWs();
 initResizeHandles();
 

@@ -224,6 +224,11 @@ class ConsolidationBot:
     async def ensure_connection(self) -> bool:
         return await self.connection_mgr.ensure_connection(self.account_type)
 
+    async def force_reconnect(self) -> dict:
+        """Force reconnect from hub button. Returns status dict."""
+        from connection import force_reconnect_from_hub
+        return await force_reconnect_from_hub(self.client, self.account_type)
+
     async def reconcile_pending_candidates(self, max_age_minutes: Optional[float] = None) -> None:
         await self.executor.reconcile_pending_candidates(max_age_minutes)
 
@@ -493,8 +498,13 @@ async def main(
 
             try:
                 if loop_forever and not await bot.ensure_connection():
-                    alerter.alert_connection_lost()
-                    await asyncio.sleep(5.0)
+                    from connection import get_reconnect_state
+                    _rs = get_reconnect_state()
+                    if _rs["recommended_restart"]:
+                        alerter.alert_connection_lost()
+                    # Silent: backoff already handled inside ensure_connection.
+                    # Only sleep briefly before next cycle retry.
+                    await asyncio.sleep(2.0)
                     continue
 
                 # Session lifecycle check BEFORE scanning
@@ -617,10 +627,25 @@ async def main(
                 exc_str = str(exc)
                 if looks_like_connection_issue(exc_str):
                     # Conexiones WS con Quotex se caen ocasionalmente (Cloudflare
-                    # idle timeout, reconexiones del broker). No es un error del
-                    # bot — reconectar silenciosamente sin spam en terminal.
-                    log.debug("Conexión perdida: %s — reconectando…", exc_str)
+                    # idle timeout, reconexiones del broker). Reconectar con backoff
+                    # exponencial. Solo loguear WARNING en fallos repetidos.
+                    from connection import get_reconnect_state, _reconnect_backoff_sec
                     await bot.ensure_connection()
+                    post_state = get_reconnect_state()
+                    if post_state["recommended_restart"]:
+                        log.error(
+                            "⚠ Conexión perdida y reconexión falló %d veces. "
+                            "Usá el botón 🔄 Reconectar en el hub.",
+                            post_state["consecutive_failures"],
+                        )
+                    elif not post_state["last_ok"]:
+                        log.warning(
+                            "Conexión perdida — reconectando (intento %d, backoff %.0fs)…",
+                            post_state["consecutive_failures"],
+                            _reconnect_backoff_sec(),
+                        )
+                    else:
+                        log.info("Conexión restaurada tras reconexión")
                 else:
                     log.error("Error en ciclo: %s", exc, exc_info=True)
 

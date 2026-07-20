@@ -267,6 +267,17 @@ async def _connect_hub_after_start():
         await asyncio.sleep(0.1)
 
 
+@_hub_app.post("/api/bot/reconnect")
+async def bot_reconnect():
+    """Force WS reconnect from hub button. Works while bot is running."""
+    if _runner.bot is None:
+        return {"ok": False, "reason": "bot_not_running"}
+    if _runner.state not in ("running", "starting"):
+        return {"ok": False, "reason": "bot_not_started"}
+    result = await _runner.bot.force_reconnect()
+    return result
+
+
 @_hub_app.post("/api/bot/stop")
 async def bot_stop():
     """Stop the trading bot gracefully (user action → disarm schedule)."""

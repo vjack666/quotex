@@ -17,7 +17,10 @@ from config import (
     FETCH_RETRIES,
     FETCH_RETRY_BACKOFF_SEC,
     HEALTHCHECK_RECONNECT_RETRIES,
+    MAX_CONSECUTIVE_RECONNECT_FAILURES,
+    MAX_RECONNECT_BACKOFF_SEC,
     MIN_PAYOUT,
+    RECONNECT_BACKOFF_BASE_SEC,
     RECONNECT_TIMEOUT_SEC,
 )
 from models import Candle
@@ -36,6 +39,42 @@ log = logging.getLogger("connection")
 # loop de consolidation_bot.py reconecten el WebSocket a la vez y corrompan la
 # sesión. Toda ruta de reconexión (force_reconnect / ConnectionManager) lo toma.
 _RECONNECT_LOCK = asyncio.Lock()
+
+# ── Reconnect state (for hub + diagnostics) ─────────────────────────────────
+_reconnect_failures = 0        # consecutive failure counter
+_reconnect_last_ts = 0.0       # timestamp of last reconnect attempt
+_reconnect_last_ok = True      # last attempt succeeded?
+_reconnect_recommended = False # True when max failures hit → recommend restart
+
+
+def get_reconnect_state() -> dict:
+    """Return current reconnect state for hub/API consumption."""
+    return {
+        "consecutive_failures": _reconnect_failures,
+        "last_ok": _reconnect_last_ok,
+        "recommended_restart": _reconnect_recommended,
+        "last_attempt_ts": _reconnect_last_ts,
+    }
+
+
+def _record_reconnect_attempt(ok: bool) -> None:
+    global _reconnect_failures, _reconnect_last_ts, _reconnect_last_ok, _reconnect_recommended
+    _reconnect_last_ts = time.time()
+    _reconnect_last_ok = ok
+    if ok:
+        _reconnect_failures = 0
+        _reconnect_recommended = False
+    else:
+        _reconnect_failures += 1
+        if _reconnect_failures >= MAX_CONSECUTIVE_RECONNECT_FAILURES:
+            _reconnect_recommended = True
+
+
+def _reconnect_backoff_sec() -> float:
+    """Exponential backoff: 2s, 4s, 8s... capped."""
+    attempt = min(_reconnect_failures, 8)  # cap exponent
+    delay = RECONNECT_BACKOFF_BASE_SEC * (2 ** max(0, attempt - 1))
+    return min(delay, MAX_RECONNECT_BACKOFF_SEC)
 
 
 def raw_to_candle(raw: dict) -> Optional[Candle]:
@@ -363,9 +402,15 @@ class ConnectionManager:
     async def _ensure_connection_locked(self, account_type: str) -> bool:
         try:
             if await asyncio.wait_for(self.client.check_connect(), timeout=3.0):
+                _record_reconnect_attempt(True)
                 return True
         except Exception:
             pass
+
+        # Backoff between repeated failures (avoid hammering Quotex/Cloudflare)
+        backoff = _reconnect_backoff_sec()
+        if _reconnect_failures > 0:
+            await asyncio.sleep(backoff)
 
         for attempt in range(1, HEALTHCHECK_RECONNECT_RETRIES + 1):
             try:
@@ -383,6 +428,7 @@ class ConnectionManager:
                         self.client.change_account(account_type),
                         timeout=RECONNECT_TIMEOUT_SEC,
                     )
+                    _record_reconnect_attempt(True)
                     log.warning("Reconexión exitosa durante loop 24/7")
                     return True
                 reason_txt = str(reason)
@@ -394,6 +440,14 @@ class ConnectionManager:
             except Exception as exc:
                 log.warning("Excepción en reconexión: %s", exc)
             await asyncio.sleep(CONNECT_RETRY_DELAY_SEC)
+
+        _record_reconnect_attempt(False)
+        if _reconnect_recommended:
+            log.error(
+                "⚠ Reconexión falló %d veces consecutivas. "
+                "Recomendado: usar el botón Reconectar en el hub.",
+                _reconnect_failures,
+            )
         return False
 
 
@@ -422,3 +476,16 @@ async def create_trading_client(
     except Exception:
         pass
     return client, ""
+
+
+async def force_reconnect_from_hub(client: Quotex, account_type: str) -> dict:
+    """Force reconnect triggered from hub button. Returns status dict."""
+    ok, reason = await force_reconnect(
+        client, account_type, step_label="hub_button",
+    )
+    _record_reconnect_attempt(ok)
+    return {
+        "ok": ok,
+        "reason": reason,
+        "state": get_reconnect_state(),
+    }
