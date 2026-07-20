@@ -2324,7 +2324,9 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             )
             stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
         _stoch_k = (stoch_m15 or {}).get("k") if stoch_m15 else None
-        _stoch_help = apply_stoch_help(_stoch_k, f_eval.direction or "", _stoch_mode)
+        _stoch_k_prev = (stoch_m15 or {}).get("k_prev") if stoch_m15 else None
+        _stoch_d = (stoch_m15 or {}).get("d") if stoch_m15 else None
+        _stoch_help = apply_stoch_help(_stoch_k, f_eval.direction or "", _stoch_mode, k_prev=_stoch_k_prev, d=_stoch_d)
         if stoch_m15 is not None:
             stoch_m15 = {
                 **stoch_m15,

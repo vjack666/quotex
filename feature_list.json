@@ -1,13 +1,13 @@
 {
   "project": "quotex-hft-bot",
-  "description": "Bot de opciones binarias en Quotex. Estrategias vivas: consolidación (STRAT-A), momentum 1m, reversal swing, order block. NUEVA: STRAT-F (Fractal/Wyckoff, marco M15/M5/M1). Gestión Massaniello.",
+  "description": "Bot de opciones binarias en Quotex. Estrategias vivas: consolidación (STRAT-A), momentum 1m, reversal swing, order block. NUEVA: STRAT-F (Fractal/Wyckoff, marco M15/M5/M1) con math filters (Hurst/R²/angle/squeeze) y scoring contextual. Gestión Massaniello.",
   "note": "Strategy B (Wyckoff Spring/Sweep) fue ELIMINADA físicamente el 2026-07-11. Este roadmap reemplaza al anterior (feature_list.json viejo + docs/ROADMAP*.md borrados).",
   "roadmap": {
-    "version": "2026-07-15",
+    "version": "2026-07-20",
     "strategy_focus": "strat_f",
-    "strat_f_status": "live_and_stable",
-    "next_recommended": "smart_order_place (#10) done. Resume schedule_auto (#8) review/close; collect black-box data under active stoch help.",
-    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done: zone-based help active (default hard) without changing evaluate_strat_f. #10 smart_order_place done."
+    "strat_f_status": "live_and_stable_with_math_filters",
+    "next_recommended": "Operar 24/7 con math filters + contextual scoring; validar impacto en black box.",
+    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done (V2 with k_prev/d). #10 smart_order_place done. Math filters + contextual scoring done (2026-07-20)."
   },
   "rules": {
     "one_feature_at_a_time": true,
@@ -274,6 +274,25 @@
       "approved_at": "2026-07-19",
       "done_at": "2026-07-19",
       "implementation_note": "Re-chequeo M15 actual + stoch M5 al promover desde maturing_watchlist. R1-R5 cubiertos por tests/test_strat_f_maturing_recheck.py (13 passed). Reparado bug preexistente: stoch_m15 indefinido con _eval_override."
+    },
+    {
+      "id": 17,
+      "name": "watchdog_bot",
+      "title": "Watchdog autónomo 24/7 (reinicio ante caída de conexión / estado no-sano)",
+      "phase": "ops",
+      "priority": 17,
+      "description": "scripts/watchdog_bot.py ejecutado como cron cada 5 min. Chequea API (127.0.0.1:8080) + proceso + marker 'Connection to remote host was lost' en consolidation_bot.log; si el bot cae o /api/bot/status no es running/starting (meta diaria, ciclo, error) → cleanup + reinicio + loop 24/7. Mantiene el bot vivo sin intervención humana. Log en scripts/watchdog.log.",
+      "acceptance": [
+        "scripts/watchdog_bot.py corre como cron cada 5 min (proceso efímero)",
+        "Detecta caída de API/proceso y marker de conexión perdida",
+        "Detecta estado no-sano vía /api/bot/status (≠ running/starting)",
+        "Reinicia con cleanup + arranque del loop 24/7 sin matar bot sano",
+        "tests/test_watchdog_bot.py verde (api_alive, bot_state, reinicio ante stopped/error)"
+      ],
+      "status": "done",
+      "done_at": "2026-07-19",
+      "implementation_note": "2 commits (cb4b6b2 watchdog conexión, a95705b estado no-sano). 14 tests totales (5 + 9). Cron 'quotex-bot-watchdog' cada 5 min.",
+      "depends_on": []
     }
   ]
 }

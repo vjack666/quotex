@@ -1,7 +1,7 @@
 # Roadmap — quotex-hft-bot (post-Strategy B)
 
 > **Fuente de verdad:** `feature_list.json`
-> **Última actualización:** 2026-07-19
+> **Última actualización:** 2026-07-20 (math filters + contextual scoring)
 > **Changelog sesión:** `docs/CHANGELOG_2026-07-16.md`
 > **Contexto:** Strategy B eliminada. **STRAT-F en producción** + stoch M15 help hard.
 > Recolección **24/7** (Massaniello solo se resetea al fin de ciclo).
@@ -32,7 +32,7 @@ Marco fractal (la temporalidad mayor manda):
   banda naranja (zona Wyckoff) = evento de entrada.
 - **M1 (menor / ejecución)**: vela que toca la banda y la rechaza (no cierra fuera).
 
-Expiración 3 min (3 velas de M1). Alineación M15+M5+M1 sube la probabilidad.
+Expiración **10 min (600s)** por defecto desde 2026-07-19 (pedido usuario; antes 15min/900s). Alineación M15+M5+M1 sube la probabilidad.
 
 ---
 
@@ -185,10 +185,23 @@ Hipótesis a validar (no son features todavía):
 
 ---
 
+## Fase ops 2 — Watchdog 24/7 + config (2026-07-19)
+
+Mantiene el bot vivo sin intervención humana. Commits `cb4b6b2`, `a95705b`, `ad54bd4`.
+
+| ID | Feature / fix | Estado | Notas |
+|----|---------------|--------|-------|
+| 17 | `watchdog_bot` | ✅ done | `scripts/watchdog_bot.py` (cron cada 5 min). Chequea API + proceso + marker "Connection to remote host was lost"; si cae → cleanup + reinicio + loop 24/7. También reinicia si `/api/bot/status` no es running/starting (meta diaria, ciclo, error). 14 tests (`tests/test_watchdog_bot.py`, mocks). |
+| — | Config 24h + vencimiento 10min | ✅ done | `DURATION_SEC=600`, `MULTI_DURATION_SECS=(600,)`, `MASSANIELLO_PRIMARY=600`, `DAILY_LOSS_GUARD_ENABLED=False` en disco (pedido usuario 2026-07-19). Fix bug: el loop lee el módulo config, no `_runner._config` mutado por `/api/daily-guard` (antes pausaba aunque el endpoint dijera OFF). |
+
+---
+
 ## Changelog
 
 | Fecha | Cambio |
 |-------|--------|
+| 2026-07-20 | **STRAT-F math filters + contextual scoring**: audit vs trading best practices; P0 M1 2-velas, duración 900s; P1 math_filters.py (Hurst/R²/angle/squeeze), Wyckoff range band, stoch V2 (k_prev/d), M15 regresión; P2 scoring contextual 3 niveles (proportional zones + M15 weight + consensus bonus). Archivos: src/math_filters.py (NUEVO), src/strat_fractal.py, src/stochastic_zones.py, src/stochastic_m15.py, src/scanner.py, src/config.py. 73 tests verdes. |
+| 2026-07-19 | **Watchdog 24/7 + config (ops)** — commits `cb4b6b2`/`a95705b`/`ad54bd4`: (1) `scripts/watchdog_bot.py` nuevo (cron cada 5 min) que chequea API + proceso + marker "Connection to remote host was lost" y reinicia con cleanup + loop 24/7; además reinicia si `/api/bot/status` no es running/starting (meta diaria/ciclo/error). 14 tests (`tests/test_watchdog_bot.py`). (2) Config: `DURATION_SEC=600`, `MULTI_DURATION_SECS=(600,)`, `MASSANIELLO_PRIMARY=600`, `DAILY_LOSS_GUARD_ENABLED=False` en disco (pedido usuario). Fix bug: el loop lee el módulo config, no `_runner._config` mutado por `/api/daily-guard` (antes pausaba aunque el endpoint dijera OFF). |
 | 2026-07-19 | **Feature #16 — Re-chequeo M15 al promover desde maturing_watchlist (STRAT-F) DONE**: corrige la entrada contra-tendencia M15 visible (~30% de aceptadas, 13/43 en auditoría). Causa raíz: la sala de espera (`maturing_watchlist`) promovía con el `m15_context` de la DETECCIÓN, no el actual; si la tendencia viró, la entrada salía contra-tendencia sin re-chequeo (R1 de `evaluate_strat_f` no se aplicaba en promoción). Solución (teoría de agotamiento de Ruben): al promover se re-evalúa M15 actual; alineado→promueve; contra-tendencia→SOLO promueve si stoch M5 confirma agotamiento (CALL contra-M15-bajista %K<20; PUT contra-M15-alcista %K>80), si no→DROP (no opera, no consume Massaniello). Archivos: `src/strat_fractal.py` (`recheck_m15_alignment`, `stoch_m5_exhausted`), `src/scanner.py` (re-chequeo en bloque `mark_promoted` + fix `stoch_m15=None` por bug preexistente `UnboundLocalError` con `_eval_override`). Tests: `tests/test_strat_f_maturing_recheck.py` (13 passed, R1-R5). Sin regresiones (21 failed pre-existentes sin cambio vs baseline). SDD: `specs/strat_f_maturing_m15_recheck/`. |
 | 2026-07-18 | **Validación Wyckoff Fase C — FASE 1 (recolección 40/40) + FASE 2 (análisis, sin edge)**: config bot a SOLO vencimiento 5min (`MULTI_DURATION_DATA_COLLECTION=False`, `MULTI_DURATION_SECS=(300,)`) para que el filtro FASE1 `entry_duration_sec=300` coincida. Recolección demo cuenta-only a 40 filas (300s + spring_margin NOT NULL + outcome WIN/LOSS + scanned_at>=inicio experimento). Resultado FASE1: 40/40 alcanzadas. **FASE 2 (observacional, sin tocar decisión/score):** baseline WR 47.5% (19W/21L); spring_margin median=0.0, Q3=0.0176 (mayoría ~0, pocos valores altos); buckets por cuartiles y thresholds fijos (>=0.01..0.10) máximo +2.5pp vs baseline. **NINGÚN threshold alcanza el umbral de capital 8pp fijado ANTES de datos** → FASE 3 (port a SSD) NO procede con n=40. Decisiones de operación de soporte: (a) separación limpia Gestión Massaniello vs Modo 24h en dos flags/endpoints/botones independientes (`STAKE_MODE` solo monto, `DAILY_LOSS_GUARD_ENABLED` solo frenos); (b) `STAKE_MODE=fixed` → executor usa `FIXED_STAKE_USD` sin Massaniello; (c) `DAILY_LOSS_GUARD_ENABLED=False` → `continuous_mode.should_skip_scan`/`should_stop_entirely` no pausan (modo 24h sin límite diario); (d) botón STOP del hub ahora cierra también el server (`_force_exit_cleanup`) para poder cerrar durante reconexión. Archivos: src/config.py, src/executor.py, src/continuous_mode.py, app.py, hub/static/index.html. Verificado AST + 26 tests (webapp_lifecycle, multi_duration, spring_heuristic). |
 | 2026-07-17 | **FASE 0 — spring_margin (float) reemplaza spring_confirmed (bool)**: el binario estaba sesgado estructuralmente a 1/NULL por STRAT_F_ZONE_MIN_AGE=3 (filtro de edad garantiza >=3 velas 5m post-fractal, mínimo casi siempre >= band). Ahora `spring_margin` = (min/max post-fractal - band)/band*100, continuo y con signo (positivo=no rompió, negativo=rompió). Campo `spring_margin REAL` en `trade_journal.candidates` (dejé `spring_confirmed INTEGER` como columna muerta por compatibilidad). Misma heurística `_spring_heuristic_5m1m`, mismo punto de integración (strat_fractal.py:314 return, scanner.py log/_rec, trade_journal log_candidate). SOLO logging, sin tocar if de aceptación/rechazo ni score. 7 tests actualizados (test_spring_heuristic.py) + smoke DB REAL con decimales (0.0455, -0.0416, None). Plan de 5 fases (Validación Wyckoff Fase C) documentado en progress/current.md con umbral 8pp fijado ANTES de datos. |

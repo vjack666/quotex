@@ -1,7 +1,7 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> Last session: 2026-07-16/17 — stoch help, smart order, 24/7 Massaniello, scan 5m, quiet logs
+> Last session: 2026-07-20 — STRAT-F math filters + contextual scoring
 > **Changelog:** `docs/CHANGELOG_2026-07-16.md`
 
 ---
@@ -23,6 +23,18 @@
    - `#8 schedule_auto` in_progress (paused).
    - Tests bankroll `min_payout=90` (P1).
    - Gate M1 micro-tendencia pre-buy: **✅ implementado y ON** (`M1_MICRO_CONFIRM_ENABLED=True`).
+8. **Watchdog 24/7 (2026-07-19, #17 done)**:
+   - `scripts/watchdog_bot.py` corre como cron cada 5 min. Chequea API (`127.0.0.1:8080`) + proceso + marker "Connection to remote host was lost" en `consolidation_bot.log`; si cae → cleanup + reinicio + loop 24/7.
+   - También reinicia si `/api/bot/status` no es `running`/`starting` (meta diaria, ciclo o error). Modo 24h = sin frenos.
+   - Log en `scripts/watchdog.log`. 14 tests (`tests/test_watchdog_bot.py`).
+9. **Config 24h + vencimiento 10min (2026-07-19)**:
+   - `DURATION_SEC=600`, `MULTI_DURATION_SECS=(600,)`, `MASSANIELLO_PRIMARY=600` en disco (pedido usuario).
+   - `DAILY_LOSS_GUARD_ENABLED=False` en disco: el loop lee el **módulo** config, no `_runner._config` mutado por `/api/daily-guard`. Antes de este fix, el bot pausaba por daily loss aunque el endpoint dijera OFF.
+10. **Math filters + contextual scoring (2026-07-20)**:
+    - Nuevo módulo `src/math_filters.py` — Hurst, R², angle, squeeze, composite scorer.
+    - Stochastic V2: `k_prev`/`d` keyword-only; vetos solo en cruce confirmado.
+    - Scoring contextual 3 niveles: proportional zones + M15 weight + consensus bonus.
+    - Duración 900s (600→900 por pedido usuario, reversión temporal).
 
 ---
 
@@ -30,7 +42,7 @@
 
 | Priority | Item | Owner |
 |----------|------|-------|
-| **P0** | Operar 24/7 con stoch hard + black box; validar impacto | Human + bot |
+| **P0** | Operar 24/7 con math filters + contextual scoring; validar impacto | Human + bot |
 | **P1** | Validar M1 micro gate en vivo (log `M1 micro` / REJECTED_M1_MICRO) | Human + bot |
 | **P2** | Review/cierre `schedule_auto` + `duration_live` | Agent |
 | **P3** | Aislar tests min_payout | Agent |
@@ -64,6 +76,7 @@ Lectura mínima:
 | 2026-07-16/17 | 24/7 Massaniello; align 5m; countdown 1 línea; quiet trade wait |
 | 2026-07-17 | **FIX RUNTIME**: cuelgue por WS caído en espera multi-leg. Eliminado trade_client (2ª instancia, Pitfall J CORRECTION); reconexión en _resolve_trade + wait_while_trade_open vía bot.ensure_connection (socket único). Ver `progress/current.md`. |
 | 2026-07-17 | **parallel_scan_fase3 (id 15) AUDITADO + CORREGIDO en vivo**: la 1ra entrega (commit e59be7e) tenía STRAT-F MUERTA en producción a pesar de 4 tests verdes — el dispatch `_run_strat_f_parallel` quedó tras el `return` de `_scan_phase_evaluate_assets` y en método equivocado (`radar_watch_tick`). 2do bug: `upsert_young` con dict posicional vs kw-only. Auditoría en vivo detectó ambos; corregido y re-validado (`STRAT-F ok=1..5`/ciclo, 0 errores maturing). (1) arranque inmediato; (2) `SESSION_MAX_MIN=0`; (3) `ALIGN_SCAN_TO_CANDLE=False`; (4) **parallel_scan_fase3** (id 15, done, auditado). |
+| 2026-07-20 | **Math filters + contextual scoring (STRAT-F)**: audit vs best practices trading; P0 M1 2-velas, duración 900s; P1 math_filters.py (Hurst/R²/angle/squeeze), Wyckoff range band, stoch V2 (k_prev/d), M15 regresión; P2 scoring contextual 3 niveles (proportional zones + M15 weight + consensus bonus). 73 tests verdes. |
 
 ---
 

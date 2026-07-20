@@ -30,6 +30,7 @@ class StratFEvaluation:
     m5_event: str = "none"                   # "fractal_up" | "fractal_down" | "none"
     info: str = ""
     spring_margin: "Optional[float]" = None        # heurística 5m/1m: margen % del precio post-fractal vs banda del fractal. Positivo=spring limpio, negativo=rompió. None=indeterminado. SOLO observación, NO bloquea.
+    math_quality: "Optional[dict]" = None    # geometric analysis (hurst, r2, angle, squeeze)
 
 
 def _fractal_up(candles: List[Candle], i: int) -> bool:
@@ -59,63 +60,111 @@ def _fractal_down(candles: List[Candle], i: int) -> bool:
 
 
 def _m15_context(candles_15m: List[Candle]) -> str:
-    """Contexto M15: range / uptrend / downtrend / broken.
-
-    'broken' = el tramo previo era un rango lateral (estreo) y la ultima vela
-    lo rompio con cuerpo (no operamos rebotes en ese caso).
-    'range'  = rango estrecho sin tendencia.
-    'uptrend'/'downtrend' = movimiento claro de cierre primero->ultimo.
+    """Contexto M15 via regresion lineal (geometric eyes, no magic numbers).
+    
+    Instead of hardcoded thresholds (0.004, 0.006), uses:
+    - R² of the close price regression → measures if there's a real trend
+    - Slope angle → measures direction and strength
+    - Decision logic:
+      * R² < 0.3 → "range" (no clear direction, noise dominates)
+      * R² >= 0.3 AND slope angle > +2° → "uptrend"
+      * R² >= 0.3 AND slope angle < -2° → "downtrend"
+      * Check for breakout: last candle closes > 2 standard deviations
+        from the regression line → "broken"
     """
+    import math
     if len(candles_15m) < 6:
         return "unknown"
-    recent = candles_15m[-6:]
-    last = recent[-1]
-    prev = recent[:-1]
-    prev_hi = max(c.high for c in prev)
-    prev_lo = min(c.low for c in prev)
-    prev_mid = (prev_hi + prev_lo) / 2.0
-    prev_rng_pct = (prev_hi - prev_lo) / prev_mid if prev_mid else 0.0
-    body = abs(last.close - last.open)
-
-    # Ruptura de un rango lateral previo
-    if prev_rng_pct < 0.004:
-        if last.close > prev_hi and body > 0:
+    
+    recent = candles_15m[-12:] if len(candles_15m) >= 12 else candles_15m
+    closes = [float(c.close) for c in recent]
+    n = len(closes)
+    
+    # Linear regression on closes
+    xs = list(range(n))
+    mean_x = sum(xs) / n
+    mean_y = sum(closes) / n
+    
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, closes))
+    den = sum((x - mean_x) ** 2 for x in xs)
+    slope = num / den if abs(den) > 1e-15 else 0.0
+    intercept = mean_y - slope * mean_x
+    
+    # R² calculation
+    ss_tot = sum((y - mean_y) ** 2 for y in closes)
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, closes))
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 1e-15 else 0.0
+    r_squared = max(0.0, min(1.0, r_squared))
+    
+    # Slope as angle (normalized by price level for cross-asset comparison)
+    if mean_y > 0:
+        normalized_slope = slope / mean_y  # percentage change per candle
+        angle_deg = math.degrees(math.atan(normalized_slope * 100))
+    else:
+        angle_deg = 0.0
+    
+    # Breakout detection: last candle vs regression band
+    last_close = closes[-1]
+    residuals = [y - (slope * x + intercept) for x, y in zip(xs, closes)]
+    std_residual = (sum(r ** 2 for r in residuals) / n) ** 0.5 if n > 1 else 0.0
+    last_residual = residuals[-1]
+    
+    # Breakout: last residual exceeds 2σ of previous residuals' deviations.
+    # This catches the case where previous candles were tightly clustered around
+    # the regression line and the last candle jumps out.
+    prev_residuals_std = (sum(r ** 2 for r in residuals[:-1]) / max(1, n - 1)) ** 0.5
+    if prev_residuals_std > 0:
+        is_broken_up = last_residual > 2.0 * prev_residuals_std
+        is_broken_down = last_residual < -2.0 * prev_residuals_std
+        if is_broken_up or is_broken_down:
             return "broken"
-        if last.close < prev_lo and body > 0:
+    elif std_residual > 0:
+        # Fallback: if all previous residuals are exactly zero, any nonzero last = breakout
+        if abs(last_residual) > 1e-10:
             return "broken"
-
-    # Tendencia / rango sobre una ventana mas amplia (las velas disponibles)
-    trend = candles_15m[-12:] if len(candles_15m) >= 12 else candles_15m
-    first_close = trend[0].close
-    last_close = trend[-1].close
-    move_pct = (last_close - first_close) / first_close if first_close else 0.0
-    if move_pct > 0.006:
+    
+    # Direction based on R² and angle
+    if r_squared < 0.3:
+        return "range"  # noise dominates, no clear trend
+    
+    # Threshold ~3° ≈ 0.6% move over 12 candles (matches old move_pct threshold)
+    if angle_deg > 3.0:
         return "uptrend"
-    if move_pct < -0.006:
+    if angle_deg < -3.0:
         return "downtrend"
+    
     return "range"
 
 
 def _m1_rejects_band(candles_1m: List[Candle], band: float, direction: str, tolerance_pct: float = 0.0015) -> bool:
-    """M1 (menor) rechaza la banda: la mecha toca la banda pero el cierre NO queda fuera.
+    """M1 rechaza la banda: al menos 2 velas consecutivas muestran rechazo.
 
-    Para CALL (banda = suelo): la vela debe tocar cerca del suelo (mecha inferior)
-    y cerrar POR ENCIMA de la banda (rechazo alcista).
-    Para PUT (banda = techo): la vela debe tocar cerca del techo (mecha superior)
-    y cerrar POR DEBAJO de la banda (rechazo bajista).
+    Requisitos:
+    - Ultima vela: mecha toca la banda, cierre del lado correcto.
+    - Penultima vela: tambien toco la banda (o estuvo muy cerca) — confirma
+      que el precio probo el nivel y fue rechazado, no fue un spike accidental.
     """
-    if not candles_1m:
+    if not candles_1m or len(candles_1m) < 2:
         return False
+
     last = candles_1m[-1]
+    prev = candles_1m[-2]
     tol = band * tolerance_pct
+
     if direction == "CALL":
-        touched = last.low <= band + tol
-        closed_ok = last.close > band
-        return touched and closed_ok
+        # Last candle: touches band with wick, closes above
+        last_touched = last.low <= band + tol
+        last_closed_ok = last.close > band
+        # Previous candle: also touched or was near the band (confirms the level)
+        prev_near = prev.low <= band + tol * 2  # slightly wider tolerance for prev
+        return last_touched and last_closed_ok and prev_near
+
     if direction == "PUT":
-        touched = last.high >= band - tol
-        closed_ok = last.close < band
-        return touched and closed_ok
+        last_touched = last.high >= band - tol
+        last_closed_ok = last.close < band
+        prev_near = prev.high >= band - tol * 2
+        return last_touched and last_closed_ok and prev_near
+
     return False
 
 
@@ -291,6 +340,17 @@ def evaluate_strat_f(
     if phase_a:
         strength = min(1.0, strength + 0.15)
 
+    # ── Math/trig signal quality (geometric "eyes") ──
+    # Contextual modifier: proportional zones + M15 weight + consensus bonus.
+    mq = None
+    try:
+        from math_filters import compute_contextual_modifier
+        cm = compute_contextual_modifier(candles_5m, direction, ctx)
+        mq = cm  # store for StratFEvaluation.math_quality
+        strength = max(0.1, min(1.0, strength + cm["delta"]))
+    except Exception:
+        pass  # math filters are soft — never block
+
     # R6 — score minimo
     if strength * 100 < min_score:
         return StratFEvaluation(
@@ -298,17 +358,32 @@ def evaluate_strat_f(
             strength=strength, skip_reason=f"score {strength*100:.0f} < minimo {min_score}",
         )
 
+    # Compute Wyckoff band as a RANGE (not a single price).
+    # Use the fractal candle's range as the zone width.
+    _fc = candles_5m[fractal_idx]
+    _fc_range = abs(float(_fc.high) - float(_fc.low))
+    if direction == "CALL":
+        _zone_floor = float(_fc.low)
+        _zone_ceil = float(_fc.low) + _fc_range * 0.5  # upper half of fractal candle
+    else:
+        _zone_ceil = float(_fc.high)
+        _zone_floor = float(_fc.high) - _fc_range * 0.5  # lower half of fractal candle
+    _zone_range_pct = _fc_range / _zone_floor if _zone_floor > 0 else 0.0
+
     zone = ConsolidationZone(
         asset=getattr(candles_5m[-1], "asset", "") if hasattr(candles_5m[-1], "asset") else "",
-        ceiling=band if direction == "PUT" else band,
-        floor=band if direction == "CALL" else band,
+        ceiling=_zone_ceil,
+        floor=_zone_floor,
         bars_inside=0,
         detected_at=candles_5m[-1].ts if hasattr(candles_5m[-1], "ts") else 0.0,
-        range_pct=0.0,
+        range_pct=_zone_range_pct,
     )
     spring_margin = _spring_heuristic_5m1m(
         candles_5m, candles_1m, fractal_idx, band, direction
     )
+    _mq_info = ""
+    if mq is not None:
+        _mq_info = f" math=[{mq['zone']} Δ={mq['delta']:+.3f} cons={mq['consensus_count']}/4 w={mq['m15_weight']}]"
     return StratFEvaluation(
         has_signal=True,
         direction=direction,
@@ -320,7 +395,8 @@ def evaluate_strat_f(
         m15_context=ctx,
         m5_event=event,
         spring_margin=spring_margin,
-        info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx}",
+        math_quality=mq,
+        info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx}{_mq_info}",
     )
 
 

@@ -119,6 +119,7 @@ def compute_stoch(
     return {
         "k": k, "d": d, "estado": estado,
         "cruce": cruce, "divergencia": divergencia, "contradicts": contradicts,
+        "k_prev": k_vals[-2] if len(k_vals) >= 2 else None,
     }
 
 

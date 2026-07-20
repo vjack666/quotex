@@ -42,6 +42,32 @@ muestra mínima 30/grupo; umbral fijado ANTES de datos, no se ajusta.
 
 ---
 
+## Feature completada: STRAT-F math filters + contextual scoring (2026-07-20)
+
+### Qué se hizo
+1. **P0-1**: M1 rejection ahora requiere 2 velas consecutivas (`_m1_rejects_band` en strat_fractal.py)
+2. **P0-2**: Duración cambiada 600s → 900s (`config.py`: `DURATION_SEC`, `MULTI_DURATION_SECS`, `MULTI_DURATION_MASSANIELLO_PRIMARY_SEC`)
+3. **P1-1**: Nuevo módulo `src/math_filters.py` — fractal dimension (Hurst), R² de regresión lineal, price vector angle (atan2), Bollinger squeeze, `compute_signal_quality` composite scorer
+4. **P1-2**: Wyckoff band ahora es un rango (floor+ceil del fractal candle range), no precio único
+5. **P1-3**: Stochastic zones V2 — `apply_stoch_help` ahora acepta `k_prev`/`d` keyword-only; vetos solo se activan cuando el cruce confirma reversión, momentum continuation = PASS
+6. **P1-4**: `_m15_context` reemplazado por regresión (R² + slope angle) en vez de umbrales hardcodeados 0.004/0.006
+7. **P2-1**: Scoring contextual de 3 niveles: proportional zones (sin dead zone) + weight M15 contextual (range=30%, trend=70%, broken=100%) + consensus bonus (3/4 → +0.05, 4/4 → +0.08)
+
+### Archivos tocados
+- `src/math_filters.py` (NUEVO)
+- `src/strat_fractal.py` (modificado)
+- `src/stochastic_zones.py` (modificado)
+- `src/stochastic_m15.py` (modificado)
+- `src/scanner.py` (modificado)
+- `src/config.py` (modificado)
+- `tests/test_stochastic_zones.py` (modificado)
+- `tests/test_strat_fractal.py` (modificado)
+
+### Tests
+73 tests totales (60 strat_fractal + stochastic_zones). Todos verdes.
+
+---
+
 ## Feature en curso
 FIX RUNTIME — cuelgue por caída de WS durante espera de trade (multi-leg)
 

@@ -152,10 +152,15 @@ def test_unknown_mode_behaves_as_off():
 def test_apply_stoch_help_signature_has_no_cruce_or_divergencia():
     sig = inspect.signature(apply_stoch_help)
     params = set(sig.parameters)
-    assert params == {"k", "direction", "mode"}
+    # V2: k_prev and d are keyword-only additions for cross-aware vetos.
+    # Core params remain k/direction/mode. Old params must NOT return.
+    assert {"k", "direction", "mode"}.issubset(params)
     assert "cruce" not in params
     assert "divergencia" not in params
     assert "contradicts" not in params
+    # V2 keyword-only params must have defaults (backward-compatible)
+    assert sig.parameters["k_prev"].default is None
+    assert sig.parameters["d"].default is None
 
 
 # ── R11/R16: config STOCH_HELP_MODE default + env override ───────────────────

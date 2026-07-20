@@ -176,7 +176,9 @@ def test_insufficient_5m_skips():
 
 def test_strength_higher_in_range():
     ev = evaluate_strat_f(_flat_15m(), _fractal_down_5m(), _m1_reject_low(), payout=85)
-    assert ev.strength >= 0.7
+    # Range context → base strength 0.70; math contextual modifier may adjust
+    # slightly but the signal must remain meaningful (above trend floor of 0.55).
+    assert ev.strength > 0.65, f"expected range strength > 0.65, got {ev.strength}"
 
 
 def _flat_15m_with_ticks(n=8, base=1.10000, avg=100) -> list[Candle]:
