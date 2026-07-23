@@ -28,6 +28,7 @@ from pyquotex.stable_api import Quotex  # type: ignore
 import config as _config
 from config import *  # noqa: F401,F403 — re-export para main.py
 from alerter import alerter
+from caffeine import CaffeineLoop, install_traffic_hook
 from candle_cache import CandleCache
 from config import MAX_SIMULTANEOUS_TRADES, MIN_ASSET_SPREAD, MAX_ENTRIES_PER_ASSET
 from config import SESSION_AUTO_RESET_ON_COMPLETE
@@ -66,23 +67,64 @@ if hasattr(_stdout_handler.stream, "reconfigure"):
     except Exception:
         pass
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        _stdout_handler,
-        logging.handlers.RotatingFileHandler(
-            "consolidation_bot.log",
-            maxBytes=2_000_000,
-            backupCount=3,
-            encoding="utf-8",
-        ),
-    ],
-)
+# Libro (bitácora del bot) guardado en: data/logs/runtime/consolidation_bot.log
+_LOGS_RUNTIME_DIR = Path(__file__).resolve().parent.parent / "data" / "logs" / "runtime"
+_LOGS_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+_CONSOLIDATION_LOG_PATH = _LOGS_RUNTIME_DIR / "consolidation_bot.log"
+
+
+# RotatingFileHandler que NO crashea cuando 2 procesos (server + trader)
+# comparten el mismo archivo en Windows (PermissionError en os.rename).
+# Reintenta y, si falla, hace copy+truncate en lugar de renombrar.
+class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    def rotate(self, source, dest):
+        import time
+        for _ in range(5):
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+                os.rename(source, dest)
+                return
+            except PermissionError:
+                time.sleep(0.2)
+        # Fallback: copiar contenido y truncar el original (no renombra,
+        # asi no bloquea al otro proceso que tiene el archivo abierto).
+        try:
+            with open(source, "rb") as fsrc, open(dest, "wb") as fdst:
+                fdst.write(fsrc.read())
+            with open(source, "r+b") as f:
+                f.truncate(0)
+        except Exception:
+            pass
+
+
+# Logger PROPIO con su handler (un solo handle por proceso al archivo).
+# NO usamos basicConfig(force=True): app.py ya configura el root logger y
+# force=True duplicaría el handler -> PermissionError en rollover.
+log = logging.getLogger("consolidation_bot")
+if not log.handlers:
+    _fh = _SafeRotatingFileHandler(
+        str(_CONSOLIDATION_LOG_PATH),
+        maxBytes=2_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+    log.addHandler(_fh)
+    log.setLevel(logging.INFO)
+log.propagate = False
+log.info("📖 Bitácora del bot -> %s", _CONSOLIDATION_LOG_PATH)
+
+# Conectar el logger "caffeine" al MISMO archivo para que sus mensajes
+# (☕ Caffeine arrancado, pings) se vean en la bitácora.
+_caf = logging.getLogger("caffeine")
+for _h in log.handlers:
+    if _h not in _caf.handlers:
+        _caf.addHandler(_h)
+_caf.setLevel(logging.INFO)
+_caf.propagate = False
 logging.getLogger("pyquotex").setLevel(logging.WARNING)
 logging.getLogger("websocket").setLevel(logging.CRITICAL)
-log = logging.getLogger("consolidation_bot")
 
 
 class ConsolidationBot:
@@ -177,6 +219,10 @@ class ConsolidationBot:
             ws_sem=self._ws_sem,
         )
         self._htf_task: asyncio.Task[Any] | None = None
+        self._caffeine_task: asyncio.Task[Any] | None = None
+        self._caffeine: Any = None
+        self._watchdog_task: asyncio.Task[Any] | None = None
+        self._watchdog: Any = None
         self._hub_scanner: Any = None
 
         # Session manager for lifecycle tracking
@@ -240,6 +286,20 @@ class ConsolidationBot:
             self._htf_task.cancel()
             try:
                 await self._htf_task
+            except asyncio.CancelledError:
+                pass
+        if self._caffeine_task and not self._caffeine_task.done():
+            self._caffeine_task.cancel()
+            try:
+                await self._caffeine_task
+            except asyncio.CancelledError:
+                pass
+        if self._watchdog_task and not self._watchdog_task.done():
+            if self._watchdog is not None:
+                self._watchdog.stop()
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
             except asyncio.CancelledError:
                 pass
         await self.executor.shutdown_background_tasks()
@@ -432,7 +492,8 @@ async def main(
     try:
         from kelly_sizer import KellySizer
         _kelly = KellySizer()
-        _kelly_factor = _kelly.calculate()
+        _kelly_result = _kelly.calculate()
+        _kelly_factor = _kelly_result["fraction"] if isinstance(_kelly_result, dict) else _kelly_result
         if _kelly_factor > 0.0:
             if bot.massaniello._initial_capital is not None:
                 _old = bot.massaniello._initial_capital
@@ -476,6 +537,38 @@ async def main(
                     )
 
         asyncio.create_task(_hub_sync(), name="hub-sync")
+
+    # ☕ Caffeine: keepalive de APLICACIÓN (texto "2" + 42["tick"]). Mantiene
+    # viva la sesión socket.io en idle para que Cloudflare no corte el WS.
+    # pyquotex ya manda un ping frame binario que Quotex ignora; este loop manda
+    # el café en el formato que el servidor SÍ entiende.
+    try:
+        bot._caffeine = CaffeineLoop(client, account_type=bot.account_type)
+        bot._caffeine_task = asyncio.create_task(
+            bot._caffeine.run(), name="caffeine"
+        )
+        install_traffic_hook(client, bot._caffeine)
+    except Exception as exc:
+        log.warning("No se pudo arrancar Caffeine: %s", exc)
+        bot._caffeine = None
+        bot._caffeine_task = None
+
+    # 🔌 ConnectionWatchdog: SAFETY NET que detecta el socket caído YA (cada
+    # WATCHDOG_INTERVAL_SEC) y lo levanta vía bot.ensure_connection (canónico).
+    # Comparte _RECONNECT_LOCK con caffeine (RT-02): no se pisan. Si caffeine
+    # falla al arrancar, el watchdog igual debe intentar levantar el socket.
+    try:
+        from caffeine import ConnectionWatchdog
+        bot._watchdog = ConnectionWatchdog(
+            client, bot.ensure_connection, account_type=bot.account_type
+        )
+        bot._watchdog_task = asyncio.create_task(
+            bot._watchdog.run(), name="conn-watchdog"
+        )
+    except Exception as exc:
+        log.warning("No se pudo arrancar ConnectionWatchdog: %s", exc)
+        bot._watchdog = None
+        bot._watchdog_task = None
 
     await bot.reconcile_pending_candidates()
 
@@ -692,6 +785,19 @@ async def main(
     except KeyboardInterrupt:
         log.info("Detenido por el usuario (Ctrl+C).")
     finally:
+        # ☕ Detener Caffeine antes de cerrar el client.
+        try:
+            if getattr(bot, "_caffeine", None) is not None:
+                bot._caffeine.stop()
+            _ct = getattr(bot, "_caffeine_task", None)
+            if _ct is not None and not _ct.done():
+                _ct.cancel()
+                try:
+                    await _ct
+                except (asyncio.CancelledError, Exception):
+                    pass
+        except Exception:
+            pass
         # Persist Massaniello so an incomplete session can resume on next Iniciar
         try:
             if getattr(bot, "massaniello_persistence", None) is not None:
@@ -736,6 +842,8 @@ class BotRunner:
         self._error: str | None = None
         self._started_at: float | None = None
         self._user_stop: bool = False
+        self._gen: int = 0  # generation counter — incremented on each start()
+        self._orphan_warned: bool = False
         self._config: dict[str, Any] = {
             "dry_run": False,
             "real_account": False,
@@ -941,6 +1049,8 @@ class BotRunner:
             "uptime_sec": (time.time() - self._started_at) if self._started_at else None,
             "schedule": self._schedule.snapshot(),
         }
+        if self._orphan_warned:
+            status["zombie"] = True
         if self._error:
             status["last_error"] = self._error
         if self._bot is not None:
@@ -1023,10 +1133,20 @@ class BotRunner:
     async def start(self, *, user: bool = True) -> None:
         if self._state in ("running", "starting"):
             return
+        # Guard: if previous task is still alive (zombie), refuse to start.
+        if self._task is not None and not self._task.done():
+            log.warning(
+                "BotRunner.start() refused — previous task still alive (zombie). "
+                "Use force_kill() first."
+            )
+            self._orphan_warned = True
+            return
         self._user_stop = False
         self._state = "starting"
         self._error = None
         self._started_at = time.time()
+        self._orphan_warned = False
+        self._gen += 1
         self._schedule.configure(self._config)
         if user:
             self._schedule.arm(self._config)
@@ -1059,20 +1179,87 @@ class BotRunner:
             self._task.cancel()
             try:
                 await asyncio.wait_for(self._task, timeout=10.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                # Task survived 10s after cancel — force-kill the WS client
+                # to break any pending broker operations, then wait a bit more.
+                log.warning(
+                    "BotRunner.stop(): task survived 10s cancel — "
+                    "force-closing client socket and retrying cancel"
+                )
+                await self._force_close_client()
+                self._task.cancel()
+                try:
+                    await asyncio.wait_for(self._task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                if not self._task.done():
+                    log.error(
+                        "BotRunner.stop(): task STILL alive after force-close — "
+                        "marking as zombie. It will be orphaned."
+                    )
+                    self._orphan_warned = True
+        self._state = "stopped"
+        self._bot = None
+        self._client = None
+        self._task = None
+
+    async def _force_close_client(self) -> None:
+        """Force-close the Quotex WS client to break stuck operations."""
+        client = self._client or (getattr(self._bot, "client", None) if self._bot else None)
+        if client is None:
+            return
+        try:
+            if hasattr(client, "ws_client") and client.ws_client is not None:
+                ws = client.ws_client
+                if hasattr(ws, "close"):
+                    await asyncio.wait_for(ws.close(), timeout=2.0)
+                elif hasattr(ws, "disconnect"):
+                    ws.disconnect()
+            if hasattr(client, "check_connect"):
+                # Signal the client that it should not try to reconnect
+                client._reconnect_disabled = True
+        except Exception as exc:
+            log.warning("BotRunner._force_close_client error: %s", exc)
+
+    async def force_kill(self) -> dict:
+        """Nuclear option: force-stop a zombie task. Returns status dict."""
+        was_alive = self._task is not None and not self._task.done()
+        log.warning("BotRunner.force_kill() called — zombie alive=%s", was_alive)
+        # Force-close the client first to break any pending I/O
+        await self._force_close_client()
+        # Cancel the task aggressively
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            try:
+                await asyncio.wait_for(self._task, timeout=3.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+        # Nuclear: if still alive, throw an exception into it
+        if self._task is not None and not self._task.done():
+            log.error("BotRunner.force_kill(): task survived cancel — throwing exception")
+            self._task.cancel()
+        # Clean up
         self._state = "stopped"
+        self._bot = None
+        self._client = None
         self._task = None
+        self._error = None
+        self._orphan_warned = False
+        return {"ok": True, "was_zombie": was_alive, "state": self._state}
 
     async def _run(self) -> None:
         """Wrapper que ejecuta main() y maneja el lifecycle."""
+        gen = self._gen  # capture generation at task creation
         natural_exit = False
         try:
             # Ensure ops/ITM/capital from hub are in config module BEFORE
             # MassanielloRiskManager() is constructed inside main().
             self._apply_config_to_module()
             log.info(
-                "BotRunner start — Massaniello hub: %d ops / %d ITM / capital=$%.2f",
+                "BotRunner start (gen=%d) — Massaniello hub: %d ops / %d ITM / capital=$%.2f",
+                gen,
                 int(self._config.get("massaniello_ops", 5)),
                 int(self._config.get("massaniello_wins", 3)),
                 float(self._config.get("massaniello_virtual_capital", 30.0)),
@@ -1091,22 +1278,28 @@ class BotRunner:
             )
             natural_exit = not self._user_stop
         except asyncio.CancelledError:
-            log.info("BotRunner: task cancelada — shutdown limpio")
+            log.info("BotRunner: task cancelada (gen=%d) — shutdown limpio", gen)
         except SystemExit as exc:
             self._error = f"SystemExit({exc.code})"
             self._state = "error"
-            log.error("BotRunner: SystemExit %s", exc.code)
+            log.error("BotRunner: SystemExit %s (gen=%d)", exc.code, gen)
         except Exception as exc:
             self._error = str(exc)
             self._state = "error"
-            log.error("BotRunner: error fatal — %s", exc, exc_info=True)
+            log.error("BotRunner: error fatal (gen=%d) — %s", gen, exc, exc_info=True)
         finally:
-            if self._state not in ("error",):
-                self._state = "stopped"
-            self._started_at = None
+            # Only update state if this is still the current generation
+            if self._gen == gen:
+                if self._state not in ("error",):
+                    self._state = "stopped"
+                self._started_at = None
+                self._orphan_warned = False
+            else:
+                log.info("BotRunner: gen=%d exiting (stale) — gen=%d is current", gen, self._gen)
             # Massaniello session terminal → next cycle or rest (auto_full only)
             if (
                 natural_exit
+                and self._gen == gen
                 and self._schedule.mode == "auto_full"
                 and self._schedule.phase == "working"
             ):
@@ -1118,6 +1311,9 @@ class BotRunner:
     async def shutdown(self) -> None:
         """Shutdown forzado — llamado desde FastAPI lifespan."""
         await self.stop(user=True)
+        # If stop() failed (zombie), force-kill
+        if self._task is not None and not self._task.done():
+            await self.force_kill()
         if self._client is not None:
             try:
                 await asyncio.wait_for(self._client.close(), timeout=3.0)

@@ -6,8 +6,9 @@
     "version": "2026-07-20",
     "strategy_focus": "strat_f",
     "strat_f_status": "live_and_stable_with_math_filters",
-    "next_recommended": "Operar 24/7 con math filters + contextual scoring; validar impacto en black box.",
-    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done (V2 with k_prev/d). #10 smart_order_place done. Math filters + contextual scoring done (2026-07-20)."
+    "next_recommended": "Evolución ML: LightGBM scorer → Multi-TF confluence → Enhanced Kelly → Session awareness.",
+    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done (V2 with k_prev/d). #10 smart_order_place done. Math filters + contextual scoring done (2026-07-20).",
+    "evolution_plan": "docs/EVOLUTION_PLAN.md"
   },
   "rules": {
     "one_feature_at_a_time": true,
@@ -292,6 +293,101 @@
       "status": "done",
       "done_at": "2026-07-19",
       "implementation_note": "2 commits (cb4b6b2 watchdog conexión, a95705b estado no-sano). 14 tests totales (5 + 9). Cron 'quotex-bot-watchdog' cada 5 min.",
+      "depends_on": []
+    },
+    {
+      "id": 22,
+      "name": "caffeine_keepalive_watchdog_hub_fix",
+      "title": "Fix keep-alive real (café) + ConnectionWatchdog + botón del hub no-adorno",
+      "phase": "ops",
+      "priority": 22,
+      "description": "src/caffeine.py: el keep-alive apuntaba a client.websocket (=None → AttributeError tragado → nunca enviaba ping engine.io '2' de TEXTO; Cloudflare cortaba a ~60-75s idle). Ahora resuelve el WebSocketApp vivo client.api.websocket_client.wss fresco por ciclo y manda '2' como TEXTO. ConnectionWatchdog NUEVO: cada WATCHDOG_INTERVAL_SEC=10 hace client.check_connect(); si el socket cae por causa ≠ idle llama bot.ensure_connection() (canónico, ya cableado al ConnectionManager) sin esperar al ciclo de trading de ~60s. Comparte lock RT-02 con el café. Fix botón hub (/api/bot/reconnect → force_reconnect_from_hub): pyquotex SOLO re-autentica cuando session_data['token'] está vacío; si el socket cae por token rechazado/sesión muerta el token viejo seguía en session_data y connect() reusaba token muerto → fallaba SIEMPRE (adorño). Ahora _force_reconnect_locked limpia session_data+SSID tras el 1er fallo y reintenta → re-login real. Cableado en main() + shutdown_background_tasks. WATCHDOG_* en config.",
+      "acceptance": [
+        "caffeine manda '2' como TEXTO por el WebSocketApp vivo (no ping-frame binario)",
+        "ConnectionWatchdog detecta socket caído y llama bot.ensure_connection()",
+        "botón hub recupera conexión aunque el token esté muerto/rechazado",
+        "tests/test_caffeine.py (12) + tests/test_connection.py (+test_force_reconnect_recovers_dead_token) verdes"
+      ],
+      "status": "done",
+      "done_at": "2026-07-23",
+      "implementation_note": "src/caffeine.py (ConnectionWatchdog NUEVO + _resolve_app_ws), src/config.py (WATCHDOG_*), src/consolidation_bot.py (cablear watchdog en main + shutdown), src/connection.py (fix botón limpiando session_data). 26 tests verdes en módulos tocados.",
+      "depends_on": []
+    },
+    {
+      "id": 18,
+      "name": "lightgbm_scorer",
+      "title": "LightGBM Adaptive Scorer — ML-driven trade prediction",
+      "phase": "evolution",
+      "priority": 18,
+      "sdd": true,
+      "spec_path": "specs/lightgbm_scorer/",
+      "description": "Replace static scoring with LightGBM model trained on black box data. Predicts trade outcomes using math_quality, stoch zones, spring_margin, score_breakdown. Outputs confidence (0-1) that adjusts final score.",
+      "acceptance": [
+        "Model trains on 500+ resolved trades from black box",
+        "Feature extraction covers 18 features (math, stoch, spring, score, context)",
+        "Walk-forward validation (80/20 temporal split)",
+        "Confidence 0-1 integrated into scanner scoring: final = base * (0.7 + 0.3 * confidence)",
+        "Fallback to static scoring when model unavailable",
+        "Auto-retraining when 100+ new trades collected",
+        "Model metadata saved to data/models/lightgbm_meta.json",
+        "All tests passing"
+      ],
+      "status": "in_progress",
+      "name": "multi_tf_correlation",
+      "title": "Multi-TF Confluence Score — timeframe alignment detection",
+      "phase": "evolution",
+      "priority": 19,
+      "sdd": true,
+      "spec_path": "specs/multi_tf_correlation/",
+      "description": "Measure alignment between M1/M5/M15/H1 timeframes. 4/4 aligned = +0.15 bonus, 3/4 = +0.05, 2/4 or less = -0.05 penalty. Uses linear regression slope to detect trend per TF.",
+      "acceptance": [
+        "Trend detection via linear regression on closes",
+        "Confluence bonus calculated from 4 timeframes",
+        "Fallback to 3 TF when H1 unavailable",
+        "Logging shows per-TF trend and confluence result",
+        "All tests passing"
+      ],
+      "status": "spec_ready",
+      "depends_on": []
+    },
+    {
+      "id": 20,
+      "name": "kelly_criterion_enhanced",
+      "title": "Enhanced Kelly Criterion — dynamic stake sizing",
+      "phase": "evolution",
+      "priority": 20,
+      "sdd": true,
+      "spec_path": "specs/kelly_criterion_sizing/",
+      "description": "Upgrade KellySizer with rolling win rate (last 50 trades), dynamic fraction by edge strength, ML confidence weighting, and per-strategy filtering. Replaces fixed Massaniello initial_amount.",
+      "acceptance": [
+        "Rolling win rate from last 50 trades",
+        "Dynamic fraction: edge>0.2→0.5, 0.1-0.2→0.3, <0.1→0.1, ≤0→0",
+        "ML confidence weighting: >0.7→×1.2, 0.4-0.7→×1.0, <0.4→×0.5",
+        "Stake limits: min $1, max 5% balance",
+        "Fallback to basic Kelly when LightGBM unavailable",
+        "All tests passing"
+      ],
+      "status": "spec_ready",
+      "depends_on": [18]
+    },
+    {
+      "id": 21,
+      "name": "session_awareness",
+      "title": "Session Awareness — time-of-day trading behavior",
+      "phase": "evolution",
+      "priority": 21,
+      "sdd": true,
+      "spec_path": "specs/session_awareness/",
+      "description": "Detect trading session (Asian/London/NY/off-hours) and adjust min_score thresholds. Off-hours blocked by default. Asian=65, London=60, NY=55, Off-hours=75 (or disabled).",
+      "acceptance": [
+        "Session detection from UTC hour",
+        "Per-session min_score thresholds",
+        "Off-hours blocking with logging",
+        "Session transition logging",
+        "Disabled fallback (global min_score)",
+        "All tests passing"
+      ],
+      "status": "spec_ready",
       "depends_on": []
     }
   ]

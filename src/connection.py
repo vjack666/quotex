@@ -246,7 +246,26 @@ async def _force_reconnect_locked(
         step_label, asset, direction.upper() if direction else "", amount,
     )
     last_reason = ""
+    reauth_done = False
     for attempt in range(1, CONNECT_RETRIES + 1):
+        # Si el connect previo falló, el token/sesión puede estar muerto.
+        # pyquotex SOLO re-autentica cuando session_data["token"] está vacío
+        # (Quotex.connect: `if not self.session_data.get("token")`). Si el token
+        # viejo sigue presente (rechazado por el server), connect() reusaría ese
+        # token muerto y volvería a fallar — el botón del hub quedaría como adorno.
+        # Por eso, tras el 1er fallo, limpiamos sesión y SSID para forzar re-login.
+        if attempt > 1 and not reauth_done:
+            try:
+                client.session_data = {}
+                api = getattr(client, "api", None)
+                state = getattr(api, "state", None)
+                if state is not None:
+                    state.SSID = None
+                reauth_done = True
+                log.info("Reconexión: limpiando sesión para re-login forzado")
+            except Exception as exc:
+                log.debug("no se pudo limpiar session_data: %s", exc)
+
         try:
             await client.close()
         except Exception:

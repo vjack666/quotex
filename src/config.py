@@ -118,6 +118,28 @@ MAX_RECONNECT_BACKOFF_SEC = 30.0
 # After N consecutive failures, recommend restart instead of retrying.
 MAX_CONSECUTIVE_RECONNECT_FAILURES = 5
 
+# ── Caffeine (keepalive de APLICACIÓN) ──────────────────────────────────────
+# Quotex habla engine.io v3: el keepalive de app es el mensaje de TEXTO "2",
+# NO un WebSocket ping frame. pyquotex configura ping_interval=24 en el WS, pero
+# websocket-client 1.9.0 manda ese "2" como ping frame binario (que Quotex ignora),
+# así que en inactividad Cloudflare cierra el socket ("Connection to remote host was
+# lost"). Este loop manda el "2" de TEXTO cada CAFFEINE_INTERVAL_SEC + un 42["tick"]
+# si lleva rato sin tráfico, manteniendo viva la sesión socket.io.
+CAFFEINE_ENABLED = True
+CAFFEINE_INTERVAL_SEC = 15.0      # cada cuánto mandar el ping de app "2" (Cloudflare corta a 100s idle)
+CAFFEINE_TICK_AFTER_IDLE_SEC = 30.0  # si no hubo tráfico en este tiempo, mandar 42["tick"]
+CAFFEINE_JITTER_SEC = 2.0         # jitter para no sincronizar con otros clientes
+
+# ☕ Watchdog de CONEXIÓN: detecta el socket caído EN SEGUIDO (sin esperar al
+# ciclo de trading de ~60s) y lo levanta vía ensure_connection. Comparte
+# _RECONNECT_LOCK con caffeine y force_reconnect (RT-02): mientras reconstruye,
+# caffeine no manda tráfico al aire. Es un SAFETY NET, no reemplaza al loop
+# principal de reconexión; ambos coexisten sin pisarse.
+WATCHDOG_ENABLED = True
+WATCHDOG_INTERVAL_SEC = 10.0       # cada cuánto hacer check_connect()
+WATCHDOG_GRACE_SEC = 0.0           # espera antes del primer check (0 = inmediato)
+WATCHDOG_JITTER_SEC = 1.0          # jitter para no sincronizar con otros clientes
+
 VOLUME_MULTIPLIER = 1.2
 VOLUME_LOOKBACK = 10
 REBOUND_MIN_STRENGTH_CALL = 0.50
@@ -222,7 +244,9 @@ STRAT_REVERSAL_SWING_PROXIMITY_TOLERANCE = 0.001
 STRAT_REVERSAL_SWING_MIN_WICK_RATIO = 0.4
 STRAT_REVERSAL_SWING_MIN_STRENGTH = 0.3
 
-BROKEN_CAPTURE_DIR = Path(__file__).resolve().parent.parent / "data" / "vela_ops"
+# Capturas de zonas rotas (contexto de debug, NO es data de ML).
+# Libro guardado en: data/journal/vela_ops/<ts>_<asset>_<reason>_<id>.json
+BROKEN_CAPTURE_DIR = Path(__file__).resolve().parent.parent / "data" / "journal" / "vela_ops"
 BROKEN_FOLLOWUP_DELAY_SEC = 15 * 60
 BROKEN_FOLLOWUP_1M_COUNT = 40
 
@@ -261,8 +285,20 @@ SESSION_AUTO_RESET_ON_COMPLETE = True
 #   "massaniello" → monto calculado por MassanielloRiskManager (gestión ON).
 #   "fixed"       → monto fijo FIXED_STAKE_USD por operación (gestión OFF).
 # Es INDEPENDIENTE del modo 24h (DAILY_LOSS_GUARD_ENABLED de abajo).
-STAKE_MODE = "massaniello"   # "massaniello" | "fixed"
-FIXED_STAKE_USD = 2.0        # monto fijo por operación cuando STAKE_MODE="fixed"
+STAKE_MODE = "fixed"         # "massaniello" | "fixed"
+FIXED_STAKE_USD = 5.0        # monto fijo por operación cuando STAKE_MODE="fixed"
+
+# ── Recolección 24/7: desactivar frenos del Massaniello ─────────────────
+# Cuando MASSANIELLO_SESSION_LIMITS_ENABLED = False, el Massaniello NUNCA
+# corta la sesión: ni por meta ITM (expected_wins), ni por racha de pérdidas,
+# ni por agotamiento de ops, ni por timeout. El bot escanea/opera 24/7 hasta
+# que el humano lo detenga manualmente. Solo deja de entrar si no hay saldo
+# para la orden mínima (y el executor lo auto-resetea, reanudando).
+# Usado para recolección de datos (black box) hasta alcanzar 500+ trades.
+MASSANIELLO_SESSION_LIMITS_ENABLED = False
+# Stop-loss por drawdown de sesión (executor.refresh_balance_and_risk).
+# False = la recolección NUNCA se detiene por caída de saldo.
+SESSION_STOP_LOSS_ENABLED = False
 
 # ── Modo 24h (sin límite de pérdida diaria) ─────────────────────────────
 # Controla SOLO los frenos del ContinuousModeGuard (pausa por pérdida diaria
@@ -332,3 +368,32 @@ def _hydrate_bankroll_from_web() -> None:
 
 
 _hydrate_bankroll_from_web()
+
+# Multi-TF Confluence
+CONFLUENCE_ENABLED = True
+CONFLUENCE_BONUS_4OF4 = 0.15
+CONFLUENCE_BONUS_3OF4 = 0.05
+CONFLUENCE_PENALTY_LOW = -0.05
+CONFLUENCE_TREND_THRESHOLD = 0.001
+
+# ML Scorer
+ML_ENABLED = True
+ML_MODEL_PATH = "data/models/lightgbm_v1.pkl"
+
+# Enhanced Kelly Criterion
+KELLY_ENABLED = True
+KELLY_FRACTION = 0.5          # half-Kelly default
+KELLY_MIN_TRADES = 10
+KELLY_ROLLING_WINDOW = 50     # last N trades for rolling WR
+KELLY_MIN_STAKE = 1.0
+KELLY_MAX_STAKE_PCT = 0.05    # 5% of balance
+
+# Session Awareness
+# False = sin restricción de horario/sesión: el bot opera 24/7 continuo
+# (pedido usuario 2026-07-20: dejar libre el bot, sin restricción, $5 fijos).
+SESSION_AWARENESS_ENABLED = False
+SESSION_OFF_HOURS_ENABLED = False
+SESSION_ASIAN_MIN_SCORE = 65
+SESSION_LONDON_MIN_SCORE = 60
+SESSION_NEWYORK_MIN_SCORE = 55
+SESSION_OFFHOURS_MIN_SCORE = 75

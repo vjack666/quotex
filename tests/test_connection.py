@@ -147,3 +147,62 @@ async def test_place_order_dry_run():
     assert oid.startswith("DRY-")
     assert reject == ""
     client.buy.assert_not_called()
+
+
+# ── Fix del botón del hub: reconexión real, no adorno ────────────────────────
+# pyquotex SOLO re-autentica cuando session_data["token"] está vacío
+# (Quotex.connect: `if not self.session_data.get("token")`). Si el socket cae por
+# token rechazado, el token viejo sigue en session_data => connect() reusaría el
+# token muerto y fallaría siempre. La fix limpia session_data tras el 1er fallo
+# para forzar re-login. Este test demuestra que el botón YA NO es un adorno.
+
+class _FakeClientReconnect:
+    """Cliente pyquotex falso: connect() falla con token muerto la 1ra vez.
+
+    La 1ra llamada a connect() simula token rechazado (session_data aún tiene
+    token). Tras limpiar session_data (lo que hace la fix), la 2da connect()
+    re-autentica y conecta OK.
+    """
+
+    def __init__(self):
+        self.session_data = {"token": "DEAD_TOKEN", "cookies": "x"}
+        self.api = MagicMock()
+        self.api.state.SSID = "DEAD_TOKEN"
+        self.connect_calls = 0
+
+    async def close(self):
+        return None
+
+    async def connect(self):
+        self.connect_calls += 1
+        if self.session_data.get("token"):
+            # Token muerto presente => pyquotex reusaría token y fallaría.
+            return False, "Websocket connection rejected."
+        # session_data vacío => re-login exitoso (comportamiento de Quotex.connect).
+        self.session_data["token"] = "FRESH_TOKEN"
+        self.api.state.SSID = "FRESH_TOKEN"
+        return True, "connected"
+
+    async def change_account(self, account_type):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_force_reconnect_recovers_dead_token(monkeypatch):
+    """El botón del hub debe recuperar la conexión aunque el token esté muerto.
+
+    Antes de la fix: connect() fallaba siempre (token muerto presente) => botón
+    adorno. Ahora: tras el 1er fallo se limpia session_data y reconnecta.
+    """
+    from connection import force_reconnect
+
+    client = _FakeClientReconnect()
+    # CONNECT_RETRIES >= 2 para permitir el reintento con re-login.
+    monkeypatch.setattr("connection.CONNECT_RETRIES", 3)
+
+    ok, reason = await force_reconnect(client, "PRACTICE", step_label="hub_button")
+
+    assert ok is True, f"El botón debió reconectar; reason={reason}"
+    assert client.connect_calls >= 2, "Debió reintentar tras limpiar session_data."
+    assert client.session_data.get("token") == "FRESH_TOKEN", "Re-login debió dar token nuevo."
+    assert client.api.state.SSID == "FRESH_TOKEN"

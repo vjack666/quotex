@@ -192,7 +192,26 @@ Mantiene el bot vivo sin intervención humana. Commits `cb4b6b2`, `a95705b`, `ad
 | ID | Feature / fix | Estado | Notas |
 |----|---------------|--------|-------|
 | 17 | `watchdog_bot` | ✅ done | `scripts/watchdog_bot.py` (cron cada 5 min). Chequea API + proceso + marker "Connection to remote host was lost"; si cae → cleanup + reinicio + loop 24/7. También reinicia si `/api/bot/status` no es running/starting (meta diaria, ciclo, error). 14 tests (`tests/test_watchdog_bot.py`, mocks). |
+| 18 | `caffeine_keepalive` + `ConnectionWatchdog` + fix botón hub | ✅ done | `src/caffeine.py`: keep-alive resuelve el WebSocketApp vivo (`client.api.websocket_client.wss`) y manda ping engine.io `"2"` como TEXTO (antes apuntaba a `client.websocket`=None → nunca enviaba). `ConnectionWatchdog` NUEVO: cada 10s `check_connect()`; si cae por causa ≠ idle llama `bot.ensure_connection()` (canónico). Comparte lock RT-02 con el café. Fix botón hub 🔄: `force_reconnect` limpia `session_data`+`SSID` tras 1er fallo → re-login real (antes reusaba token muerto = adorno). `WATCHDOG_*` en config. Cableado en `main()` + `shutdown_background_tasks`. 12 tests caffeine + 1 test_connection. |
 | — | Config 24h + vencimiento 10min | ✅ done | `DURATION_SEC=600`, `MULTI_DURATION_SECS=(600,)`, `MASSANIELLO_PRIMARY=600`, `DAILY_LOSS_GUARD_ENABLED=False` en disco (pedido usuario 2026-07-19). Fix bug: el loop lee el módulo config, no `_runner._config` mutado por `/api/daily-guard` (antes pausaba aunque el endpoint dijera OFF). |
+
+---
+
+## Fase 7 — Evolución ML (2026-07-20)
+
+> **Objetivo:** Transformar el scoring de fórmula estática a predicción adaptativa con ML.
+> **Plan completo:** `docs/EVOLUTION_PLAN.md`
+> **Regla:** Zero intervención humana durante desarrollo. Humano aprueba docs solamente.
+
+| ID | Feature | Estado | Depende de | Specs |
+|----|---------|--------|------------|-------|
+| 18 | `lightgbm_scorer` | 📋 spec_ready | — | `specs/lightgbm_scorer/` |
+| 19 | `multi_tf_correlation` | 📋 spec_ready | — | `specs/multi_tf_correlation/` |
+| 20 | `kelly_criterion_enhanced` | 📋 spec_ready | #18 | `specs/kelly_criterion_sizing/` |
+| 21 | `session_awareness` | 📋 spec_ready | — | `specs/session_awareness/` |
+
+> **Ejecución:** #18 → #19 (paralelo) → #20 → #21 (paralelo con #20)
+> **Resultado esperado:** Win rate >60%, señales más selectivas (<8/día), drawdown <15%
 
 ---
 
@@ -200,6 +219,7 @@ Mantiene el bot vivo sin intervención humana. Commits `cb4b6b2`, `a95705b`, `ad
 
 | Fecha | Cambio |
 |-------|--------|
+| 2026-07-23 | **Fix café (keep-alive real) + ConnectionWatchdog + botón del hub ya no es adorno**: (1) `src/caffeine.py` — el keep-alive apuntaba al WebSocket equivocado (`client.websocket` = `None`, AttributeError tragado en silencio → nunca mandaba el ping engine.io `"2"` de TEXTO, Cloudflare cortaba a ~60-75s idle). Ahora resuelve el WebSocketApp vivo `client.api.websocket_client.wss` fresco por ciclo (las reconexiones crean `WebsocketClient` nuevo; cachear dejaría socket muerto). Mandá `"2"` como TEXTO (el `ping_interval=24` de pyquotex es ping-frame binario que Quotex ignora). (2) `ConnectionWatchdog` NUEVO en caffeine.py: cada `WATCHDOG_INTERVAL_SEC=10` hace `client.check_connect()`; si el socket cae por causa distinta a idle, llama `bot.ensure_connection()` (el método canónico ya cableado al ConnectionManager) — sin esperar a que el ciclo de trading de ~60s se dé cuenta. Comparte el lock RT-02 con el café (no se pisan). (3) Fix botón del hub 🔄 (`/api/bot/reconnect` → `force_reconnect_from_hub`): pyquotex SOLO re-autentica cuando `session_data["token"]` está vacío (`Quotex.connect`); si el socket cae por token rechazado/sesión muerta, el token viejo seguía en `session_data` y `connect()` reusaba el token muerto → fallaba SIEMPRE (botón adorno). Ahora `_force_reconnect_locked` limpia `session_data` + `SSID` tras el 1er fallo y reintenta → re-login real. Archivos: src/caffeine.py (NUEVO ConnectionWatchdog), src/config.py (WATCHDOG_*), src/consolidation_bot.py (cablear watchdog en main + shutdown), src/connection.py (fix botón), tests/test_caffeine.py (12 tests: café + watchdog + wiring real), tests/test_connection.py (+test_force_reconnect_recovers_dead_token). 26 tests verdes en los módulos tocados. |
 | 2026-07-20 | **STRAT-F math filters + contextual scoring**: audit vs trading best practices; P0 M1 2-velas, duración 900s; P1 math_filters.py (Hurst/R²/angle/squeeze), Wyckoff range band, stoch V2 (k_prev/d), M15 regresión; P2 scoring contextual 3 niveles (proportional zones + M15 weight + consensus bonus). Archivos: src/math_filters.py (NUEVO), src/strat_fractal.py, src/stochastic_zones.py, src/stochastic_m15.py, src/scanner.py, src/config.py. 73 tests verdes. |
 | 2026-07-19 | **Watchdog 24/7 + config (ops)** — commits `cb4b6b2`/`a95705b`/`ad54bd4`: (1) `scripts/watchdog_bot.py` nuevo (cron cada 5 min) que chequea API + proceso + marker "Connection to remote host was lost" y reinicia con cleanup + loop 24/7; además reinicia si `/api/bot/status` no es running/starting (meta diaria/ciclo/error). 14 tests (`tests/test_watchdog_bot.py`). (2) Config: `DURATION_SEC=600`, `MULTI_DURATION_SECS=(600,)`, `MASSANIELLO_PRIMARY=600`, `DAILY_LOSS_GUARD_ENABLED=False` en disco (pedido usuario). Fix bug: el loop lee el módulo config, no `_runner._config` mutado por `/api/daily-guard` (antes pausaba aunque el endpoint dijera OFF). |
 | 2026-07-19 | **Feature #16 — Re-chequeo M15 al promover desde maturing_watchlist (STRAT-F) DONE**: corrige la entrada contra-tendencia M15 visible (~30% de aceptadas, 13/43 en auditoría). Causa raíz: la sala de espera (`maturing_watchlist`) promovía con el `m15_context` de la DETECCIÓN, no el actual; si la tendencia viró, la entrada salía contra-tendencia sin re-chequeo (R1 de `evaluate_strat_f` no se aplicaba en promoción). Solución (teoría de agotamiento de Ruben): al promover se re-evalúa M15 actual; alineado→promueve; contra-tendencia→SOLO promueve si stoch M5 confirma agotamiento (CALL contra-M15-bajista %K<20; PUT contra-M15-alcista %K>80), si no→DROP (no opera, no consume Massaniello). Archivos: `src/strat_fractal.py` (`recheck_m15_alignment`, `stoch_m5_exhausted`), `src/scanner.py` (re-chequeo en bloque `mark_promoted` + fix `stoch_m15=None` por bug preexistente `UnboundLocalError` con `_eval_override`). Tests: `tests/test_strat_f_maturing_recheck.py` (13 passed, R1-R5). Sin regresiones (21 failed pre-existentes sin cambio vs baseline). SDD: `specs/strat_f_maturing_m15_recheck/`. |
