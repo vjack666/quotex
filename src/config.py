@@ -380,6 +380,12 @@ CONFLUENCE_TREND_THRESHOLD = 0.001
 ML_ENABLED = False                # feature #18: reemplaza scoring estático solo con >=500 trades
 ML_MODEL_PATH = "data/models/lightgbm_v1.pkl"
 
+# Bandera de recolección de nueva tanda de datos para entrenar el ML.
+# A partir de este timestamp (fecha/hora/minuto) se cuenta el batch nuevo de
+# trades resueltos hacia el guard de 500. Dejar "" = sin bandera (cuenta todo).
+# Formato: "YYYY-MM-DD HH:MM:SS". Se fija al activar una campaña de recolección.
+ML_COLLECTION_START = "2026-07-23 17:18:39"
+
 # ── Extreme-read gate (STRAT-F) ──────────────────────────────────────────────
 # El extremo del rango local es el MEJOR sitio para entrar (como un spike),
 # pero solo si la vela de ENTRADA tiene cuerpo a FAVOR de la dirección.

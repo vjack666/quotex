@@ -349,6 +349,23 @@
       "depends_on": []
     },
     {
+      "id": 25,
+      "name": "ml_collection_start_flag",
+      "title": "Bandera ML_COLLECTION_START (recolectar nueva tanda de data para ML)",
+      "phase": "ops",
+      "priority": 25,
+      "description": "Bandera ML_COLLECTION_START en config.py = timestamp 'YYYY-MM-DD HH:MM:SS' que marca 'a partir de este fecha/hora/minuto se recolecta una tanda nueva de data para entrenar el ML'. scripts/ml_progress.py la honra: el conteo del BATCH NUEVO solo cuenta trades resueltos con scan_candidates.created_at >= la bandera (la campana de recoleccion activa). Con bandera vacia ('') cuenta el historico completo (comportamiento anterior). El filtro usa scan_candidates.created_at (el bot escribe en vivo con timestamp); candidates de trade_journal no tiene timestamp, queda como referencia global. pytest.ini: pythonpath = . scripts src para resolver ml_progress en tests.",
+      "acceptance": [
+        "con bandera fijada, ml_progress cuenta solo created_at >= bandera (batch nuevo)",
+        "sin bandera (''), cuenta historico completo",
+        "tests/test_ml_progress.py (3) verdes"
+      ],
+      "status": "done",
+      "done_at": "2026-07-23",
+      "implementation_note": "src/config.py (ML_COLLECTION_START='2026-07-23 17:18:39'), scripts/ml_progress.py (count_resolved filtra por bandera + _norm_ts), tests/test_ml_progress.py (3), pytest.ini (pythonpath). 43 tests verdes en los modulos tocados.",
+      "depends_on": []
+    },
+    {
       "id": 18,
       "name": "lightgbm_scorer",
       "title": "LightGBM Adaptive Scorer — ML-driven trade prediction",
