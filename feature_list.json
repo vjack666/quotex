@@ -314,6 +314,41 @@
       "depends_on": []
     },
     {
+      "id": 23,
+      "name": "extreme_read_gate",
+      "title": "Lectura de extremo en STRAT-F (entrar en spike, no en rebote)",
+      "phase": "ops",
+      "priority": 23,
+      "description": "El extremo del rango local es el MEJOR sitio para entrar (como un spike), pero solo si la vela de ENTRADA tiene cuerpo a FAVOR de la dirección. Empírico en black-box: PUT ganadoras en mínimo 100% cuerpo a favor; PUT perdedoras solo 67%. NUEVO gate extreme_read_gate(candles, entry_price, direction) en strat_fractal.py: si el entry cae en el extremo (top/bottom 15% del rango local 5m) exige cuerpo a favor + cuerpo dominante (>=50% del rango de la vela); si el cuerpo va contra (rebote) -> RECHAZA. Cableado en scanner.py (_evaluate_strat_f_single) detrás de bandera EXTREME_READ_ENABLED=False (OFF por defecto). Marca en black-box (columna extreme_read) cuáles señales pasaron por la mejora para análisis en cuenta demo. EXTREME_READ_POS=0.15, EXTREME_READ_BODY_MIN_RATIO=0.5 en config.",
+      "acceptance": [
+        "extreme_read_gate pasa en extremo con cuerpo a favor, rechaza el rebote (tests/test_extreme_read_gate.py 6)",
+        "black-box graba la bandera extreme_read y el schema tiene la columna (tests/test_blackbox_extreme_read.py 3)",
+        "scanner importa el gate y la bandera arranca OFF (tests/test_extreme_read_wiring.py 3)",
+        "cuando EXTREME_READ_ENABLED=True, señal en extremo con cuerpo contra -> REJECTED_EXTREME_READ"
+      ],
+      "status": "done",
+      "done_at": "2026-07-23",
+      "implementation_note": "src/strat_fractal.py (extreme_read_gate NUEVO), src/config.py (EXTREME_READ_*), src/scanner.py (cableado en _evaluate_strat_f_single + marca extreme_read en _rec), src/black_box_recorder.py (columna extreme_read + INSERT). 12 tests verdes. Bandera OFF: el bot opera igual hasta que el usuario la encienda en demo.",
+      "depends_on": []
+    },
+    {
+      "id": 24,
+      "name": "scan_pool_clean_shutdown",
+      "title": "Cierre limpio del ProcessPool STRAT-F (sin workers zombies)",
+      "phase": "ops",
+      "priority": 24,
+      "description": "Al dar Ctrl+C o 'finalizar' en el hub, shutdown_scan_pool() solo hacia shutdown(wait=False) (marca 'no acepta más trabajo' pero NO mata procesos). En Windows (spawn) los 10 workers de STRAT-F quedaban vivos en call_queue.get(block=True) y se tragaban el KeyboardInterrupt del padre (traceback sucio + procesos huérfanos). Ahora shutdown_scan_pool() captura la referencia a los workers ANTES de shutdown() y los terminate()+join(timeout=2)+kill() si siguen vivos.",
+      "acceptance": [
+        "los workers del ProcessPool mueren tras shutdown (no quedan colgados)",
+        "shutdown idempotente (llamar con pool None no rompe)",
+        "tests/test_scan_pool_shutdown.py (2) verdes"
+      ],
+      "status": "done",
+      "done_at": "2026-07-23",
+      "implementation_note": "src/loop_utils.py (shutdown_scan_pool reescrito). 2 tests verdes.",
+      "depends_on": []
+    },
+    {
       "id": 18,
       "name": "lightgbm_scorer",
       "title": "LightGBM Adaptive Scorer — ML-driven trade prediction",

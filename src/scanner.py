@@ -104,7 +104,7 @@ from strat_support import find_strong_support_2m
 from strat_momentum import detect_momentum_1m
 from strat_fractal import (
     evaluate_strat_f, StratFEvaluation,
-    recheck_m15_alignment, stoch_m5_exhausted,
+    recheck_m15_alignment, stoch_m5_exhausted, extreme_read_gate,
 )
 from strat_order_block import detect_order_block_entry
 from strat_reversal_swing import detect_reversal_swing
@@ -117,6 +117,10 @@ from maturing_watchlist import (
 )
 from trade_journal import get_journal
 from zone_memory import query_nearby_zones, score_zone_memory
+from ml_features import extract_features
+from ml_scorer import MLScorer
+from multi_tf_correlation import compute_confluence_bonus
+from session_awareness import detect_session, get_effective_min_score, should_block, get_current_session_info
 
 if TYPE_CHECKING:
     from executor import TradeExecutor
@@ -1773,6 +1777,27 @@ class AssetScanner:
 
         prev_threshold = self.bot.current_score_threshold
         session_threshold = self.executor._update_dynamic_threshold()
+        # ── Feature 21: Session awareness ──────────────────────────────────
+        try:
+            from config import SESSION_AWARENESS_ENABLED
+            if SESSION_AWARENESS_ENABLED:
+                _sess_info = get_current_session_info()
+                if _sess_info["blocked"]:
+                    log.info(
+                        "[SESSION] %s activo — entradas bloqueadas",
+                        _sess_info["session"],
+                    )
+                    self.executor._record_scan_acceptances(0)
+                    return
+                session_threshold = get_effective_min_score(session_threshold)
+                if self.bot.stats["scans"] % 20 == 0:
+                    log.info(
+                        "[SESSION] %s activo (min_score=%d)",
+                        _sess_info["session"],
+                        session_threshold,
+                    )
+        except Exception:
+            pass
         window_accepts = sum(self.bot.accepted_scans_window)
         if prev_threshold != session_threshold:
             reason = self._threshold_change_reason(window_accepts)
@@ -2299,6 +2324,10 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     candles = ctx.candles_5m
     candles_1m = ctx.candles_1m
     candles_15m = ctx.candles_15m
+    # Feature 18/19 defaults (set in promote block, used in black_box_record)
+    _ml_confidence = None
+    _confluence_label = None
+    _confluence_bonus = 0.0
     _strat_f_only_mode = ctx.strat_f_only_mode
     flags = ctx.flags
     STRAT_A_ONLY = flags.get("STRAT_A_ONLY", False)
@@ -2363,6 +2392,37 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             f"m1_reject:{'ok' if f_eval.m5_event else 'fail'}",
         ]
         if f_eval.has_signal and f_eval.direction and f_eval.zone:
+            # ── Extreme-read gate (bandera OFF por defecto) ───────────────
+            # El extremo del rango local es el mejor sitio (spike), pero solo
+            # si la vela de entrada tiene cuerpo a favor. Si entra en minimo/
+            # maximo con cuerpo contra (rebote) -> rechazar. Marca en
+            # black-box (extreme_read=1) cuando el gate decide la senal.
+            _used_extreme_read = False
+            if _runtime_config.EXTREME_READ_ENABLED:
+                _entry_px = (
+                    candles_1m[-1].close if candles_1m
+                    else (candles[-1].close if candles else None)
+                )
+                _ok, _why = extreme_read_gate(
+                    candles,
+                    _entry_px,
+                    f_eval.direction,
+                    extreme_pos=_runtime_config.EXTREME_READ_POS,
+                    body_min_ratio=_runtime_config.EXTREME_READ_BODY_MIN_RATIO,
+                )
+                if _why is not None:
+                    _used_extreme_read = True
+                if not _ok:
+                    _rec["decision"] = "REJECTED_EXTREME_READ"
+                    _rec["reject_reason"] = _why
+                    _rec["extreme_read"] = 1
+                    _batch[1].append(_rec)
+                    key = f"F:{short_reason(_why or 'extreme_read_reject')}"
+                    res.reject_counts_delta[key] = res.reject_counts_delta.get(key, 0) + 1
+                    res.logs.append(
+                        f"[STRAT-F] {sym} {f_eval.direction} skip: {_why}"
+                    )
+                    return res
             if _mw_mode == "shadow" and _mw_entries:
                 for _me in list(_mw_entries):
                     res.maturing_ops.append(("mark_promoted", (_me.key, "shadow")))
@@ -2455,9 +2515,43 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                         f_candidate.score = round(f_candidate.score + _stoch_help.score_delta, 1)
                         if isinstance(f_candidate.score_breakdown, dict):
                             f_candidate.score_breakdown["stoch_help"] = float(_stoch_help.score_delta)
+                    # ── Feature 18: ML confidence boost ──────────────────────────
+                    _ml_confidence = None
+                    try:
+                        _ml = MLScorer()
+                        if _ml.is_available():
+                            _features = extract_features(getattr(f_candidate, "_strategy_json", {}))
+                            _ml_confidence = _ml.predict(_features)
+                            if _ml_confidence is not None:
+                                _ml_boost = round((_ml_confidence - 0.5) * 20.0, 1)
+                                f_candidate.score = round(f_candidate.score + _ml_boost, 1)
+                                if isinstance(f_candidate.score_breakdown, dict):
+                                    f_candidate.score_breakdown["ml_confidence"] = round(_ml_confidence, 3)
+                                    f_candidate.score_breakdown["ml_boost"] = _ml_boost
+                    except Exception:
+                        pass
+                    # ── Feature 19: Multi-TF confluence bonus ───────────────────
+                    _confluence_label = None
+                    _confluence_bonus = 0.0
+                    try:
+                        _c1m = ctx.candles_1m or []
+                        _c5m = ctx.candles_5m or []
+                        _c15m = ctx.candles_15m or []
+                        if len(_c1m) >= 3 and len(_c5m) >= 3 and len(_c15m) >= 3:
+                            _confluence_label, _confluence_bonus, _ = compute_confluence_bonus(
+                                _c1m, _c5m, _c15m, None,
+                            )
+                            f_candidate.score = round(f_candidate.score + _confluence_bonus, 1)
+                            if isinstance(f_candidate.score_breakdown, dict):
+                                f_candidate.score_breakdown["confluence_label"] = _confluence_label
+                                f_candidate.score_breakdown["confluence_bonus"] = _confluence_bonus
+                    except Exception:
+                        pass
                     res.f_candidate = f_candidate
                     res.strat_f_accepts = 1
                     _rec["decision"] = "ACCEPTED"
+                    if _runtime_config.EXTREME_READ_ENABLED:
+                        _rec["extreme_read"] = 1 if _used_extreme_read else 0
                     _batch[0].append(_rec)
                     res.logs.append(
                         f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
@@ -2519,6 +2613,9 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     "event": f_eval.m5_event,
                     "pattern": f_eval.pattern_name,
                     "math_quality": f_eval.math_quality,
+                    "ml_confidence": _ml_confidence,
+                    "confluence_label": _confluence_label,
+                    "confluence_bonus": _confluence_bonus,
                 },
                 "candles_1m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}

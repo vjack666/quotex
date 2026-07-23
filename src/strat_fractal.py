@@ -432,3 +432,71 @@ def stoch_m5_exhausted(stoch_k: Optional[float], direction: str) -> bool:
     if direction == "PUT":
         return stoch_k > 80.0
     return False
+
+
+def extreme_read_gate(
+    candles: List[Candle],
+    entry_price: Optional[float],
+    direction: str,
+    *,
+    extreme_pos: float = 0.15,
+    body_min_ratio: float = 0.5,
+) -> Tuple[bool, Optional[str]]:
+    """Lee la vela de ENTRADA cuando cae en el EXTREMO del rango local.
+
+    El extremo NO es el enemigo (es el mejor sitio, como entrar en un spike).
+    El riesgo es operar el REBOTE en lugar del quiebre: la vela de entrada
+    cerró contra la dirección esperada (el precio ya devolvió).
+
+    Criterio (empírico en black-box: PUT ganadoras en mínimo tenían 100%
+    cuerpo confirmando bajada; PUT perdedoras solo 67%):
+      - Si el entry NO está en el extremo del rango local -> gate ABIERTO (True).
+      - Si está en el extremo:
+          * la vela de entrada debe tener CUERPO a FAVOR de la dirección
+            (CALL: close>open; PUT: close<open) y cuerpo dominante
+            (|cuerpo| >= body_min_ratio * rango de la vela).
+          * => True ("extreme_read_ok"): es spike con convicción.
+          * sino => False ("extreme_read_reject:body_against"): es rebote.
+
+    `used` lo marca el caller para la black-box (cuándo el gate efecivamente
+    decidíó la señal). Esta función es pura: no toca DB ni red.
+    """
+    if not candles or entry_price in (None, 0):
+        return True, None  # sin contexto -> no bloqueamos
+    try:
+        e = float(entry_price)
+        highs = [float(c.high) for c in candles if getattr(c, "high", None) is not None]
+        lows = [float(c.low) for c in candles if getattr(c, "low", None) is not None]
+    except (TypeError, ValueError):
+        return True, None
+    if not highs or not lows:
+        return True, None
+    lo, hi = min(lows), max(highs)
+    if hi <= lo:
+        return True, None
+    pos = (e - lo) / (hi - lo)
+    in_extreme = (direction == "CALL" and pos > 1.0 - extreme_pos) or (
+        direction == "PUT" and pos < extreme_pos
+    )
+    if not in_extreme:
+        return True, None  # entry centrada -> no aplica lectura de extremo
+
+    # Vela de entrada = la que contiene el entry en su rango
+    entry_candle = None
+    for c in candles:
+        if float(getattr(c, "low", float("inf"))) <= e <= float(getattr(c, "high", float("-inf"))):
+            entry_candle = c
+            break
+    if entry_candle is None:
+        entry_candle = candles[-1]
+
+    o = float(getattr(entry_candle, "open", e))
+    cl = float(getattr(entry_candle, "close", e))
+    body = abs(cl - o)
+    rng = float(getattr(entry_candle, "high", e)) - float(getattr(entry_candle, "low", e))
+    body_ratio = body / rng if rng > 0 else 0.0
+    body_favors = (cl > o) if direction == "CALL" else (cl < o)
+
+    if body_favors and body_ratio >= body_min_ratio:
+        return True, "extreme_read_ok"
+    return False, "extreme_read_reject:body_against"

@@ -377,8 +377,20 @@ CONFLUENCE_PENALTY_LOW = -0.05
 CONFLUENCE_TREND_THRESHOLD = 0.001
 
 # ML Scorer
-ML_ENABLED = True
+ML_ENABLED = False                # feature #18: reemplaza scoring estático solo con >=500 trades
 ML_MODEL_PATH = "data/models/lightgbm_v1.pkl"
+
+# ── Extreme-read gate (STRAT-F) ──────────────────────────────────────────────
+# El extremo del rango local es el MEJOR sitio para entrar (como un spike),
+# pero solo si la vela de ENTRADA tiene cuerpo a FAVOR de la dirección.
+# Si entra en minimo/maximo con cuerpo CONTRA (rebote) -> rechazar.
+# Empirico (black-box): PUT ganadoras en minimo 100% cuerpo a favor;
+# PUT perdedoras solo 67%. El gate filtra el rebote sin prohibir el spike.
+# Bandera OFF por defecto: cuando la enciendas, marca en black-box (columna
+# `extreme_read`) cuáles senales pasaron por esta lectura, para analizar.
+EXTREME_READ_ENABLED = False
+EXTREME_READ_POS = 0.15        # umbral de "extremo": top/bottom 15% del rango local
+EXTREME_READ_BODY_MIN_RATIO = 0.5  # cuerpo debe ser >=50% del rango de la vela
 
 # Enhanced Kelly Criterion
 KELLY_ENABLED = True

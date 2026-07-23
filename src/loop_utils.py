@@ -316,12 +316,41 @@ def get_scan_pool() -> Optional[ProcessPoolExecutor]:
 
 
 def shutdown_scan_pool() -> None:
-    """Cierra el pool global si existe. Seguro llamar varias veces."""
+    """Cierra el pool global si existe. Seguro llamar varias veces.
+
+    `shutdown(wait=False)` solo marca el pool como "no acepta más trabajo";
+    NO mata los workers. En Windows (spawn) esos procesos quedan vivos en
+    `call_queue.get(block=True)` y se tragan el Ctrl+C del padre (traceback
+    sucio + procesos huérfanos). Los terminamos explícitamente.
+
+    Nota: `ProcessPoolExecutor.shutdown()` deja `._processes` en None, así
+    que capturamos la referencia ANTES de llamarlo.
+    """
     global _SCAN_POOL
-    if _SCAN_POOL is not None:
+    pool = _SCAN_POOL
+    _SCAN_POOL = None
+    if pool is None:
+        return
+    procs = getattr(pool, "_processes", None) or {}
+    try:
+        pool.shutdown(wait=False)
+    except Exception:
+        pass
+    # Mata los workers restantes (Windows: spawn deja procesos colgados).
+    for proc in procs.values():
         try:
-            _SCAN_POOL.shutdown(wait=False)
+            if proc.is_alive():
+                proc.terminate()
         except Exception:
             pass
-        _SCAN_POOL = None
+    for proc in procs.values():
+        try:
+            proc.join(timeout=2)
+        except Exception:
+            pass
+        try:
+            if proc.is_alive():
+                proc.kill()
+        except Exception:
+            pass
 

@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS scan_candidates (
     -- Post-mortem automático
     loss_reason     TEXT,                   -- por qué perdió (ANTES vs resultado)
     improvement_hint TEXT,                  -- sugerencia de calibración derivada de datos
+    extreme_read    INTEGER DEFAULT 0,      -- 1 si la señal pasó por el extreme-read gate (STRAT-F)
 
     -- Order expiry used for multi-duration A/B data collection
     duration_sec    INTEGER,
@@ -337,17 +338,20 @@ class BlackBoxRecorder:
         duration_sec = data.get("duration_sec", None)
         if duration_sec is not None:
             duration_sec = int(duration_sec)
-        
+        extreme_read = int(data.get("extreme_read", 0) or 0)
+
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-             candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec,
+             extreme_read)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-            candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec
+            candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec,
+            extreme_read
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
