@@ -366,6 +366,25 @@
       "depends_on": []
     },
     {
+      "id": 26,
+      "name": "strat_f_spike_mode",
+      "title": "Modo SPIKE STRAT-F (entrar en el extremo con agotamiento, condicion ADICIONAL al rebote)",
+      "sdd": false,
+      "phase": "ops",
+      "priority": 26,
+      "description": "Condicion NUEVA que se ANADE al lado del modo rebote existente de STRAT-F (NO lo reemplaza): cuando hay patron de agotamiento (stoch M5 exhaust: CALL %K<20, PUT %K>80) y la vela de entrada toca el extremo del fractal (band) con CUERPO a FAVOR de la direccion (cuerpo dominante >=50% del rango de la vela), evaluate_strat_f promueve la senal a entry_mode='SPIKE' / spike=True. O sea: entra EN el extremo (CALL en minimo, PUT en maximo) - el spike con conviccion - en vez de esperar el rebote en la banda. Si NO hay agotamiento, el bot opera igual (modo REBOTE). Marca en black-box (scan_candidates.extreme_read=1, entry_mode='SPIKE') para analisis en demo. Detras de bandera STRAT_F_SPIKE_MODE=True en config.py.",
+      "acceptance": [
+        "con agotamiento + cuerpo a favor en extremo -> entry_mode=SPIKE, spike=True",
+        "sin agotamiento o cuerpo en contra -> modo REBOTE (comportamiento anterior intacto)",
+        "tests/test_strat_f_spike.py (4) verdes",
+        "scanner marca extreme_read=1 y entry_mode=SPIKE en black-box"
+      ],
+      "status": "done",
+      "done_at": "2026-07-23",
+      "implementation_note": "src/strat_fractal.py (bloque SPIKE en evaluate_strat_f + import STRAT_F_SPIKE_MODE/EXTREME_READ_BODY_MIN_RATIO/compute_stoch; campo spike en StratFEvaluation), src/scanner.py (marca extreme_read/entry_mode SPIKE), src/config.py (STRAT_F_SPIKE_MODE=True), tests/test_strat_f_spike.py (4). 47 tests verdes en modulos tocados.",
+      "depends_on": []
+    },
+    {
       "id": 18,
       "name": "lightgbm_scorer",
       "title": "LightGBM Adaptive Scorer — ML-driven trade prediction",

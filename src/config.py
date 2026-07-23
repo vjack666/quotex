@@ -398,6 +398,13 @@ EXTREME_READ_ENABLED = False
 EXTREME_READ_POS = 0.15        # umbral de "extremo": top/bottom 15% del rango local
 EXTREME_READ_BODY_MIN_RATIO = 0.5  # cuerpo debe ser >=50% del rango de la vela
 
+# Modo SPIKE (adicional al rebote de STRAT-F, NO lo reemplaza): cuando hay
+# patron de agotamiento (stoch M5 exhaust) y el precio toca el extremo del
+# fractal con CUERPO a favor, entra EN el extremo (CALL en minimo, PUT en
+# maximo) — el spike con conviccion — en vez de esperar el rebote en la banda.
+# Mejora la estrategia existente; el rebote sigue vivo cuando no hay agotamiento.
+STRAT_F_SPIKE_MODE = True
+
 # Enhanced Kelly Criterion
 KELLY_ENABLED = True
 KELLY_FRACTION = 0.5          # half-Kelly default

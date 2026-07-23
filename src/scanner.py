@@ -2552,12 +2552,16 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     _rec["decision"] = "ACCEPTED"
                     if _runtime_config.EXTREME_READ_ENABLED:
                         _rec["extreme_read"] = 1 if _used_extreme_read else 0
+                    if getattr(f_eval, "spike", False):
+                        _rec["extreme_read"] = 1  # senal SPIKE (extremo con conviccion)
+                        _rec["entry_mode"] = "SPIKE"
                     _batch[0].append(_rec)
                     res.logs.append(
                         f"[STRAT-F] ✓ {sym} {f_eval.direction} strength={f_eval.strength} "
                         f"ctx={f_eval.m15_context} event={f_eval.m5_event} "
                         f"spring_margin={f_eval.spring_margin}"
                     )
+
         elif f_eval.skip_reason:
             _rec["decision"] = "REJECTED_STRAT_F"
             _batch[1].append(_rec)

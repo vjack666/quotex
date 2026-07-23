@@ -14,6 +14,10 @@ from typing import List, Optional, Tuple
 
 from models import Candle, ConsolidationZone
 from config import MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE
+from config import STRAT_F_SPIKE_MODE
+from config import EXTREME_READ_BODY_MIN_RATIO
+
+from stochastic_m15 import compute_stoch
 
 
 @dataclass
@@ -25,6 +29,7 @@ class StratFEvaluation:
     pattern_name: str = "none"               # "fractal_up" | "fractal_down"
     strength: float = 0.0
     confirms: bool = False
+    spike: bool = False               # True = entrada SPIKE (extremo con conviccion) por agotamiento
     skip_reason: Optional[str] = None
     m15_context: str = "unknown"             # "range" | "uptrend" | "downtrend" | "broken"
     m5_event: str = "none"                   # "fractal_up" | "fractal_down" | "none"
@@ -384,19 +389,42 @@ def evaluate_strat_f(
     _mq_info = ""
     if mq is not None:
         _mq_info = f" math=[{mq['zone']} Δ={mq['delta']:+.3f} cons={mq['consensus_count']}/4 w={mq['m15_weight']}]"
+    # ── Condición SPIKE (adicional al rebote, NO lo reemplaza) ──
+    # Cuando hay patrón de agotamiento (stoch M5 exhaust) y el precio toca el
+    # extremo del fractal (band) con CUERPO a FAVOR de la dirección, promueve
+    # la señal a modo SPIKE: entra EN el extremo (CALL en mínimo, PUT en máximo)
+    # — el spike con convicción — en vez de esperar el rebote en la banda.
+    # El rebote sigue siendo la señal base cuando no hay agotamiento.
+    entry_mode = "REBOUND"
+    is_spike = False
+    if STRAT_F_SPIKE_MODE:
+        _stoch = compute_stoch(candles_5m, k_period=14, d_period=3)
+        _k = (_stoch or {}).get("k") if _stoch else None
+        if stoch_m5_exhausted(_k, direction):
+            _entry_candle = candles_1m[-1] if candles_1m else candles_5m[-1]
+            _entry_px = _entry_candle.close
+            _near_extreme = abs(float(_entry_px) - float(band)) <= float(band) * 0.0015
+            _body = float(_entry_candle.close) - float(_entry_candle.open)
+            _body_toward = (_body > 0) if direction == "CALL" else (_body < 0)
+            _body_ratio = abs(_body) / max(float(_entry_candle.high) - float(_entry_candle.low), 1e-9)
+            if _near_extreme and _body_toward and _body_ratio >= EXTREME_READ_BODY_MIN_RATIO:
+                entry_mode = "SPIKE"
+                is_spike = True
+
     return StratFEvaluation(
         has_signal=True,
         direction=direction,
-        entry_mode="REBOUND",
+        entry_mode=entry_mode,
         zone=zone,
         pattern_name=event,
         strength=strength,
         confirms=True,
+        spike=is_spike,
         m15_context=ctx,
         m5_event=event,
         spring_margin=spring_margin,
         math_quality=mq,
-        info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx}{_mq_info}",
+        info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
     )
 
 
