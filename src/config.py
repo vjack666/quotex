@@ -39,11 +39,18 @@ ENTRY_REJECT_LAST_SEC = 2.0
 # 300 = 5m open (aligns STRAT-F structure + DURATION_SEC often 300).
 # 60 = legacy 1m open.
 ENTRY_SYNC_TF_SEC = TF_5M
+# FAST_ENTRY: cuando True, la ORDEN se lanza en el open de la vela de 1 min (60s)
+# en vez del open de 5 min (300s). El vencimiento (DURATION_SEC, 15 min) queda intacto.
+# Gana tiempo de reacción: apenas el scan detecta la señal, entra en la próxima vela M1.
+# STRAT-F (modo SPIKE) lee la vela de entrada M1 (más ruidosa que M5) -> validar en demo.
+FAST_ENTRY = True
+FAST_ENTRY_TF_SEC = TF_1M  # 60s
 # Align scan loop to the 5m candle open (TF_5M=300). Lead 0 = fire exactly at open.
 # False ⇒ escanea cada SCAN_INTERVAL_SEC (60s) en cuanto no hay trade abierto,
 # sin esperar el open de vela (pedido usuario: "apenas no hay operación, escanea").
 ALIGN_SCAN_TO_CANDLE = False
 SCAN_LEAD_SEC = 0.0  # exactamente en el open de la vela 5m
+
 MAX_LOSS_SESSION = 0.20
 
 CYCLE_MAX_OPERATIONS = 5
@@ -83,7 +90,11 @@ H1_EMA_SLOW = 50
 H1_FETCH_TIMEOUT_SEC = 12.0
 # Pre-buy M1 micro-trend gate (default ON). Blocks only when last M1 candle
 # is clearly against the intended CALL/PUT direction. Fail-open on data gaps.
-M1_MICRO_CONFIRM_ENABLED = True
+# Ruben 2026-07-24: lo que elige el scanner es lo que opera. El filtro M1
+# micro-confirm anulaba la decision del scanner (se auto-rechazaba con
+# m1_against_call/put antes de enviar la orden). Se desactiva para que
+# opere OTC lo que salga del escaneo.
+M1_MICRO_CONFIRM_ENABLED = False
 CANDLE_FETCH_TIMEOUT_SEC = 8.0
 CANDLE_FETCH_1M_TIMEOUT_SEC = 12.0
 FETCH_RETRIES = 2
@@ -92,7 +103,14 @@ ORDER_SEND_RETRIES = 1
 # Hard order fails (timeout / unexpected / connection) quarantine length in scan cycles.
 ORDER_FAIL_QUARANTINE_CYCLES = 5
 RECONNECT_TIMEOUT_SEC = 12.0
-SCAN_MAX_ASSETS_PER_CYCLE = 40
+SCAN_MAX_ASSETS_PER_CYCLE = 10  # laboratorio: tope de activos a escanear/aprender (era 40)
+# Laboratorio de aprendizaje por activo: cuantas velas de historico bajar por TF
+# para que el agente identifique ciclos del estocastico (20->80 / 80->20).
+# M1 de 30 dias = 43200 velas (pesado en RAM); se usa 1 dia como proxy reciclable.
+LAB_MONTH_COUNT_M1 = 1440    # ~1 dia de 1m (reciclable, se tira)
+LAB_MONTH_COUNT_M5 = 8640    # ~1 mes de 5m
+LAB_MONTH_COUNT_M15 = 2880   # ~1 mes de 15m
+LAB_MAX_ASSETS = 10          # tope del laboratorio (coincide con SCAN_MAX_ASSETS_PER_CYCLE)
 # Logging verbosity: set BOT_LOG_VERBOSE=1 for per-asset noise + phase markers.
 # Default (normal) keeps cycle summaries, signals, entries, wins/losses.
 LOG_VERBOSE = os.environ.get("BOT_LOG_VERBOSE", "").strip().lower() in (
@@ -377,7 +395,10 @@ CONFLUENCE_PENALTY_LOW = -0.05
 CONFLUENCE_TREND_THRESHOLD = 0.001
 
 # ML Scorer
-ML_ENABLED = False                # feature #18: reemplaza scoring estático solo con >=500 trades
+ML_ENABLED = True                 # feature #18: Entry Intelligence Agent activo.
+                                     # Capa extra en score_candidate + auto-retrain.
+                                     # Sin modelo en data/models/ => fallback a score base.
+                                     # Solo cuenta demo opera (real_account=false).
 ML_MODEL_PATH = "data/models/lightgbm_v1.pkl"
 
 # Bandera de recolección de nueva tanda de datos para entrenar el ML.
@@ -422,3 +443,10 @@ SESSION_ASIAN_MIN_SCORE = 65
 SESSION_LONDON_MIN_SCORE = 60
 SESSION_NEWYORK_MIN_SCORE = 55
 SESSION_OFFHOURS_MIN_SCORE = 75
+# Feature 27 — Experience Engine: observación en vivo. Al resolver un trade
+# (WIN/LOSS) se completa el arco de experiencia y se graba en data/market_memory.
+OBSERVATION_ENABLED = True
+
+# IA de Zonas (Feature 28): segunda IA lectora de la memoria única. Reemplaza
+# el detector por reglas zone_memory.py. Emite zone_confidence para STRAT-A/F.
+ZONE_IA_ENABLED = True

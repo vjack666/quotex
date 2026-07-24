@@ -15,6 +15,7 @@ Almacenamiento: SQLite + JSON exports
 import json
 import sqlite3
 import os
+import threading
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -205,7 +206,7 @@ class BlackBoxRecorder:
                 "candles_15m", "candles_post", "entry_price", "exit_price",
                 "session_id", "stoch_m15", "stoch_contradicts",
                 "loss_reason", "improvement_hint", "duration_sec",
-                "stoch_m5", "filter_funnel",
+                "stoch_m5", "filter_funnel", "extreme_read",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
@@ -334,23 +335,34 @@ class BlackBoxRecorder:
         session_id = data.get("session_id", None)
         stoch_m15 = json.dumps(data.get("stoch_m15", {}), ensure_ascii=False) if data.get("stoch_m15") else None
         stoch_m5 = json.dumps(data.get("stoch_m5", {}), ensure_ascii=False) if data.get("stoch_m5") else None
+        stoch_m1 = json.dumps(data.get("stoch_m1", {}), ensure_ascii=False) if data.get("stoch_m1") else None
         filter_funnel = json.dumps(data.get("filter_funnel", []), ensure_ascii=False) if data.get("filter_funnel") else None
         duration_sec = data.get("duration_sec", None)
         if duration_sec is not None:
             duration_sec = int(duration_sec)
         extreme_read = int(data.get("extreme_read", 0) or 0)
 
+        # Fase B: asegurar columnas nuevas en DBs antiguos (idempotente).
+        # extreme_read viene del feature extreme_read_gate (Ruben 2026-07-22)
+        # y stoch_m1 de la captura de las 3 TFs. Si la DB es vieja y no las
+        # tiene, el INSERT fallaria. Las creamos si faltan.
+        for _col in ("stoch_m1", "extreme_read"):
+            try:
+                cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} TEXT")
+            except sqlite3.OperationalError:
+                pass  # ya existe
+
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-             candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec,
+             candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
              extreme_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-            candles_15m, session_id, stoch_m15, stoch_m5, filter_funnel, order_id, duration_sec,
+            candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
             extreme_read
         ))
         candidate_id = int(cur.lastrowid or 0)
@@ -683,7 +695,87 @@ class BlackBoxRecorder:
             "outcome": outcome,
             "profit": profit,
         })
-    
+
+        # Hook agente VIVO (Ruben 2026-07-24): al resolver un trade, el agente
+        # aprende en tiempo real. Fire-and-forget en hilo daemon para NO
+        # bloquear el bot. Detras de bandera AGENT_LIVE para no afectar el
+        # comportamiento por defecto.
+        if os.environ.get("AGENT_LIVE") == "1":
+            try:
+                import sys as _sys
+                _scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+                if _scripts not in _sys.path:
+                    _sys.path.insert(0, _scripts)
+                import agent_live  # type: ignore
+                _t = threading.Thread(
+                    target=agent_live.on_trade_resolved,
+                    args=(order_id, outcome),
+                    daemon=True,
+                )
+                _t.start()
+            except Exception:  # nosec - el agente nunca debe romper el bot
+                pass
+
+        # Hook Experience Engine (Feature 27): al resolver un trade (WIN/LOSS)
+        # se completa el ARCO de experiencia y se graba en la memoria única
+        # (data/market_memory). Fire-and-forget en hilo daemon: NUNCA bloquea
+        # ni rompe el bot. Detrás de OBSERVATION_ENABLED. El capturador solo
+        # llama ExperienceMemory.record(); jamás query_similar ni IAs.
+        try:
+            from config import OBSERVATION_ENABLED  # type: ignore
+        except Exception:
+            OBSERVATION_ENABLED = False
+        if OBSERVATION_ENABLED and str(outcome).upper() in ("WIN", "LOSS"):
+            try:
+                threading.Thread(
+                    target=self._record_experience_arc,
+                    args=(order_id,),
+                    daemon=True,
+                ).start()
+            except Exception:  # nosec - la observación nunca debe romper el bot
+                pass
+
+        # Hook Entry Intelligence Agent (Feature 18): al resolver un trade,
+        # agenda un reentrenamiento en segundo plano si hay >=100 trades
+        # nuevos resueltos. Fire-and-forget (hilo daemon). Detras de ML_ENABLED.
+        try:
+            from config import ML_ENABLED  # type: ignore
+        except Exception:
+            ML_ENABLED = os.environ.get("ML_ENABLED") == "1"
+        if ML_ENABLED:
+            try:
+                import entry_intelligence  # type: ignore
+
+                entry_intelligence.trigger_background_retrain_once()
+            except Exception:
+                pass
+
+    def _record_experience_arc(self, order_id: str) -> None:
+        """Feature 27 — completa el arco de experiencia de un trade resuelto.
+
+        Corre en hilo daemon (fire-and-forget). Lee la fila persistida del
+        candidato, construye el arco con build_entry_experience y lo graba con
+        ExperienceMemory.record() (ÚNICO write-path). Nunca lanza excepciones.
+        """
+        try:
+            from observation import build_experience_from_candidate_row  # type: ignore
+            from experience_engine import ExperienceMemory  # type: ignore
+
+            con = sqlite3.connect(self.db_path, timeout=5.0)
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                "SELECT * FROM scan_candidates WHERE order_id = ? ORDER BY id DESC LIMIT 1",
+                (order_id,),
+            ).fetchone()
+            con.close()
+            if not row:
+                return
+            exp = build_experience_from_candidate_row(dict(row))
+            if exp is not None:
+                ExperienceMemory().record(exp)
+        except Exception:  # nosec - la observación nunca debe romper el bot
+            pass
+
     def record_phase(self, strategy: str, phase: str, message: str = "", asset: str = "") -> None:
         """Registra una fase de procesamiento."""
         try:

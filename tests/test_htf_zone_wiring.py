@@ -1,7 +1,11 @@
-"""Unit tests — HTF 15m cache wiring y zone_memory en STRAT-A."""
+"""Unit tests — HTF 15m cache wiring y zona IA (Feature 28) en STRAT-A.
+
+La zona IA (src/zone_ia.py) reemplaza a zone_memory.py: lee la memoria única
+del Experience Engine (data/market_memory/*.jsonl) y emite zone_confidence.
+Sin reglas: la zona y su fortaleza son salida de la IA, no del capturador.
+"""
 from __future__ import annotations
 
-import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,14 +19,16 @@ if str(SRC) not in sys.path:
 
 from config import BROKER_TZ
 from entry_scorer import score_candidate
+from experience_engine import ExperienceMemory, MarketExperience
 from htf_scanner import HTFScanner
 from models import Candle, CandidateEntry, ConsolidationZone
 from scanner import AssetScanner
 from strat_a import infer_h1_trend
+from zone_ia import ZoneIA
 
 
 class FakeHTFScanner:
-    def __init__(self, candles_map: dict[str, list] | None = None, default: list | None = None):
+    def __init__(self, candles_map: dict | None = None, default: list | None = None):
         self._map = candles_map or {}
         self._default = default if default is not None else []
 
@@ -49,15 +55,14 @@ def _trending_15m_candles(n: int = 60, *, bullish: bool, base: float = 1.10) -> 
     return candles
 
 
-def _make_scanner(monkeypatch, htf: FakeHTFScanner, journal_db: Path | None = None):
+def _make_scanner(monkeypatch, htf: FakeHTFScanner):
     bot = MagicMock()
     bot.htf_scanner = htf
     bot.stats = {"skipped": 0, "rejected_young_zone": 0, "filtered_sensor": 0}
     executor = MagicMock()
     scanner = AssetScanner(bot, executor)
-
     journal = MagicMock()
-    journal.db_path = journal_db or Path(__file__).parent / "_nonexistent_journal.db"
+    journal.db_path = Path(__file__).parent / "_nonexistent_journal.db"
     monkeypatch.setattr("scanner.get_journal", lambda: journal)
     return bot, scanner, journal
 
@@ -73,57 +78,42 @@ def _zone(price: float = 1.10) -> ConsolidationZone:
     )
 
 
-def _seed_expired_zone(
-    db_path: Path,
-    *,
-    asset: str,
-    ceiling: float,
-    floor: float,
-    expiry_reason: str = "TIME_LIMIT",
-    bars_inside: int = 12,
-) -> None:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS expired_zones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            expired_at TEXT NOT NULL,
-            asset TEXT NOT NULL,
-            expiry_reason TEXT NOT NULL,
-            ceiling REAL NOT NULL,
-            floor REAL NOT NULL,
-            range_pct REAL,
-            bars_inside INTEGER,
-            age_min REAL,
-            last_close REAL,
-            break_body REAL DEFAULT NULL,
-            payout INTEGER DEFAULT 0
-        )
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO expired_zones (
-            expired_at, asset, expiry_reason, ceiling, floor,
-            range_pct, bars_inside, age_min, last_close, payout
-        ) VALUES (?,?,?,?,?,?,?,?,?,?)
-        """,
-        (
-            datetime.now(tz=BROKER_TZ).isoformat(),
-            asset,
-            expiry_reason,
-            ceiling,
-            floor,
-            0.001,
-            bars_inside,
-            30.0,
-            (ceiling + floor) / 2,
-            88,
-        ),
-    )
-    conn.commit()
-    conn.close()
+def _seed_experiences(mem_dir: Path, *, asset: str, direction: str,
+                      level: float, n_win: int, n_loss: int) -> None:
+    """Siembra experiencias cerradas en la memoria (formato MarketExperience)."""
+    mem = ExperienceMemory(root=mem_dir)
+    base_ts = int(datetime.now().timestamp())
+    i = 0
+    for _ in range(n_win):
+        mem.record(MarketExperience(
+            ts=base_ts + i,
+            asset=asset,
+            tf="M5",
+            contexto_previo={"stoch_m15_estado": "NEUTRO"},
+            evento={"nivel": level, "direction": direction},
+            evolucion={},
+            resultado={"decision": "WIN", "pips": 15.0},
+            consecuencias={},
+        ))
+        i += 1
+    for _ in range(n_loss):
+        mem.record(MarketExperience(
+            ts=base_ts + i,
+            asset=asset,
+            tf="M5",
+            contexto_previo={"stoch_m15_estado": "NEUTRO"},
+            evento={"nivel": level, "direction": direction},
+            evolucion={},
+            resultado={"decision": "LOSS", "pips": -12.0},
+            consecuencias={},
+        ))
+        i += 1
+
+
+def _patch_zone_mem(monkeypatch, mem_dir: Path):
+    mem = ExperienceMemory(root=mem_dir)
+    ZoneIA._mem = mem
+    monkeypatch.setattr(ZoneIA, "_memory", classmethod(lambda cls: mem))
 
 
 @pytest.mark.asyncio
@@ -185,43 +175,30 @@ def test_htf_pass_aligned_call(monkeypatch):
     assert infer_h1_trend(candles_15m) == "bullish"
 
 
-def test_zone_memory_populated_from_db(monkeypatch, tmp_path):
+def test_zone_ia_reads_memory(monkeypatch, tmp_path):
+    """La IA de Zonas lee la memoria y NO veta cuando la zona es fuerte (WR alto)."""
     sym = "EURUSD_otc"
     price = 1.1000
-    db_path = tmp_path / "journal.db"
-    _seed_expired_zone(
-        db_path,
-        asset=sym,
-        ceiling=price + 0.0008,
-        floor=price + 0.0002,
-        expiry_reason="TIME_LIMIT",
-    )
+    _seed_experiences(tmp_path, asset=sym, direction="put", level=price,
+                      n_win=8, n_loss=2)
+    _patch_zone_mem(monkeypatch, tmp_path)
 
     htf = FakeHTFScanner(default=_trending_15m_candles(60, bullish=False))
-    _, scanner, _ = _make_scanner(monkeypatch, htf, journal_db=db_path)
+    _, scanner, _ = _make_scanner(monkeypatch, htf)
 
-    passed, _, zones, _ = scanner._apply_strat_a_htf_zone_gates(sym, "put", price)
+    passed, _, _, skip = scanner._apply_strat_a_htf_zone_gates(sym, "put", price)
 
     assert passed
-    assert len(zones) >= 1
+    assert skip is None
 
 
-def test_score_breakdown_zone_memory_nonzero(monkeypatch, tmp_path):
+def test_score_breakdown_zone_confidence_nonzero(monkeypatch, tmp_path):
+    """El scorer aplica el ajuste zone_confidence desde la memoria (sin reglas)."""
     sym = "EURUSD_otc"
     price = 1.1000
-    db_path = tmp_path / "journal.db"
-    _seed_expired_zone(
-        db_path,
-        asset=sym,
-        ceiling=price + 0.0008,
-        floor=price + 0.0002,
-        expiry_reason="TIME_LIMIT",
-    )
-
-    from zone_memory import query_nearby_zones
-
-    zones = query_nearby_zones(db_path, sym, price)
-    assert zones
+    _seed_experiences(tmp_path, asset=sym, direction="put", level=price,
+                      n_win=9, n_loss=1)
+    _patch_zone_mem(monkeypatch, tmp_path)
 
     candidate = CandidateEntry(
         asset=sym,
@@ -229,12 +206,30 @@ def test_score_breakdown_zone_memory_nonzero(monkeypatch, tmp_path):
         zone=_zone(price),
         direction="put",
         candles=[Candle(ts=0, open=price, high=price, low=price, close=price)],
-        zone_memory=zones,
         candles_15m=_trending_15m_candles(30, bullish=False),
     )
     score_candidate(candidate)
 
-    assert candidate.score_breakdown.get("zone_memory", 0) != 0
+    assert candidate.score_breakdown.get("zone_confidence_adj", 0) != 0
+    assert "zone_confidence" in candidate.score_breakdown
+
+
+def test_zone_ia_wall_veto(monkeypatch, tmp_path):
+    """La IA de Zonas veta (wall) cuando la zona tiene WR bajo en ese nivel."""
+    sym = "EURUSD_otc"
+    price = 1.1000
+    _seed_experiences(tmp_path, asset=sym, direction="put", level=price,
+                      n_win=1, n_loss=9)
+    _patch_zone_mem(monkeypatch, tmp_path)
+
+    htf = FakeHTFScanner(default=_trending_15m_candles(60, bullish=False))
+    bot, scanner, _ = _make_scanner(monkeypatch, htf)
+
+    passed, _, _, skip = scanner._apply_strat_a_htf_zone_gates(sym, "put", price)
+
+    assert not passed
+    assert skip == "zone_ia_wall"
+    assert bot.stats["skipped"] == 1
 
 
 def test_score_candidate_trend_prefers_15m_over_5m():
@@ -267,27 +262,3 @@ def test_score_candidate_trend_prefers_15m_over_5m():
 
     assert trend_15m != trend_5m
     assert trend_15m > trend_5m
-
-
-def test_zone_memory_wall_veto(monkeypatch, tmp_path):
-    sym = "EURUSD_otc"
-    price = 1.1000
-    db_path = tmp_path / "journal.db"
-    _seed_expired_zone(
-        db_path,
-        asset=sym,
-        ceiling=price - 0.0001,
-        floor=price - 0.0010,
-        expiry_reason="TIME_LIMIT",
-        bars_inside=20,
-    )
-
-    htf = FakeHTFScanner(default=_trending_15m_candles(60, bullish=False))
-    bot, scanner, _ = _make_scanner(monkeypatch, htf, journal_db=db_path)
-
-    passed, _, zones, skip = scanner._apply_strat_a_htf_zone_gates(sym, "put", price)
-
-    assert not passed
-    assert skip == "zone_memory_wall"
-    assert zones
-    assert bot.stats["skipped"] == 1

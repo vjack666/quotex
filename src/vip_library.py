@@ -225,7 +225,7 @@ class VipLibraryManager:
         ma1_trend = _trend_label(ma1_fast, ma1_slow)
         ma5_trend = _trend_label(ma5_fast, ma5_slow)
         spike_ok = not self._has_spike(candles_1m) and not self._has_spike(candles_5m)
-        zone_memory_adj = float((getattr(candidate, "score_breakdown", {}) or {}).get("zone_memory", 0.0) or 0.0)
+        zone_memory_adj = float((getattr(candidate, "score_breakdown", {}) or {}).get("zone_confidence_adj", 0.0) or 0.0)
         zone_memory_ok = zone_memory_adj >= 0.0
         order_block_ok = self._order_block_ok(candidate)
 

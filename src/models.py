@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 from config import DURATION_SEC, MIN_PAYOUT
 
@@ -66,7 +66,7 @@ class CandidateEntry:
     mode: SignalMode = SignalMode.REBOUND
     candles_h1: List[Candle] = field(default_factory=list)
     candles_15m: List[Candle] = field(default_factory=list)
-    zone_memory: list = field(default_factory=list)
+    zone_confidence: Optional[float] = None  # Feature 28: salida cruda de la IA de Zonas
 
     def __str__(self) -> str:
         bd = self.score_breakdown

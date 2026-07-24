@@ -181,7 +181,10 @@
       "status": "done",
       "sdd": true,
       "spec_path": "specs/stoch_entry_help/",
-      "depends_on": [2, 3],
+      "depends_on": [
+        2,
+        3
+      ],
       "approved_at": "2026-07-16",
       "note": "Done 2026-07-16. Default STOCH_HELP_MODE=hard — stoch ACTIVE help layer on STRAT-F."
     },
@@ -227,7 +230,10 @@
       "sdd": true,
       "spec_path": "specs/maturing_zone_watchlist/",
       "approved_at": "2026-07-17",
-      "depends_on": [4, 9],
+      "depends_on": [
+        4,
+        9
+      ],
       "note": "Done 2026-07-17. Reviewer APPROVE. Watchlist R3 young → re-eval → live/shadow. See progress/impl_maturing_zone_watchlist.md + review_maturing_zone_watchlist.md."
     },
     {
@@ -386,26 +392,33 @@
     },
     {
       "id": 18,
-      "name": "lightgbm_scorer",
-      "title": "LightGBM Adaptive Scorer — ML-driven trade prediction",
+      "name": "entry_intelligence_agent",
+      "title": "Entry Intelligence Agent - LightGBM que descubre patrones solo (estocastico + geometria)",
       "phase": "evolution",
       "priority": 18,
       "sdd": true,
       "spec_path": "specs/lightgbm_scorer/",
-      "description": "Replace static scoring with LightGBM model trained on black box data. Predicts trade outcomes using math_quality, stoch zones, spring_margin, score_breakdown. Outputs confidence (0-1) that adjusts final score.",
+      "description": "Agente de aprendizaje estadistico que descubre por si mismo que configuraciones do mercado tem maior probabilidade de exito e emite um Entry Quality Score (0-1) que o scanner consulta como CAMADA EXTRA (sem substituir STRAT-F). UNICO indicador tecnico = estocastico (M15/M5/M1, ja capturado); o resto sao matematicas/geometria das velas OHLC (corpo, mecha, intervalo, inclinacao, compressao, fractal, posicao no extremo) calculadas OFFLINE desde candles_1m/5m/15m ja guardadas em scan_candidates. NAO RSI/ADX/ATR/bandas. Auto-retrain continuo desde trades resolvidos.",
       "acceptance": [
-        "Model trains on 500+ resolved trades from black box",
-        "Feature extraction covers 18 features (math, stoch, spring, score, context)",
-        "Walk-forward validation (80/20 temporal split)",
-        "Confidence 0-1 integrated into scanner scoring: final = base * (0.7 + 0.3 * confidence)",
-        "Fallback to static scoring when model unavailable",
-        "Auto-retraining when 100+ new trades collected",
-        "Model metadata saved to data/models/lightgbm_meta.json",
+        "Model trains on 500+ resolved trades from black box (walk-forward 80/20 temporal)",
+        "Features = estocastico M15/M5/M1 + geometria OFFLINE (body_dir, body_ratio, opp_wick_ratio, entry_extreme_pos, pre_trend_slope, compression, fractal_align) + contexto (direction, payout, duration_sec, hour_utc, dow, asset_onehot)",
+        "SIN RSI/ADX/ATR/bandas nem indicadores externos",
+        "Confidence 0-1 integrado como camada extra: final = base * (0.7 + 0.3 * confidence), detras de ML_ENABLED (arranca False)",
+        "Fallback a scoring estatico quando nao ha modelo",
+        "Auto-retrain quando >100 trades novos resolvidos; conserva o de melhor F1 e recarrega em memoria",
+        "feature_importance em lightgbm_meta.json explica que relacoes descobriu o modelo",
+        "Extracao OFFLINE: nao se adiciona I/O ao ciclo do scanner em vivo",
         "All tests passing"
       ],
-      "status": "in_progress",
+      "status": "done",
+      "spec_ready_at": "2026-07-24",
+      "note": "Implementado: Entry Intelligence Agent. Geometria OFFLINE (body_dir, body_ratio, opp_wick_ratio, entry_extreme_pos, pre_trend_slope, compression_geom, fractal_align) + stoch M15/M5/M1 + contexto, desde candles_1m/5m/15m ya guardadas. Capa extra en score_candidate detras ML_ENABLED: final=base*(0.7+0.3*confidence). Auto-retrain continuo (umbral >100 nuevos) en scripts/entry_intelligence_retrain.py. Tests: tests/test_entry_intelligence.py (14). Fase 5 (validacion en demo) pendiente de activar ML_ENABLED.",
+      "done_at": "2026-07-24"
+    },
+    {
+      "id": 19,
       "name": "multi_tf_correlation",
-      "title": "Multi-TF Confluence Score — timeframe alignment detection",
+      "title": "Multi-TF Confluence Score - timeframe alignment detection",
       "phase": "evolution",
       "priority": 19,
       "sdd": true,
@@ -439,7 +452,9 @@
         "All tests passing"
       ],
       "status": "spec_ready",
-      "depends_on": [18]
+      "depends_on": [
+        18
+      ]
     },
     {
       "id": 21,
@@ -460,6 +475,49 @@
       ],
       "status": "spec_ready",
       "depends_on": []
+    },
+    {
+      "id": 27,
+      "name": "experience_engine",
+      "title": "Experience Engine — Market Memory única (aprende experiencias, no reglas)",
+      "description": "Sustituye los detectores basados en reglas por una memoria única del mercado. El sistema adquiere un arco de experiencia (contexto previo -> evento -> evolucion -> resultado -> consecuencias) en cada cambio relevante y lo DISTRIBUYE a las IAs, que solo leen. CERO reglas hardcoded de deteccion (no '3 toques', no FVG, no Order Block). Feature 18 (Entry Intelligence Agent) se vuelve el primer lector de esta memoria. Concepto aprobado en docs/experience_engine_concept.md.",
+      "phase": "evolution",
+      "priority": 1,
+      "status": "done",
+      "spec_ready_at": "2026-07-24",
+      "sdd": true,
+      "spec_path": "specs/experience_engine/",
+      "depends_on": [
+        18
+      ],
+      "acceptance": [
+        "El sistema adquiere un arco de experiencia completo en cada cambio relevante del mercado.",
+        "Todas las experiencias viven en UNA memoria unica (sin tablas por detector).",
+        "Las IAs solo leen la memoria; ninguna escribe ni modifica la captura.",
+        "El engine distribuye experiencias similares a las IAs en modo activo.",
+        "F18 se re-entrena desde la memoria unica sin cambiar su contrato de Confidence Score.",
+        "No existe logica que decida por regla si un nivel es soporte/resistencia/FVG/OB."
+      ],
+      "started_at": "2026-07-24",
+      "done_at": "2026-07-24",
+      "verification": "73 passed (engine+observacion+ML+distribucion); seed OFFLINE 211 experiencias; IA de Zonas prototipo valida tesis"
+    },
+    {
+      "id": 28,
+      "name": "zone_ia",
+      "title": "IA de Zonas (Experience Engine) — reemplaza zone_memory.py",
+      "sdd": true,
+      "status": "done",
+      "depends_on": [
+        27
+      ],
+      "replaces": [
+        "src/zone_memory.py"
+      ],
+      "description": "Segunda IA lectora de la memoria única. Descubre zonas de reacción por clustering de proximidad (sin reglas) y emite zone_confidence, reemplazando el detector por reglas zone_memory.py en STRAT-A/F.",
+      "started_at": "2026-07-24",
+      "done_at": "2026-07-24",
+      "verification": "86 passed (zone_ia + htf_zone_wiring + experience_engine + observation + distrib + ML). zone_memory.py borrado; ZONE_IA_ENABLED=True; tesis 'una memoria, multiples IAs' demostrada."
     }
   ]
 }

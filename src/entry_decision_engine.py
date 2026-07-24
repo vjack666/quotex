@@ -24,7 +24,7 @@ from enum import Enum
 import logging
 
 from models import Candle, ConsolidationZone, CandidateEntry
-from zone_memory import HistoricalZone, score_zone_memory
+from zone_ia import ZoneIA, WALL_CONF_THRESHOLD
 from spike_filter import detect_spike_anomaly
 from candle_patterns import CandleSignal
 
@@ -325,19 +325,7 @@ def _check_zone_age_minimum(zone_age_min: float, threshold: float = 20.0) -> Vet
     )
 
 
-def _check_zone_memory_no_wall(zone_adj: float, wall_threshold: float = -10.0) -> VetoResult:
-    """Veto 9: ¿Zone memory no bloquea (ajuste > -10)?"""
-    passed = zone_adj > wall_threshold
-    return VetoResult(
-        veto_type=VetoType.ZONE_MEMORY_WALL,
-        passed=passed,
-        reason="" if passed else f"memoria bloquea (ajuste={zone_adj:.1f})",
-        value=zone_adj,
-        threshold=wall_threshold
-    )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # CLASIFICACIÓN EN CATEGORÍAS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -442,7 +430,6 @@ def evaluate_entry(
     score_threshold: int = 73,
     enforce_quality: bool = True,
     helper_infer_h1_trend: Optional[Callable[[list[Candle]], str]] = None,
-    helper_score_zone_memory: Optional[Callable[[list[HistoricalZone], str, float], float]] = None,
 ) -> EntryDecision:
     """
     MOTOR PRINCIPAL: Evalúa candidato contra todos los vetos y devuelve decisión.
@@ -589,24 +576,36 @@ def evaluate_entry(
             return decision
         
         # ─────────────────────────────────────────────────────────────────────
-        # VETO 9: ¿Zone memory no bloquea?
+        # VETO 9: ¿Zona de reacción no es un muro? (IA de Zonas, Feature 28)
+        # Lee la memoria única y mide zone_confidence en el nivel de entrada.
+        # Sin reglas ni _DECAY_TABLE. Si la IA está off o sin muestra, no veta.
         # ─────────────────────────────────────────────────────────────────────
         zone_adj = 0.0
-        if hasattr(candidate, "zone_memory") and candidate.zone_memory:
-            try:
-                current_price = float(candles_5m[-1].close if candles_5m else candidate.zone.midpoint)
-                score_zone_memory_fn: Callable[[list[HistoricalZone], str, float], float]
-                score_zone_memory_fn = helper_score_zone_memory or score_zone_memory
-                zone_adj = score_zone_memory_fn(
-                    candidate.zone_memory,
-                    candidate.direction,
-                    current_price
+        try:
+            conf = ZoneIA.score(candidate)
+            if conf is not None:
+                zone_adj = round((conf - 0.5) * 16.0, 1)
+            if ZoneIA.is_wall(candidate):
+                veto_9 = VetoResult(
+                    veto_type=VetoType.ZONE_MEMORY_WALL,
+                    passed=False,
+                    reason="zone_ia_wall",
+                    value=zone_adj,
+                    threshold=WALL_CONF_THRESHOLD,
                 )
-            except Exception as e:
-                log.warning(f"Error scoring zone memory: {e}")
-                zone_adj = 0.0
-        
-        veto_9 = _check_zone_memory_no_wall(zone_adj, -10.0)
+            else:
+                veto_9 = VetoResult(
+                    veto_type=VetoType.ZONE_MEMORY_WALL,
+                    passed=True,
+                    reason="zone_ia_ok",
+                )
+        except Exception as e:
+            log.warning(f"Error scoring zone IA: {e}")
+            veto_9 = VetoResult(
+                veto_type=VetoType.ZONE_MEMORY_WALL,
+                passed=True,
+                reason="zone_ia_off",
+            )
         decision.vetos.append(veto_9)
         decision.zone_memory_adj = zone_adj
         if not veto_9.passed:

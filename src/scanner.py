@@ -67,7 +67,6 @@ from stochastic_m15 import compute_stoch
 from stochastic_zones import apply_stoch_help
 from entry_decision_engine import (
     _check_htf_available_and_aligned,
-    _check_zone_memory_no_wall,
 )
 from scan_prefetch import (
     ScanCycleData,
@@ -116,7 +115,7 @@ from maturing_watchlist import (
     parse_bars_age_from_skip,
 )
 from trade_journal import get_journal
-from zone_memory import query_nearby_zones, score_zone_memory
+from zone_ia import ZoneIA
 from ml_features import extract_features
 from ml_scorer import MLScorer
 from multi_tf_correlation import compute_confluence_bonus
@@ -390,7 +389,7 @@ class AssetScanner:
             self.bot.stats["rejected_young_zone"] += 1
         if skip_reason == "h1_conflict":
             self.bot.stats["filtered_sensor"] += 1
-        elif skip_reason in ("htf_reject", "zone_memory_wall"):
+        elif skip_reason in ("htf_reject", "zone_ia_wall"):
             self.bot.stats["skipped"] += 1
         elif skip_reason is not None:
             self.bot.stats["skipped"] += 1
@@ -402,7 +401,7 @@ class AssetScanner:
         price: float,
     ) -> tuple[bool, list, list, str | None]:
         """
-        Veto HTF 15m y muro zone_memory antes de crear candidato STRAT-A.
+        Veto HTF 15m y muro zone_ia (IA de Zonas, Feature 28) antes de crear candidato STRAT-A.
 
         Retorna (passed, candles_15m, zones, skip_reason).
         """
@@ -421,15 +420,22 @@ class AssetScanner:
             return False, candles_15m, [], "htf_reject"
 
         journal = get_journal()
-        zones = query_nearby_zones(journal.db_path, sym, price)
-        zone_adj = score_zone_memory(zones, direction, price) if zones else 0.0
-        wall = _check_zone_memory_no_wall(zone_adj, -10.0)
-        if not wall.passed:
-            log.info("⛔ [STRAT-A] %s: zone_memory wall (adj=%.1f)", sym, zone_adj)
-            self._bump_strat_a_skip_stats("zone_memory_wall")
-            return False, candles_15m, zones, "zone_memory_wall"
+        # Veto "wall" de zona usando la IA de Zonas (Feature 28): lee la memoria
+        # única y mide zone_confidence en el nivel de price. Sin reglas ni
+        # _DECAY_TABLE. Si la IA está off o sin muestra, no veta (neutral).
+        try:
+            from zone_ia import ZoneIA
+            _wall_cand = type(
+                "Z", (), {"asset": sym, "direction": direction, "entry_price": price}
+            )()
+            if ZoneIA.is_wall(_wall_cand):
+                log.info("⛔ [STRAT-A] %s: zone_ia wall (low confidence)", sym)
+                self._bump_strat_a_skip_stats("zone_ia_wall")
+                return False, candles_15m, [], "zone_ia_wall"
+        except Exception:  # nosec - la IA nunca debe romper el scanner
+            pass
 
-        return True, candles_15m, zones, None
+        return True, candles_15m, [], None
 
     async def _handle_breakout_side_effects(
         self,
@@ -861,7 +867,7 @@ class AssetScanner:
                     candles=candles_5m,
                 )
                 candidate.candles_h1 = h1_hist
-                candidate.zone_memory = zones
+                # zone_memory eliminado (Feature 28): la IA de Zonas lee la memoria única
                 candidate.candles_15m = candles_15m
                 candidate._reversal_pattern = pattern_name  # type: ignore[attr-defined]
                 candidate._reversal_strength = strength  # type: ignore[attr-defined]
@@ -1401,7 +1407,6 @@ class AssetScanner:
             candidate = self._candidate_from_strat_a_evaluation(
                 sym, payout, candles, h1_candles, ev, amount, ma_state, blocks, ob_tf_label, candles_1m,
             )
-            candidate.zone_memory = zones
             candidate.candles_15m = candles_15m
             score_candidate(candidate)
             self._apply_score_adjustments(candidate, ev, ob_tf_label, sym)
@@ -1581,7 +1586,6 @@ class AssetScanner:
                 "radar_cache",
                 candles_1m,
             )
-            candidate.zone_memory = zones
             candidate.candles_15m = candles_15m
             score_candidate(candidate)
             self._apply_score_adjustments(candidate, ev, "radar", sym)
@@ -2337,6 +2341,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     _mw_mode = normalize_mode(flags.get("MATURING_WATCHLIST_MODE", "live"))
     # Auditoría post-mortem (black box): estocástico M5 + funnel de filtros por capa.
     _stoch_m5_json = None          # dict {k, d, exhausted} al promover desde maturing
+    _stoch_m1_json = None          # Fase B: dict {k, d, k_prev, estado, cruce} M1
     _filter_funnel = []            # capas STRAT-F evaluadas en este ciclo (audit)
 
     if not STRAT_A_ONLY and (STRAT_F_ENABLED or _strat_f_only_mode):
@@ -2484,7 +2489,17 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     _stoch_m5_json = {
                         "k": _k,
                         "d": (_stoch_m5 or {}).get("d"),
+                        "k_prev": (_stoch_m5 or {}).get("k_prev"),  # Fase B: pendiente para agente
                         "exhausted": bool(_exhausted),
+                    }
+                    # Fase B: estocastico M1 para que el agente aprenda las 3 TFs.
+                    _stoch_m1 = compute_stoch(candles_1m, k_period=14, d_period=3) if candles_1m else None
+                    _stoch_m1_json = {
+                        "k": (_stoch_m1 or {}).get("k"),
+                        "d": (_stoch_m1 or {}).get("d"),
+                        "k_prev": (_stoch_m1 or {}).get("k_prev"),
+                        "estado": (_stoch_m1 or {}).get("estado"),
+                        "cruce": (_stoch_m1 or {}).get("cruce"),
                     }
                     # Funnel de auditoría (ruta promovida): capas maturing + stoch M5.
                     _filter_funnel = [
@@ -2637,6 +2652,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 "bb_scan_id": ctx.bb_scan_id,
                 "stoch_m15": stoch_m15,
                 "stoch_m5": _stoch_m5_json,
+                "stoch_m1": _stoch_m1_json,  # Fase B: nueva TF para el agente
                 "filter_funnel": _filter_funnel,
             }
             res.strat_f_batch_delta = _batch

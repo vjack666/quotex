@@ -10,7 +10,195 @@ from models import (
     CandidateEntry,
     SignalMode,
 )
-from zone_memory import HistoricalZone, score_zone_memory as _zm_score
+from zone_ia import ZoneIA
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY INTELLIGENCE AGENT (Feature 18) — capa extra de ML sobre el score base
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    from config import ML_ENABLED, ML_MODEL_PATH  # type: ignore
+except Exception:  # config not importable (e.g. isolated test) → ML off
+    ML_ENABLED = False
+    ML_MODEL_PATH = "data/models/lightgbm_v1.pkl"
+
+# Experience Engine (Feature 27): modo ACTIVO. Al evaluar un candidato, el
+# engine distribuye su memoria a la IA (solo LECTURA: query_similar). El
+# capturador escribe en la memoria (OBSERVATION_ENABLED); las IAs solo leen.
+try:
+    from config import OBSERVATION_ENABLED  # type: ignore
+except Exception:
+    OBSERVATION_ENABLED = False
+
+# IA de Zonas (Feature 28): segunda IA lectora de la memoria única. Reemplaza
+# el detector por reglas zone_memory.py. Emite zone_confidence. Bandera activa.
+try:
+    from config import ZONE_IA_ENABLED  # type: ignore
+except Exception:
+    ZONE_IA_ENABLED = True
+
+_EXP_MEM = None          # singleton de ExperienceMemory (cache)
+_EXP_MEM_TS = 0.0
+_EXP_MEM_TTL = 30.0      # recarga cada 30s (la memoria crece en vivo)
+
+
+def _get_experience_memory():
+    """Singleton con cache de ExperienceMemory. Solo lectura (query_similar)."""
+    global _EXP_MEM, _EXP_MEM_TS
+    import time as _t
+    if _EXP_MEM is None or (_t.time() - _EXP_MEM_TS) > _EXP_MEM_TTL:
+        try:
+            from experience_engine import ExperienceMemory  # type: ignore
+            _EXP_MEM = ExperienceMemory()
+            _EXP_MEM_TS = _t.time()
+        except Exception:
+            _EXP_MEM = False
+    return _EXP_MEM or None
+
+
+def _apply_experience_distrib(entry: CandidateEntry) -> None:
+    """Feature 27 (T8/T9) — distribución ACTIVA: el engine empuja su memoria a
+    la IA de Entradas al evaluar un candidato.
+
+    Solo LEE (query_similar): calcula el win rate observado de experiencias
+    similares (mismo asset + direccion + contexto stoch) y lo combina como
+    ajuste aditivo leve en el score_breakdown. NUNCA escribe en la memoria.
+    Detrás de OBSERVATION_ENABLED. No bloquea ni rompe el bot.
+    """
+    if not OBSERVATION_ENABLED:
+        return
+    try:
+        mem = _get_experience_memory()
+        if mem is None:
+            return
+        asset = getattr(entry, "asset", None)
+        direction = (getattr(entry, "direction", "") or "").upper()
+        if not asset or direction not in ("CALL", "PUT"):
+            return
+
+        # Perfil grueso: mismo asset + misma direccion
+        similars = mem.query_similar(
+            {"asset": str(asset), "direction": direction}, limit=200
+        )
+        # Afinar por contexto stoch (estado), sin reglas duras
+        stoch = getattr(entry, "stoch_m15", None) or {}
+        stoch_zone = stoch.get("estado") if isinstance(stoch, dict) else None
+
+        closed = [e for e in similars if e.is_closed()]
+        if stoch_zone:
+            same_ctx = [
+                e for e in closed
+                if (e.contexto_previo.get("stoch_m15", {}) or {}).get("zone") == stoch_zone
+            ]
+            if len(same_ctx) >= 5:
+                closed = same_ctx
+
+        if len(closed) < 5:
+            return  # muestra insuficiente: no ajustamos
+
+        wins = sum(1 for e in closed if e.resultado.get("decision") == "WIN")
+        wr = wins / len(closed)
+
+        # Ajuste leve (±8 pts) centrado en WR=0.5; no toca el umbral de STRAT-F
+        adj = round((wr - 0.5) * 16.0, 1)
+        entry.score = round(entry.score + adj, 1)
+        try:
+            entry.score_breakdown["experience_win_rate"] = round(wr, 3)
+            entry.score_breakdown["experience_n"] = len(closed)
+            entry.score_breakdown["experience_adj"] = adj
+        except (AttributeError, TypeError):
+            pass
+        setattr(entry, "experience_win_rate", wr)
+        setattr(entry, "experience_n", len(closed))
+    except Exception:  # nosec - la distribución nunca rompe el bot
+        pass
+
+
+def _finalize_scoring(entry: CandidateEntry) -> None:
+    """Aplica todas las capas extra (ML + distribución Experience Engine)."""
+    _apply_ml_layer(entry)
+    _apply_experience_distrib(entry)
+
+_ML_SCORER = None  # lazy singleton
+
+
+def _get_ml_scorer():
+    """Return the shared MLScorer, or None when ML is disabled/unavailable."""
+    global _ML_SCORER
+    if not ML_ENABLED:
+        return None
+    if _ML_SCORER is None:
+        try:
+            from ml_scorer import MLScorer
+
+            _ML_SCORER = MLScorer(model_path=ML_MODEL_PATH)
+        except Exception:
+            _ML_SCORER = False  # mark as unavailable so we don't retry forever
+    return _ML_SCORER or None
+
+
+def _entry_to_feature_row(entry: CandidateEntry) -> dict:
+    """Build an ml_features-compatible row dict from a live CandidateEntry.
+
+    Uses the raw candle snapshots already on the entry (M1 + M15) plus the
+    signal context. Stochastic across TFs is read if the scanner attached it
+    (``entry.stoch_m15`` etc.); otherwise those features default to 0 and the
+    model still predicts.
+    """
+    from ml_features import extract_features_full
+
+    def _as_dicts(candles):
+        out = []
+        for c in candles or []:
+            if hasattr(c, "__dict__"):
+                out.append(c.__dict__)
+            else:
+                out.append(c)
+        return out
+
+    return {
+        "asset": getattr(entry, "asset", None),
+        "direction": getattr(entry, "direction", None),
+        "payout": getattr(entry, "payout", None),
+        "duration_sec": getattr(entry, "duration_sec", None),
+        "stoch_m15": getattr(entry, "stoch_m15", None),
+        "stoch_m5": getattr(entry, "stoch_m5", None),
+        "stoch_m1": getattr(entry, "stoch_m1", None),
+        "candles_1m": _as_dicts(getattr(entry, "candles", [])),
+        "candles_5m": _as_dicts(getattr(entry, "candles_5m", [])),
+        "candles_15m": _as_dicts(getattr(entry, "candles_15m", [])),
+        "ts": getattr(entry, "_signal_ts_1m", None),
+    }
+
+
+def _apply_ml_layer(entry: CandidateEntry) -> None:
+    """Apply the Entry Intelligence Agent as an EXTRA multiplicative layer.
+
+    final = base * (0.7 + 0.3 * confidence). Never replaces the base score;
+    if the model is unavailable or predicts None, the base score is kept
+    unchanged (clean fallback). Stores the confidence + delta for traceability.
+    """
+    scorer = _get_ml_scorer()
+    if scorer is None:
+        return
+    try:
+        feats = _entry_to_feature_row(entry)
+        conf = scorer.predict(feats)
+    except Exception:
+        return
+    if conf is None:
+        return
+    base = entry.score
+    entry.score = round(base * (0.7 + 0.3 * conf), 1)
+    try:
+        entry.score_breakdown["ml_confidence"] = round(conf, 3)
+        entry.score_breakdown["ml_adjust"] = round(entry.score - base, 1)
+    except (AttributeError, TypeError):
+        pass
+    # Store on the entry for downstream logging / DB recording.
+    setattr(entry, "ml_confidence", conf)
+    setattr(entry, "ml_adjusted_score", entry.score)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,15 +452,20 @@ def _score_historical_level(entry: CandidateEntry) -> float:
         return HIST_LEVEL_CALL_BONUS if entry.direction == "call" else -HIST_LEVEL_PENALTY
     return 0.0
 
-def _score_zone_memory_adj(entry: CandidateEntry) -> float:
+def _score_zone_ia(entry: CandidateEntry) -> float:
+    """Feature 28 — ajuste por zona de reacción descubierta por la IA de Zonas.
+
+    Lee la memoria única (ZoneIA.score) y emite zone_confidence ∈ [0,1].
+    Mapea a ajuste aditivo leve (±8 pts) centrado en 0.5. Sin reglas: la zona
+    y su fortaleza son salida de la IA, no del capturador. Retorna 0.0 si la IA
+    está off o no hay muestra suficiente (neutral).
     """
-    Ajuste por acumulaciones históricas cercanas (zone_memory).
-    Retorna 0.0 si no hay zonas cargadas.
-    """
-    if not entry.zone_memory:
+    conf = ZoneIA.score(entry)
+    if conf is None:
         return 0.0
-    price = float(entry.candles[-1].close) if entry.candles else float(entry.zone.midpoint)
-    return _zm_score(entry.zone_memory, entry.direction, price)
+    entry.zone_confidence = conf
+    entry.score_breakdown["zone_confidence"] = round(conf, 3)
+    return round((conf - 0.5) * 16.0, 1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  FUNCIÓN PRINCIPAL DE SCORING
@@ -309,6 +502,7 @@ def score_candidate(
             "payout": round(s_payout, 1),
             "age_adjustment": round(age_adj, 1),
         }
+        _finalize_scoring(entry)
         return entry.score
 
     if effective_mode == SignalMode.BREAKOUT:
@@ -324,7 +518,7 @@ def score_candidate(
         s_payout   = _score_payout(entry.payout, w["payout"])
         age_adj    = _age_adjustment(entry.zone)
         hist_adj   = _score_historical_level(entry)
-        zm_adj     = _score_zone_memory_adj(entry)
+        zm_adj     = _score_zone_ia(entry)
 
         total = s_comp + s_momentum + s_trend + s_payout + age_adj + hist_adj + zm_adj
         entry.score = round(total, 1)
@@ -340,7 +534,9 @@ def score_candidate(
         if hist_adj != 0.0:
             entry.score_breakdown["hist_level"] = round(hist_adj, 1)
         if zm_adj != 0.0:
-            entry.score_breakdown["zone_memory"] = round(zm_adj, 1)
+            entry.score_breakdown["zone_confidence_adj"] = round(zm_adj, 1)
+        if entry.zone_confidence is not None:
+            entry.score_breakdown["zone_confidence"] = round(entry.zone_confidence, 3)
     else:
         w = WEIGHTS_REBOUND
         s_comp    = _score_compression(entry.zone, w["compression"])
@@ -354,7 +550,7 @@ def score_candidate(
         s_payout  = _score_payout(entry.payout, w["payout"])
         age_adj   = _age_adjustment(entry.zone)
         hist_adj  = _score_historical_level(entry)
-        zm_adj    = _score_zone_memory_adj(entry)
+        zm_adj    = _score_zone_ia(entry)
 
         total = s_comp + s_bounce + s_trend + s_payout + age_adj + hist_adj + zm_adj
         entry.score = round(total, 1)
@@ -368,8 +564,11 @@ def score_candidate(
         if hist_adj != 0.0:
             entry.score_breakdown["hist_level"] = round(hist_adj, 1)
         if zm_adj != 0.0:
-            entry.score_breakdown["zone_memory"] = round(zm_adj, 1)
+            entry.score_breakdown["zone_confidence_adj"] = round(zm_adj, 1)
+        if entry.zone_confidence is not None:
+            entry.score_breakdown["zone_confidence"] = round(entry.zone_confidence, 3)
 
+    _finalize_scoring(entry)
     return entry.score
 
 
