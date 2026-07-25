@@ -2345,7 +2345,16 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     _filter_funnel = []            # capas STRAT-F evaluadas en este ciclo (audit)
 
     if not STRAT_A_ONLY and (STRAT_F_ENABLED or _strat_f_only_mode):
-        stoch_m15 = None
+        # Pre-calcular stoch M15 y M5 ANTES de evaluar STRAT-F, para
+        # alimentar el SPIKE mejorado (R3 zona M5 alineada, R7 banda
+        # zone_strength). Candles M5 ya estan en `candles`.
+        stoch_m15 = compute_stoch(candles_15m) if candles_15m else None
+        _stoch_m5 = None
+        _efficacy_val = None
+        try:
+            _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
+        except Exception:
+            _stoch_m5 = None
         if ctx._eval_override is not None:
             f_eval = ctx._eval_override
         else:
@@ -2355,15 +2364,19 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 candles_1m,
                 payout=payout,
                 min_payout=int(MIN_PAYOUT),
+                stoch_m15=stoch_m15,
+                stoch_m5=_stoch_m5,
+                zone_strength=_efficacy_val,
             )
-            stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
-        # EFICACIA ESTRUCTURAL REAL (3 días M15) — grosor de la línea (Ruben 2026-07-25).
+            # EFICACIA ESTRUCTURAL REAL (3 días M15) se calcula abajo (línea ~2374)
+
         # Se calcula sobre el cache COMPLETO de 288 velas, no sobre las 20 que
         # guarda el backbox. El backbox solo recibe el resultado (en strategy_details).
         _efficacy = None
         if candles_15m and f_eval.direction and f_eval.zone is not None:
             try:
                 from zone_strength import compute_support_efficacy
+
                 _lvl = (
                     f_eval.zone.floor if f_eval.direction == "CALL"
                     else f_eval.zone.ceiling
@@ -2386,7 +2399,26 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
         _stoch_k = (stoch_m15 or {}).get("k") if stoch_m15 else None
         _stoch_k_prev = (stoch_m15 or {}).get("k_prev") if stoch_m15 else None
         _stoch_d = (stoch_m15 or {}).get("d") if stoch_m15 else None
-        _stoch_help = apply_stoch_help(_stoch_k, f_eval.direction or "", _stoch_mode, k_prev=_stoch_k_prev, d=_stoch_d)
+        _lvl_for_stoch = None
+        _zone_lo = None
+        _zone_hi = None
+        if candles_15m and f_eval.direction and f_eval.zone is not None:
+            try:
+                _zone_lo = float(f_eval.zone.floor)
+                _zone_hi = float(f_eval.zone.ceiling)
+            except Exception:
+                _zone_lo = _zone_hi = None
+        _zs = (_efficacy or {}).get("efficacy") if _efficacy else None
+        _stoch_help = apply_stoch_help(
+            _stoch_k, f_eval.direction or "", _stoch_mode,
+            k_prev=_stoch_k_prev, d=_stoch_d,
+            stoch_full=stoch_m15 if isinstance(stoch_m15, dict) else None,
+            candles_15m=candles_15m,
+            zone_lo=_zone_lo,
+            zone_hi=_zone_hi,
+            stoch_m5=_stoch_m5,
+            zone_strength=float(_zs) if isinstance(_zs, (int, float)) else None,
+        )
         if stoch_m15 is not None:
             stoch_m15 = {
                 **stoch_m15,

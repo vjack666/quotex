@@ -518,6 +518,44 @@
       "started_at": "2026-07-24",
       "done_at": "2026-07-24",
       "verification": "86 passed (zone_ia + htf_zone_wiring + experience_engine + observation + distrib + ML). zone_memory.py borrado; ZONE_IA_ENABLED=True; tesis 'una memoria, multiples IAs' demostrada."
+    },
+    {
+      "id": 29,
+      "name": "market_geometry_ctx",
+      "title": "Contexto Geométrico M15 (OTC) — soportes/resistencias del día para consenso de dirección",
+      "sdd": true,
+      "status": "in_progress",
+      "depends_on": [
+        27,
+        28
+      ],
+      "description": "Usa ~96 velas M15 de pares OTC (ya traídas) con smc_analysis.detect_structure para trazar swings/soportes/resistencias reales del día. Cruza con IA de Zonas (memoria) + confirmación por cuerpo como consenso de dirección en el extremo. Sin reglas, sin Bollinger, sin majors. Aprende de EURJPY_otc (loss direccion_equivocada).",
+      "started_at": "2026-07-24",
+      "done_at": "2026-07-24",
+      "verification": "101 passed (market_geometry_ctx 6 + extreme_direction 9 + zone_ia 5 + htf_zone_wiring 8 + experience_engine 4 + observation 5 + distrib 3 + ML...). Wiring end-to-end: scorer puebla entry.geometry desde candles_15m y _score_extreme_direction penaliza PUT en soporte con cuerpo alcista (caso EURJPY). MARKET_GEOMETRY_ENABLED=True."
+    },
+    {
+      "id": 30,
+      "name": "strat_f_spike_wyckoff_phase_a",
+      "title": "Mejora del SPIKE: agotamiento verdadero (cruce M15 confirmado + M5 alineado + vela de rechazo) anclado a ZONA S/R fractal, mapeado a Fase A Wyckoff",
+      "sdd": true,
+      "status": "done",
+      "spec_path": "specs/strat_f_spike_wyckoff_phase_a/",
+      "depends_on": [
+        29
+      ],
+      "description": "Eleva el modo SPIKE de evaluate_strat_f de 'M5 en extremo + cuerpo a favor' a 'agotamiento verdadero en la ZONA S/R del fractal con cruce M15 confirmado (cross_ago>=1) + M5 alineado + vela de rechazo (martillo/doji/estrellafugaz)'. Reusa stoch_exhaustion.evaluate_exhaustion como motor (NO duplica lógica). Mapea el evento a Fase A de Wyckoff (spring/upthrust). Conserva el rebote base (R6). NO olvida las zonas S/R fractal (suelo/techo Wyckoff) como ancla (R1). M5 como árbitro de la entrada (alineado con M15), coherente con '5 min es mas que suficiente'.",
+      "acceptance": [
+        "SPIKE con cruce M15 confirmado + M5 alineado + vela de rechazo en zona fractal → entry_mode=SPIKE, spike=True",
+        "SPIKE sin cruce M15 confirmado → REBOUND (no SPIKE)",
+        "SPIKE con M5 en contra → REBOUND",
+        "pattern_name/auditoria incluye wyckoff_phase_a (spring para CALL, upthrust para PUT)",
+        "Rebote base intacto: tests test_strat_f_spike.py y test_strat_f_maturing_recheck.py siguen verdes",
+        "tests nuevos R9 cubren los 4 casos",
+        "pytest tests/ en verde (modulos tocados)"
+      ],
+      "created_at": "2026-07-25",
+      "note": "Spec redactado por auditoria del sistema + logica validada en watchdog (stoch_exhaustion). Puerta SDD: espera aprobacion humana."
     }
   ]
 }

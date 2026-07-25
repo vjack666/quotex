@@ -1,13 +1,25 @@
 """M15 stoch zone help over STRAT-F (pure, no I/O).
 
-V2: Zone vetos now consider cross direction — only veto when the cross
-CONFIRMS the extreme is turning against us. Momentum continuation in
-extreme zones is PASS, not VETO.
+V3 (actualizacion completa): la regla de entrada en zonas extremas ya NO
+es "BOOST ciego apenas el %K toca el extremo". Ahora exige
+AGOTAMIENTO VERDADERO (ver stoch_exhaustion.evaluate_exhaustion):
+
+  - CALL en Z1 (sobreventa): requiere cruce alcista CONFIRMADO (>=1 vela
+    M15 de antiguedad) + vela de agotamiento (martillo/doji/estrellafugaz)
+    en el soporte.
+  - PUT en Z5 (sobrecompra): requiere cruce bajista CONFIRMADO +
+    vela de agotamiento en la resistencia.
+
+Si esta confirmado -> BOOST fuerte (+12).
+Si falta (EXHAUST_WAIT) -> PASS (no entra, pero deja vigilar al fractal;
+no es VETO duro: el par puede madurar y confirmar en la siguiente vela).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence
+
+from stoch_exhaustion import evaluate_exhaustion
 
 Zone = Literal["Z1", "Z2", "Z3", "Z4", "Z5"]
 Action = Literal["BOOST", "PASS", "VETO"]
@@ -21,7 +33,8 @@ class StochHelpResult:
     zone: Optional[Zone]
     action: Action
     score_delta: int
-    reason: str  # stoch_boost | stoch_pass | stoch_extreme_against | stoch_no_k | stoch_momentum_continuation
+    reason: str  # stoch_boost | stoch_pass | stoch_extreme_against | stoch_no_k | stoch_momentum_continuation | stoch_exhaust_wait | stoch_exhaust_confirmed
+    exhaustion: Optional[object] = None  # ExhaustResult para auditoria
 
 
 def zone_from_k(k: Optional[float]) -> Optional[Zone]:
@@ -84,6 +97,15 @@ def apply_stoch_help(
     *,
     k_prev: Optional[float] = None,
     d: Optional[float] = None,
+    stoch_full: Optional[dict] = None,
+    candles_15m: Optional[Sequence] = None,
+    zone_lo: Optional[float] = None,
+    zone_hi: Optional[float] = None,
+    stoch_m5: Optional[dict] = None,   # {k,d,estado,cruce} del M5 — debe alinearse
+    zone_strength: Optional[float] = None,  # % fuerza linea imaginaria (zone_strength).
+                                           # FUENTE PRINCIPAL de la banda (R7).
+    candles_1m: Optional[Sequence] = None,  # ventana M1 para evaluacion INTRAVELA (R10)
+    lookback: int = 3,                        # velas M1/15m a revisar para la vela de rechazo
 ) -> StochHelpResult:
     """Return zone/action/score_delta for STRAT-F direction.
 
@@ -113,48 +135,66 @@ def apply_stoch_help(
     if direction_u not in ("CALL", "PUT"):
         return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_pass")
 
-    # Matrix locked by R3/R4
+    # --- V3: agotamiento verdadero en zonas extremas -------------------
+    # Z1 (sobreventa) para CALL y Z5 (sobrecompra) para PUT son las
+    # unicas zonas donde el rebote tiene sentido. En AMBAS exige el
+    # agotamiento confirmado (cruce + vela de rechazo en la franja S/R).
+    if (direction_u == "CALL" and zone == "Z1") or (
+        direction_u == "PUT" and zone == "Z5"
+    ):
+        ex = evaluate_exhaustion(
+            k=k,
+            d=d,
+            k_vals=stoch_full.get("k_vals") if stoch_full else None,
+            d_vals=stoch_full.get("d_vals") if stoch_full else None,
+            direction=direction_u,
+            candles_15m=candles_15m,
+            zone_lo=zone_lo,
+            zone_hi=zone_hi,
+            stoch_m5=stoch_m5,
+            zone_strength=zone_strength,
+            candles_1m=candles_1m,
+            lookback=lookback,
+        )
+        if ex.action == "EXHAUST_CONFIRMED":
+            return StochHelpResult(
+                zone=zone, action="BOOST", score_delta=12,
+                reason="stoch_exhaust_confirmed", exhaustion=ex,
+            )
+        # EXHAUST_WAIT: en la zona pero sin cruce confirmado y/o sin vela
+        # de rechazo. No entra (PASS), pero NO es veto: el fractal sigue
+        # vigilando y puede confirmar en la proxima vela M15.
+        return StochHelpResult(
+            zone=zone, action="PASS", score_delta=0,
+            reason=f"stoch_exhaust_wait:{ex.reason}", exhaustion=ex,
+        )
+
+    # Zonas medias / no-extremas: comportamiento anterior (boost suave
+    # a favor de la direccion, PASS en Z2/Z3/Z4 segun lado).
     if direction_u == "CALL":
-        if zone == "Z1":
-            return StochHelpResult(zone=zone, action="BOOST", score_delta=10, reason="stoch_boost")
         if zone == "Z2":
             return StochHelpResult(zone=zone, action="BOOST", score_delta=5, reason="stoch_boost")
         if zone in ("Z3", "Z4"):
             return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_pass")
-        # Z5: Check cross direction before vetoing
+        # Z5 (CALL): sobrecompra es contra-direccion -> vetar si confirma
         if effective_mode == "hard":
             if _is_cross_against(k, k_prev, d, "CALL"):
-                return StochHelpResult(
-                    zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against"
-                )
+                return StochHelpResult(zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against")
             if _is_momentum_continuing(k, k_prev, "CALL"):
-                return StochHelpResult(
-                    zone=zone, action="PASS", score_delta=0, reason="stoch_momentum_continuation"
-                )
-            # k_prev not available or ambiguous → old behavior (conservative VETO)
-            return StochHelpResult(
-                zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against"
-            )
+                return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_momentum_continuation")
+            return StochHelpResult(zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against")
         return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_pass")
 
     # PUT
-    if zone == "Z5":
-        return StochHelpResult(zone=zone, action="BOOST", score_delta=10, reason="stoch_boost")
     if zone == "Z4":
         return StochHelpResult(zone=zone, action="BOOST", score_delta=5, reason="stoch_boost")
     if zone in ("Z2", "Z3"):
         return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_pass")
-    # Z1: Check cross direction before vetoing
+    # Z1 (PUT): sobreventa es contra-direccion -> vetar si confirma
     if effective_mode == "hard":
         if _is_cross_against(k, k_prev, d, "PUT"):
-            return StochHelpResult(
-                zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against"
-            )
+            return StochHelpResult(zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against")
         if _is_momentum_continuing(k, k_prev, "PUT"):
-            return StochHelpResult(
-                zone=zone, action="PASS", score_delta=0, reason="stoch_momentum_continuation"
-            )
-        return StochHelpResult(
-            zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against"
-        )
+            return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_momentum_continuation")
+        return StochHelpResult(zone=zone, action="VETO", score_delta=0, reason="stoch_extreme_against")
     return StochHelpResult(zone=zone, action="PASS", score_delta=0, reason="stoch_pass")

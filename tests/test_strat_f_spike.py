@@ -1,18 +1,23 @@
-"""Modo SPIKE de STRAT-F: condición ADICIONAL al rebote (no lo reemplaza).
+"""Modo SPIKE de STRAT-F (V3): agotamiento verdadero + Fase A Wyckoff.
 
-Cuando hay patron de agotamiento (stoch M5 exhaust) y la vela de entrada toca
-el extremo del fractal con CUERPO a favor, evaluate_strat_f promueve la senal a
-entry_mode="SPIKE" / spike=True. Si no hay agotamiento, queda en REBOTE.
+Reescribe el test viejo (cuerpo-a-favor) para la nueva semantica: el SPIKE
+ahora se activa cuando apply_stoch_help devuelve BOOST por agotamiento
+confirmado (cruce M15 + M5 alineado + vela de rechazo en la zona S/R,
+o stoch atrapado en extremo). Mapea a spring (CALL) / upthrust (PUT).
 
-Se mockea compute_stoch para aislar la logica SPIKE (el stoch real necesita
-muchas velas de sesion; aqui solo importa el valor %K inyectado).
+Se mockea apply_stoch_help para aislar la propagacion del SPIKE dentro de
+evaluate_strat_f (el motor real esta cubierto en test_stochastic_zones y
+test_stoch_exhaustion). El caso (e) INTRAVELA verifica que evaluate_strat_f
+le pasa candles_1m a apply_stoch_help (R10).
 """
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from strat_fractal import evaluate_strat_f, stoch_m5_exhausted
+from strat_fractal import evaluate_strat_f
+from stochastic_zones import StochHelpResult
+from stoch_exhaustion import ExhaustResult
 
 
 def _candle(o, h, l, c, ts):
@@ -26,70 +31,154 @@ def _range_15m():
 
 
 def _m5_with_fractal_down(band: float):
-    """Velas M5 con fractal_down real en idx 5 (Bill Williams, vecinos altos).
-
-    Devuelve m5 con el fractal en idx 5 y 4 velas de rebote posteriores.
-    """
-    m5 = [_candle(100, 101, 99, 100, i) for i in range(5)]  # planas previas
-    m5.append(_candle(band + 1, band + 1.5, band, band + 0.8, 5))  # fractal_down (low hundido)
+    """M5 con fractal_down real (Bill Williams). Infiere direccion CALL.
+    Velas planas ~100; idx5 hunde el low al nivel `band`."""
+    m5 = [_candle(100, 101, 99, 100, i) for i in range(5)]
+    m5.append(_candle(band + 1, band + 1.5, band, band + 0.8, 5))  # low hundido = band
     for j in range(4):  # rebote suave post-fractal
         base = band + 0.8 + j * 0.4
         m5.append(_candle(base - 0.2, base + 0.3, base - 0.3, base, 6 + j))
     return m5
 
 
+def _m5_with_fractal_up(band: float):
+    """M5 con fractal_up real (Bill Williams). Infiere direccion PUT.
+    Velas planas ~100 (high=101); idx5 clava el high en `band` (techo > 101)."""
+    m5 = [_candle(100, 101, 99, 100, i) for i in range(5)]
+    m5.append(_candle(band - 1.5, band, band - 1.2, band - 1.0, 5))  # high clavado = band
+    for j in range(4):  # rebote suave post-fractal (baja del techo)
+        base = band - 1.0 - j * 0.4
+        m5.append(_candle(base + 0.2, base + 0.3, base - 0.3, base, 6 + j))
+    return m5
+
+
 def _m1_rejecting_band(band: float):
-    """Dos velas M1 que rechazan la banda (CALL: tocan low, cierran arriba)."""
+    """Dos velas M1 que rechazan la banda S/R (CALL: low toca band, cierra arriba)."""
     tol = band * 0.0015
     prev = _candle(band, band + 0.3, band, band + 0.05, 100)
     last = _candle(band, band + 0.4, band, band + 0.1 + tol, 101)
     return [prev, last]
 
 
+def _m1_rejecting_band_up(band: float):
+    """Dos velas M1 que rechazan el techo S/R (PUT: high toca band, cierra abajo)."""
+    tol = band * 0.0015
+    prev = _candle(band, band, band - 0.3, band - 0.05, 100)
+    last = _candle(band, band, band - 0.4, band - 0.1 - tol, 101)
+    return [prev, last]
+
+
+def _boost_exhaust(path: str, candle: str):
+    ex = ExhaustResult(
+        "EXHAUST_CONFIRMED", "agotamiento_confirmado",
+        in_extreme_zone=True, cross_confirmed=True, cross_ago=2,
+        exhaustion_candle=candle, path=path,
+    )
+    return StochHelpResult(zone="Z1", action="BOOST", score_delta=12,
+                           reason="stoch_exhaust_confirmed", exhaustion=ex)
+
+
+# ── (a) REBOTE base sin agotamiento: NO SPIKE ──────────────────────
+
 def test_rebote_base_valido():
     band = 96.5
     m5 = _m5_with_fractal_down(band)
     m1 = _m1_rejecting_band(band)
-    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}):
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help", return_value=StochHelpResult(
+             zone="Z1", action="PASS", score_delta=0, reason="stoch_exhaust_wait:x")):
         ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
     assert ev.has_signal, f"se esperaba senal REBOTE, skip={ev.skip_reason}"
     assert ev.entry_mode == "REBOUND"
     assert ev.spike is False
 
 
-def test_spike_cuando_hay_agotamiento_y_cuerpo_a_favor():
+# ── (b) CALL spring confirmado -> SPIKE + wyckoff_event=spring ──────
+
+def test_spike_call_spring_confirmado():
     band = 96.5
     m5 = _m5_with_fractal_down(band)
-    # M1: rechaza banda Y tiene cuerpo a favor DOMINANTE cerca del extremo (SPIKE)
-    tol = band * 0.0015
-    prev = _candle(band, band + 0.3, band, band + 0.05, 100)
-    # last: open=band, close=band+0.12, high=band+0.16, low=band -> cuerpo dominante (>=50% rango)
-    last = _candle(band, band + 0.16, band, band + 0.12, 101)  # close>open (cuerpo a favor)
-    m1 = [prev, last]
-    # Agotamiento: stoch M5 %K < 20 para CALL
-    with patch("strat_fractal.compute_stoch", return_value={"k": 10.0, "d": 12.0}):
+    m1 = _m1_rejecting_band(band)
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help", return_value=_boost_exhaust("ruptura", "martillo")):
         ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
-    assert ev.has_signal, f"se esperaba senal, skip={ev.skip_reason}"
-    assert ev.spike is True, f"con agotamiento+cuerpo_a_favor debe ser SPIKE, mode={ev.entry_mode}"
+    assert ev.has_signal
+    assert ev.spike is True
+    assert ev.entry_mode == "SPIKE"
+    assert ev.wyckoff_event == "spring"
+    assert ev.exhaustion_candle == "martillo"
+
+
+# ── (c) PUT upthrust confirmado -> SPIKE + wyckoff_event=upthrust ──
+
+def test_spike_put_upthrust_confirmado():
+    band = 103
+    m5 = _m5_with_fractal_up(band)
+    m1 = _m1_rejecting_band_up(band)
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help",
+                return_value=_boost_exhaust("ruptura", "estrellafugaz")):
+        ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
+    assert ev.has_signal
+    assert ev.spike is True
+    assert ev.wyckoff_event == "upthrust"
+    assert ev.exhaustion_candle == "estrellafugaz"
+
+
+# ── (d) CAMINO ATRAPADO (R4-bis): sin vela rechazo, stoch atrapado ──
+
+def test_spike_camino_atrapado_sin_vela_rechazo():
+    band = 103
+    m5 = _m5_with_fractal_up(band)
+    m1 = _m1_rejecting_band_up(band)
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help",
+                return_value=_boost_exhaust("atrapado", "atrapado")):
+        ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
+    assert ev.has_signal
+    assert ev.spike is True
     assert ev.entry_mode == "SPIKE"
 
 
-def test_spike_no_se_activa_sin_cuerpo_a_favor():
+# ── (e) INTRAVELA (R10): el agotamiento se detecta en candles_1m ─────
+#     (la M15 aun no cierra). evaluate_strat_f DEBE pasar candles_1m a
+#     apply_stoch_help para que el motor lo vea.
+
+def test_spike_intravela_usa_candles_1m():
     band = 96.5
     m5 = _m5_with_fractal_down(band)
-    # M1 con cuerpo EN CONTRA (rebote, close<open) -> no debe ser SPIKE
-    tol = band * 0.0015
-    prev = _candle(band, band + 0.3, band, band + 0.05, 100)
-    last = _candle(band + 0.2, band + 0.5, band, band + 0.05, 101)  # close<open (en contra)
-    m1 = [prev, last]
-    with patch("strat_fractal.compute_stoch", return_value={"k": 10.0, "d": 12.0}):
+    m1 = _m1_rejecting_band(band)
+
+    captured = {}
+
+    def _fake_help(k, direction, mode, **kw):
+        captured.update(kw)
+        # Solo confirma si recibio candles_1m (el agotamiento vive en M1)
+        if kw.get("candles_1m"):
+            return _boost_exhaust("ruptura", "martillo")
+        return StochHelpResult(zone="Z1", action="PASS", score_delta=0,
+                               reason="stoch_exhaust_wait:sin_vela")
+
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help", side_effect=_fake_help):
         ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
-    assert ev.has_signal, f"se esperaba senal REBOTE, skip={ev.skip_reason}"
-    assert ev.spike is False, "cuerpo en contra -> no SPIKE (es rebote)"
+    # El SPIKE solo se activa si evaluate_strat_f cableo candles_1m (R10)
+    assert captured.get("candles_1m") is not None, "evaluate_strat_f no paso candles_1m"
+    assert captured.get("lookback") == 15, "lookback intravela debe ser 15"
+    assert ev.spike is True, "INTRAVELA: senal debio detectarse antes de cerrar M15"
 
 
-def test_stoch_m5_exhausted_contrato():
-    assert stoch_m5_exhausted(10.0, "CALL") is True
-    assert stoch_m5_exhausted(50.0, "CALL") is False
-    assert stoch_m5_exhausted(90.0, "PUT") is True
-    assert stoch_m5_exhausted(None, "CALL") is False
+# ── (f) M5 EN CONTRA (filtro de paciencia, R3): NO SPIKE ──────────
+
+def test_spike_m5_contra_bloquea():
+    band = 103
+    m5 = _m5_with_fractal_up(band)
+    m1 = _m1_rejecting_band_up(band)
+    # apply_stoch_help devuelve PASS (m5_contra) -> NO promueve a SPIKE
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help", return_value=StochHelpResult(
+             zone="Z5", action="PASS", score_delta=0, reason="stoch_exhaust_wait:m5_contra")):
+        ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
+    assert ev.has_signal
+    assert ev.spike is False, "M5 en contra -> filtro de paciencia, NO SPIKE"
+    assert ev.entry_mode == "REBOUND"

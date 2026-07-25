@@ -16,8 +16,10 @@ from models import Candle, ConsolidationZone
 from config import MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE
 from config import STRAT_F_SPIKE_MODE
 from config import EXTREME_READ_BODY_MIN_RATIO
+from config import STOCH_HELP_MODE
 
 from stochastic_m15 import compute_stoch
+from stochastic_zones import apply_stoch_help
 
 
 @dataclass
@@ -36,6 +38,8 @@ class StratFEvaluation:
     info: str = ""
     spring_margin: "Optional[float]" = None        # heurística 5m/1m: margen % del precio post-fractal vs banda del fractal. Positivo=spring limpio, negativo=rompió. None=indeterminado. SOLO observación, NO bloquea.
     math_quality: "Optional[dict]" = None    # geometric analysis (hurst, r2, angle, squeeze)
+    wyckoff_event: "Optional[str]" = None    # Fase A Wyckoff: "spring" (CALL en suelo) / "upthrust" (PUT en techo) / None
+    exhaustion_candle: "Optional[str]" = None  # vela de rechazo: "martillo"/"doji"/"estrellafugaz"/"atrapado" / None
 
 
 def _fractal_up(candles: List[Candle], i: int) -> bool:
@@ -270,6 +274,10 @@ def evaluate_strat_f(
     min_payout: int = MIN_PAYOUT,
     min_score: float = STRAT_F_MIN_SCORE,
     zone_min_age: int = STRAT_F_ZONE_MIN_AGE,
+    stoch_m5: Optional[dict] = None,        # {k,d,cruce} M5 — debe alinearse (R3)
+    zone_strength: Optional[float] = None,  # % fuerza linea imaginaria (R7)
+    stoch_m15: Optional[dict] = None,       # {k,d,k_vals,d_vals} M15 — si el scanner
+                                            # lo pasa se reusa; si no, se calcula interno.
 ) -> StratFEvaluation:
     """Evaluador puro STRAT-F (sin I/O).
 
@@ -389,27 +397,56 @@ def evaluate_strat_f(
     _mq_info = ""
     if mq is not None:
         _mq_info = f" math=[{mq['zone']} Δ={mq['delta']:+.3f} cons={mq['consensus_count']}/4 w={mq['m15_weight']}]"
-    # ── Condición SPIKE (adicional al rebote, NO lo reemplaza) ──
-    # Cuando hay patrón de agotamiento (stoch M5 exhaust) y el precio toca el
-    # extremo del fractal (band) con CUERPO a FAVOR de la dirección, promueve
-    # la señal a modo SPIKE: entra EN el extremo (CALL en mínimo, PUT en máximo)
-    # — el spike con convicción — en vez de esperar el rebote en la banda.
-    # El rebote sigue siendo la señal base cuando no hay agotamiento.
+    # ── ZONE STRENGTH (R7, fuente principal de la banda) ──
+    # Si el caller no lo paso, lo calculamos sobre la ZONA S/R del fractal
+    # (puro, sin I/O: recorre candles_15m). La "linea imaginaria" manda.
+    if zone_strength is None and candles_15m is not None:
+        try:
+            from zone_strength import compute_support_efficacy
+            _zl = float(zone.floor) if direction == "CALL" else float(zone.ceiling)
+            _eff = compute_support_efficacy(_zl, candles_15m, direction=direction)
+            zone_strength = _eff.get("efficacy")
+        except Exception:
+            zone_strength = None
+    # ── Condición SPIKE mejorada (adicional al rebote, NO lo reemplaza) ──
+    # Reusa stoch_exhaustion vía apply_stoch_help como motor (R1-R4, R4-bis):
+    # agotamiento verdadero en la ZONA S/R del fractal con cruce M15 confirmado
+    # + M5 alineado + vela de rechazo (o atrapado en extremo). Intravela: la
+    # última vela de candles_15m es la M15 EN CURSO; candles_1m (ventana M1)
+    # permite detectar el agotamiento DENTRO de la vela viva (R10, lookback=15).
+    # Mapea a Fase A de Wyckoff: spring (CALL en suelo) / upthrust (PUT en techo).
+    # DECISIÓN DOCUMENTADA (D5): reemplaza el "cuerpo a favor >= ratio" del
+    # SPIKE viejo por classify_exhaustion_candle (martillo/doji/estrellafugaz)
+    # porque la mecha de rechazo marca el rechazo real — más preciso, no es
+    # pérdida accidental de comportamiento.
     entry_mode = "REBOUND"
     is_spike = False
+    wyckoff_event: Optional[str] = None
+    exhaustion_candle: Optional[str] = None
     if STRAT_F_SPIKE_MODE:
-        _stoch = compute_stoch(candles_5m, k_period=14, d_period=3)
-        _k = (_stoch or {}).get("k") if _stoch else None
-        if stoch_m5_exhausted(_k, direction):
-            _entry_candle = candles_1m[-1] if candles_1m else candles_5m[-1]
-            _entry_px = _entry_candle.close
-            _near_extreme = abs(float(_entry_px) - float(band)) <= float(band) * 0.0015
-            _body = float(_entry_candle.close) - float(_entry_candle.open)
-            _body_toward = (_body > 0) if direction == "CALL" else (_body < 0)
-            _body_ratio = abs(_body) / max(float(_entry_candle.high) - float(_entry_candle.low), 1e-9)
-            if _near_extreme and _body_toward and _body_ratio >= EXTREME_READ_BODY_MIN_RATIO:
+        # Reusa el stoch M15 que paso el scanner; si no, lo calcula interno
+        # (fallback, p.ej. en tests que mockean strat_fractal.compute_stoch).
+        _stoch_m15 = stoch_m15 if isinstance(stoch_m15, dict) else compute_stoch(candles_15m, direction=direction)
+        _help = apply_stoch_help(
+            (_stoch_m15 or {}).get("k"),
+            direction,
+            STOCH_HELP_MODE if STOCH_HELP_MODE in ("off", "soft", "hard") else "hard",
+            stoch_full=_stoch_m15 if isinstance(_stoch_m15, dict) else None,
+            candles_15m=candles_15m,        # última vela = M15 abierta (intravela)
+            candles_1m=candles_1m,
+            lookback=15,                    # 15 velas M1 = vida de la M15 abierta
+            zone_lo=float(zone.floor),
+            zone_hi=float(zone.ceiling),
+            stoch_m5=stoch_m5,
+            zone_strength=zone_strength,
+        )
+        if _help.action == "BOOST" and _help.exhaustion is not None:
+            _ex = _help.exhaustion
+            if getattr(_ex, "path", "") in ("ruptura", "atrapado"):
                 entry_mode = "SPIKE"
                 is_spike = True
+                wyckoff_event = "spring" if direction == "CALL" else "upthrust"
+                exhaustion_candle = getattr(_ex, "exhaustion_candle", None)
 
     return StratFEvaluation(
         has_signal=True,
@@ -424,6 +461,8 @@ def evaluate_strat_f(
         m5_event=event,
         spring_margin=spring_margin,
         math_quality=mq,
+        wyckoff_event=wyckoff_event,
+        exhaustion_candle=exhaustion_candle,
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
     )
 
