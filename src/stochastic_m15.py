@@ -73,6 +73,36 @@ def _cross_ago_in_series(
     return len(k_vals) - 1 - cross_idx
 
 
+def _cruce_en_zona(
+    k_vals: Sequence[float],
+    d_vals: Sequence[float],
+    cruce: Optional[str],
+    overbought: float,
+    oversold: float,
+) -> bool:
+    """True si el ULTIMO cruce %K/%D ocurrió MIENTRAS el %K estaba en la banda
+    de extremo (>=overbought o <=oversold). Esto es la condición de estrategia
+    'cruce en zona de sobrecompra/sobreventa', no un cruce en neutro.
+
+    Un cruce en el medio del termómetro (20-80) NO cuenta: la estrategia solo
+    opera el agotamiento en el extremo.
+    """
+    if cruce is None or len(k_vals) < 2 or len(d_vals) < 2:
+        return False
+    n = min(len(k_vals), len(d_vals))
+    cross_idx: Optional[int] = None
+    for i in range(1, n):
+        k0, d0, k1, d1 = k_vals[i - 1], d_vals[i - 1], k_vals[i], d_vals[i]
+        if cruce == "alcista" and k0 <= d0 and k1 > d1:
+            cross_idx = i
+        elif cruce == "bajista" and k0 >= d0 and k1 < d1:
+            cross_idx = i
+    if cross_idx is None:
+        return False
+    k_at_cross = k_vals[cross_idx]
+    return k_at_cross >= overbought or k_at_cross <= oversold
+
+
 def compute_stoch(
     candles: Sequence[Candle],
     k_period: int = 14,
@@ -162,6 +192,10 @@ def compute_stoch(
     # Antiguedad del cruce en velas M15 (>=1 = confirmado ~5 min).
     cross_ago = _cross_ago_in_series(k_vals, d_vals, cruce)
 
+    # El cruce ocurrio DENTRO de la banda de extremo? (condicion de estrategia:
+    # cruce %K/%D en sobrecompra/sobreventa, no en neutro).
+    cruce_en_zona = _cruce_en_zona(k_vals, d_vals, cruce, overbought, oversold)
+
     # Divergencia (precio vs %K en ventana reciente, mín 3 velas)
     divergencia = _detect_divergence(closes, k_vals)
 
@@ -182,6 +216,7 @@ def compute_stoch(
         "cruce": cruce, "divergencia": divergencia, "contradicts": contradicts,
         "k_prev": k_vals[-2] if len(k_vals) >= 2 else None,
         "cross_ago": cross_ago,  # velas M15 desde el cruce (>=1 = confirmado ~5 min)
+        "cruce_en_zona": cruce_en_zona,  # el cruce ocurrio en banda 80/20 (no en neutro)
         "k_vals": k_vals, "d_vals": d_vals,  # series para agotamiento confirmado
     }
 

@@ -219,3 +219,48 @@ def test_slow_k_period_1_devuelve_crudo():
         r = sm.compute_stoch(candles, slow_k_period=1)
     assert abs(r["k"] - k_seq[-1]) < 0.01
     assert len(r["k_vals"]) == len(k_seq)
+
+
+def test_cruce_en_zona_unit():
+    """_cruce_en_zona: el cruce %K/%D debe haber ocurrido DENTRO de la banda
+    80/20 (condicion de estrategia), no en el medio neutro."""
+    # cruce BAJISTA en sobrecompra (>=80): cuenta
+    k = [95, 94, 92, 90, 88, 86]
+    d = [90, 91, 92, 91, 89, 87]
+    assert sm._cruce_en_zona(k, d, "bajista", 80, 20) is True
+    # cruce ALCISTA en sobreventa (<=20): cuenta
+    k = [20, 16, 14, 13, 18, 25]
+    d = [18, 17, 16, 15, 17, 20]
+    assert sm._cruce_en_zona(k, d, "alcista", 80, 20) is True
+    # cruce ALCISTA en neutro (~52): NO cuenta
+    k = [50, 52, 54, 56, 58, 60]
+    d = [55, 54, 53, 54, 56, 58]
+    assert sm._cruce_en_zona(k, d, "alcista", 80, 20) is False
+    # sin cruce (lineas planas): NO cuenta
+    k = [50, 50, 50]
+    d = [50, 50, 50]
+    assert sm._cruce_en_zona(k, d, None, 80, 20) is False
+
+
+def test_compute_stoch_expone_cruce_en_zona():
+    """El dict de compute_stoch debe traer 'cruce_en_zona' (bool) y ser coherente:
+    False cuando no hay cruce, y reflejar la misma logica que _cruce_en_zona."""
+    # sin cruce (k_seq constante en neutro) -> False
+    k_seq = [50] * 20
+    candles = _candles_from_closes([100] * len(k_seq))
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, [50] * len(k_seq))
+        r = sm.compute_stoch(candles)
+    assert isinstance(r["cruce_en_zona"], bool)
+    assert r["cruce_en_zona"] is False
+    assert r["estado"] == "NEUTRO"
+    # la logica de 'en zona' es la misma que la funcion auxiliar (cubierta por
+    # test_cruce_en_zona_unit): si hay cruce en banda, el campo debe ser True.
+    # Verificamos que el campo existe y es bool en un caso de sobrecompra.
+    k_seq = [90] * 20
+    candles = _candles_from_closes([100] * len(k_seq))
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, [90] * len(k_seq))
+        r = sm.compute_stoch(candles)
+    assert isinstance(r["cruce_en_zona"], bool)
+    assert r["estado"] == "SOBRECOMPRA"
