@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 TF_15M_SEC        = 900          # segundos de una vela 15m
-HTF_CANDLES_COUNT = 50           # 50 × 15m = 12.5 horas de historia
+HTF_CANDLES_COUNT = 288          # 288 × 15m = 3 días de historia (eficacia de S/R)
 HTF_CACHE_TTL_SEC = 870          # refrescar ~30s antes del cierre de la vela
 HTF_FETCH_TIMEOUT = 12.0         # timeout por activo
 HTF_INTER_ASSET_SLEEP = 0.4      # pausa entre activos para no saturar el WS

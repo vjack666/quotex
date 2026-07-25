@@ -2357,6 +2357,32 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 min_payout=int(MIN_PAYOUT),
             )
             stoch_m15 = compute_stoch(candles_15m, direction=f_eval.direction) if candles_15m else None
+        # EFICACIA ESTRUCTURAL REAL (3 días M15) — grosor de la línea (Ruben 2026-07-25).
+        # Se calcula sobre el cache COMPLETO de 288 velas, no sobre las 20 que
+        # guarda el backbox. El backbox solo recibe el resultado (en strategy_details).
+        _efficacy = None
+        if candles_15m and f_eval.direction and f_eval.zone is not None:
+            try:
+                from zone_strength import compute_support_efficacy
+                _lvl = (
+                    f_eval.zone.floor if f_eval.direction == "CALL"
+                    else f_eval.zone.ceiling
+                )
+                _efficacy = compute_support_efficacy(
+                    float(_lvl), candles_15m, direction=f_eval.direction
+                )
+            except Exception as _e:
+                _efficacy = {"detail": f"eficacia_err:{_e}"}
+        elif candles_15m and f_eval.direction:
+            try:
+                from zone_strength import compute_support_efficacy
+                _band, _age, _ev = fractal_band_and_age(candles, f_eval.m5_event)
+                if _band is not None:
+                    _efficacy = compute_support_efficacy(
+                        float(_band), candles_15m, direction=f_eval.direction
+                    )
+            except Exception:
+                _efficacy = None
         _stoch_k = (stoch_m15 or {}).get("k") if stoch_m15 else None
         _stoch_k_prev = (stoch_m15 or {}).get("k_prev") if stoch_m15 else None
         _stoch_d = (stoch_m15 or {}).get("d") if stoch_m15 else None
@@ -2635,6 +2661,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     "ml_confidence": _ml_confidence,
                     "confluence_label": _confluence_label,
                     "confluence_bonus": _confluence_bonus,
+                    "support_efficacy_3d_m15": _efficacy,  # eficacia real del nivel (3 días M15)
                 },
                 "candles_1m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}

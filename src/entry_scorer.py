@@ -11,6 +11,23 @@ from models import (
     SignalMode,
 )
 from zone_ia import ZoneIA
+try:
+    from zone_strength import ZoneStrength, compute_rebound_strength  # type: ignore
+except Exception:
+    ZoneStrength = None
+    compute_rebound_strength = None
+try:
+    from config import ZONE_STRENGTH_ENABLED  # type: ignore
+except Exception:
+    ZONE_STRENGTH_ENABLED = True
+
+# Feature 29 — Contexto Geométrico M15 (OTC). Cache compartida de swings/S-R
+# del día; el scorer la consulta para alimentar el filtro de dirección en el
+# extremo (RG4/RG6). Cero reglas: solo métricas que las IAs leen.
+try:
+    from market_geometry_ctx import GEOMETRY_CACHE  # type: ignore
+except Exception:
+    GEOMETRY_CACHE = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -452,6 +469,77 @@ def _score_historical_level(entry: CandidateEntry) -> float:
         return HIST_LEVEL_CALL_BONUS if entry.direction == "call" else -HIST_LEVEL_PENALTY
     return 0.0
 
+try:
+    from config import MARKET_GEOMETRY_ENABLED  # type: ignore
+except Exception:
+    MARKET_GEOMETRY_ENABLED = False
+
+# Feature 29 / RG6 — confirmación por CUERPO en el extremo del rango.
+# Lección EURJPY 2247864af2e7b77e: la mecha tocó el piso pero el CUERPO cerró
+# alcista → PUT perdió. El filtro correcto NO es "prohibido entrar en el
+# extremo", sino distinguir spike con convicción (cuerpo a favor, sin mecha
+# opuesta) de rebote (mecha toca el nivel, cuerpo cierra en contra).
+EXTREME_TOUCH_PCT      = 0.0015  # proximidad al extremo para activar el filtro
+EXTREME_BODY_MIN_PCT   = 0.40    # cuerpo mínimo (|c-o|/rango) para "convicción"
+EXTREME_DIR_PENALTY    = -8.0    # ajuste aditivo leve si el cuerpo NO confirma
+
+
+def _score_extreme_direction(entry: CandidateEntry, geom=None) -> float:
+    """Feature 29 (RG6) — dirección en el extremo del rango/swing.
+
+    Si el precio está en un extremo (piso/techo de entry.zone o swing de
+    geometría) y la vela de entrada NO tiene cuerpo a favor de la dirección
+    (cuerpo decidido + cierre en la mitad correcta del rango de la vela),
+    penaliza levemente (-8pt). Sin extremo o sin datos → 0.0 (neutral).
+    """
+    if not MARKET_GEOMETRY_ENABLED or not entry.candles:
+        return 0.0
+
+    candle = entry.candles[-1]
+    price = float(candle.close)
+    tol = price * EXTREME_TOUCH_PCT
+
+    # Extremos: zona (piso/techo) y/o swings de geometría externa
+    levels_low: List[float] = []
+    levels_high: List[float] = []
+    if entry.zone is not None:
+        levels_low.append(float(entry.zone.floor))
+        levels_high.append(float(entry.zone.ceiling))
+    if geom is not None:
+        levels_high.extend(float(x) for x in getattr(geom, "swing_highs", []) or [])
+        levels_low.extend(float(x) for x in getattr(geom, "swing_lows", []) or [])
+    if not levels_low and not levels_high:
+        return 0.0
+
+    lo, hi = float(candle.low), float(candle.high)
+    at_floor = any(abs(lo - lvl) <= tol for lvl in levels_low)
+    at_ceiling = any(abs(hi - lvl) <= tol for lvl in levels_high)
+
+    direction = entry.direction.lower()
+    if not ((direction == "put" and at_floor) or (direction == "call" and at_ceiling)):
+        return 0.0  # no estamos vendiendo en piso ni comprando en techo
+
+    rng = hi - lo
+    if rng <= 0:
+        return 0.0
+    body_pct = abs(candle.close - candle.open) / rng
+    close_pos = (candle.close - lo) / rng  # 0 = low, 1 = high
+
+    if direction == "put":
+        confirmed = (candle.close < candle.open
+                     and body_pct >= EXTREME_BODY_MIN_PCT
+                     and close_pos <= 0.5)
+    else:
+        confirmed = (candle.close > candle.open
+                     and body_pct >= EXTREME_BODY_MIN_PCT
+                     and close_pos >= 0.5)
+
+    if confirmed:
+        return 0.0  # spike con convicción: no penalizar
+    setattr(entry, "extreme_body_pct", round(body_pct, 3))  # trazabilidad
+    return EXTREME_DIR_PENALTY
+
+
 def _score_zone_ia(entry: CandidateEntry) -> float:
     """Feature 28 — ajuste por zona de reacción descubierta por la IA de Zonas.
 
@@ -484,24 +572,64 @@ def score_candidate(
     effective_mode = mode if mode is not None else entry.mode
     entry.mode = effective_mode
 
+    # Feature 29 (RG4/RG6): contexto geométrico M15 del día (cache por barra).
+    # Lo consulta el filtro de dirección en el extremo. Solo métricas; la IA
+    # decide. Sin reglas.
+    geom = None
+    _c15 = getattr(entry, "candles_15m", None)
+    if GEOMETRY_CACHE is not None and _c15:
+        try:
+            geom = GEOMETRY_CACHE.get(entry.asset, _c15)
+        except Exception:
+            geom = None
+    entry.geometry = geom
     # ── STRAT-F (Fractal / Wyckoff) ────────────────────────────────────────
-    # El evaluador ya asignó strength (0.55-1.0) y un score_breakdown con
-    # {fractal, context, payout}. NO recalculamos con los componentes de
-    # STRAT-A (compresión/rebote/tendencia) porque la zona STRAT-F es una
-    # banda de un solo precio (range_pct=0) y las velas son M1 — daría ~19.
-    # El score refleja la fuerza real de la señal fractal/Wyckoff.
+    # REEMPLAZO COMPLETO de la evaluación media de S/R (2026-07-25): el score
+    # refleja el % de FUERZA de la "línea imaginaria" (modelo físico de
+    # zone_strength). Si la línea no es suficientemente fuerte para que el
+    # rebote aguante, el candidato se DESCALIFICA (score 0 + reject_reason).
     if getattr(entry, "_strategy_origin", None) == "STRAT-F":
-        strength = float(getattr(entry, "_reversal_strength", 0.0) or 0.0)
-        s_base = strength * 80.0
         s_payout = float(entry.score_breakdown.get("payout", 0.0))
         age_adj = _age_adjustment(entry.zone) if entry.zone is not None else 0.0
-        total = s_base + s_payout + age_adj
-        entry.score = round(total, 1)
+
+        st = None
+        if ZONE_STRENGTH_ENABLED and ZoneStrength is not None:
+            st = ZoneStrength.score(entry)
+        if st is None:
+            st = {"strength_pct": 0.5, "line_thickness": 0.5,
+                  "impact_velocity": 0.3, "sufficient": True,
+                  "n_reactions": 0, "win_rate": 0.5, "ticks_in_reject": 0,
+                  "efficacy_touch_count": 0, "efficacy_bounce_rate": 0.0,
+                  "efficacy": 0.0, "detail": "ZoneStrength off"}
+
+        # Score base = fuerza de la línea (0..1) * 80, igual que antes con
+        # strength, pero ahora es MEDIBLE (no heurística de fractales).
+        s_base = st["strength_pct"] * 80.0
         entry.score_breakdown = {
             "strength_score": round(s_base, 1),
             "payout": round(s_payout, 1),
             "age_adjustment": round(age_adj, 1),
+            "line_thickness": st["line_thickness"],
+            "impact_velocity": st["impact_velocity"],
+            "rebound_strength_pct": st["strength_pct"],
+            "efficacy_touch_count": st["efficacy_touch_count"],
+            "efficacy_bounce_rate": st["efficacy_bounce_rate"],
+            "efficacy": st["efficacy"],
         }
+        if not st["sufficient"]:
+            # Línea insuficiente: el rebote no aguantaría → rechazo duro.
+            entry.score = 0.0
+            try:
+                setattr(entry, "reject_reason", "WEAK_LINE_STRENGTH")
+                entry.score_breakdown["reject_reason"] = "WEAK_LINE_STRENGTH"
+                entry.score_breakdown["line_detail"] = st["detail"]
+            except (AttributeError, TypeError):
+                pass
+            _finalize_scoring(entry)
+            return entry.score
+
+        total = s_base + s_payout + age_adj
+        entry.score = round(total, 1)
         _finalize_scoring(entry)
         return entry.score
 
@@ -519,8 +647,9 @@ def score_candidate(
         age_adj    = _age_adjustment(entry.zone)
         hist_adj   = _score_historical_level(entry)
         zm_adj     = _score_zone_ia(entry)
+        ext_adj    = _score_extreme_direction(entry, geom)
 
-        total = s_comp + s_momentum + s_trend + s_payout + age_adj + hist_adj + zm_adj
+        total = s_comp + s_momentum + s_trend + s_payout + age_adj + hist_adj + zm_adj + ext_adj
         entry.score = round(total, 1)
         entry.score_breakdown = {
             "compression": s_comp,
@@ -531,6 +660,8 @@ def score_candidate(
             # alias para compatibilidad con código que lee "bounce"
             "bounce":      s_momentum,
         }
+        if ext_adj != 0.0:
+            entry.score_breakdown["extreme_direction"] = round(ext_adj, 1)
         if hist_adj != 0.0:
             entry.score_breakdown["hist_level"] = round(hist_adj, 1)
         if zm_adj != 0.0:
@@ -540,7 +671,15 @@ def score_candidate(
     else:
         w = WEIGHTS_REBOUND
         s_comp    = _score_compression(entry.zone, w["compression"])
-        s_bounce  = _score_bounce(entry.candles, entry.zone, entry.direction, w["bounce"])
+        # REEMPLAZO (2026-07-25): el componente REBOTE ya no usa _score_bounce
+        # (mecha burda) ni extreme_direction ni zone_confidence aislado. Usa el
+        # % de fuerza de la línea (ZoneStrength) como medida real del rebote.
+        s_bounce = 0.0
+        st = None
+        if ZONE_STRENGTH_ENABLED and ZoneStrength is not None:
+            st = ZoneStrength.score(entry)
+        if st is not None:
+            s_bounce = st["strength_pct"] * w["bounce"]  # fuerza de línea → pts de rebote
         trend_candles = (
             entry.candles_15m
             if len(entry.candles_15m) >= 25
@@ -551,16 +690,24 @@ def score_candidate(
         age_adj   = _age_adjustment(entry.zone)
         hist_adj  = _score_historical_level(entry)
         zm_adj    = _score_zone_ia(entry)
+        ext_adj    = _score_extreme_direction(entry, geom)
 
-        total = s_comp + s_bounce + s_trend + s_payout + age_adj + hist_adj + zm_adj
+        total = s_comp + s_bounce + s_trend + s_payout + age_adj + hist_adj + zm_adj + ext_adj
         entry.score = round(total, 1)
         entry.score_breakdown = {
             "compression": s_comp,
-            "bounce":      s_bounce,
+            "bounce":      round(s_bounce, 1),
             "trend":       s_trend,
             "payout":      s_payout,
             "age_adjustment": age_adj,
+            "rebound_strength_pct": st["strength_pct"] if st else None,
+            "line_thickness": st["line_thickness"] if st else None,
+            "impact_velocity": st["impact_velocity"] if st else None,
         }
+        if st is not None:
+            entry.score_breakdown["line_detail"] = st["detail"]
+        if ext_adj != 0.0:
+            entry.score_breakdown["extreme_direction"] = round(ext_adj, 1)
         if hist_adj != 0.0:
             entry.score_breakdown["hist_level"] = round(hist_adj, 1)
         if zm_adj != 0.0:
