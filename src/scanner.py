@@ -61,7 +61,8 @@ from config import (
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets
-from loop_utils import get_scan_pool
+from loop_utils import get_scan_pool, shutdown_scan_pool, init_scan_pool
+from concurrent.futures.process import BrokenProcessPool
 from black_box_recorder import get_black_box
 from stochastic_m15 import compute_stoch
 from stochastic_zones import apply_stoch_help
@@ -2732,8 +2733,25 @@ async def _run_strat_f_parallel(ctxs, bb, maturing_wl, log, candidates, reject_c
         results = [_evaluate_strat_f_serial(c) for c in ctxs]
     else:
         loop = asyncio.get_event_loop()
-        futures = [loop.run_in_executor(pool, _evaluate_strat_f_serial, c) for c in ctxs]
-        results = await asyncio.gather(*futures, return_exceptions=True)
+        try:
+            futures = [loop.run_in_executor(pool, _evaluate_strat_f_serial, c) for c in ctxs]
+            results = await asyncio.gather(*futures, return_exceptions=True)
+        except BrokenProcessPool:
+            # Un worker hijo murio de repente (sin memoria, senal del SO, etc.).
+            # El grupo queda inutilizable: lo cerramos, recreamos para el
+            # proximo ciclo y degradamos ESTE ciclo a evaluacion serial para
+            # que el bot no se caiga. (Ver consolidation_bot.main scan_all.)
+            log.error(
+                "[STRAT-F] El grupo de procesos se rompio (un worker murio "
+                "abruptamente). Degradando a evaluacion serial este ciclo y "
+                "recreando el pool para el siguiente."
+            )
+            try:
+                shutdown_scan_pool()
+                init_scan_pool()
+            except Exception:
+                pass
+            results = [_evaluate_strat_f_serial(c) for c in ctxs]
     accepts = 0
     for c, res in zip(ctxs, results):
         if isinstance(res, Exception):

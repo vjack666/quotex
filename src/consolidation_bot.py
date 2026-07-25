@@ -658,7 +658,15 @@ async def main(
                     await wait_while_trade_open(bot)
                     continue
 
-                await bot.scan_all()
+                try:
+                    await bot.scan_all()
+                except Exception as exc:  # nunca un ciclo malo tumba el bot
+                    log.error(
+                        "[SCAN] Ciclo de escaneo fallo y se omite: %s. "
+                        "El bot sigue vivo y reintenta en el proximo ciclo.",
+                        exc,
+                    )
+                    continue
 
                 hub = bot._hub_scanner
                 if hub is not None:
