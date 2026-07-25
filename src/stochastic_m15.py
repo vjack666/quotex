@@ -22,11 +22,23 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from models import Candle
 
-# pyquotex trae el cálculo base. Lo importamos para no reinventar la fórmula.
+# pyquotex trae el cálculo base del %K crudo. Lo importamos para no reinventar
+# la fórmula de Lane.
 try:
     from pyquotex.utils.indicators import TechnicalIndicators
 except Exception:  # pragma: no cover — fallback si pyquotex no está en path
     TechnicalIndicators = None
+
+
+def _sma(values: List[float], period: int) -> List[float]:
+    """SMA simple local (usada para suavizar %K y calcular %D). Evita depender
+    de pyquotex en el suavizado y simplifica los tests."""
+    if period <= 0 or len(values) < period:
+        return []
+    out = []
+    for i in range(len(values) - period + 1):
+        out.append(round(sum(values[i:i + period]) / period, 2))
+    return out
 
 
 def _candles_to_ohlcv(candles: Sequence[Candle]) -> tuple[List[float], List[float], List[float], List[float]]:
@@ -38,19 +50,51 @@ def _candles_to_ohlcv(candles: Sequence[Candle]) -> tuple[List[float], List[floa
     return closes, highs, lows, opens
 
 
+def _cross_ago_in_series(
+    k_vals: List[float], d_vals: List[float], cruce: Optional[str]
+) -> Optional[int]:
+    """Velas M15 desde el ULTIMO cruce %K/%D en la direccion de `cruce`.
+
+    cruce='alcista' busca K subiendo sobre D; 'bajista' busca K bajando
+    bajo D. Devuelve n velas hace, o None si no hay cruce en la serie.
+    """
+    if cruce is None or len(k_vals) < 2 or len(d_vals) < 2:
+        return None
+    cross_idx: Optional[int] = None
+    n = min(len(k_vals), len(d_vals))  # %D suele ser mas corta que %K
+    for i in range(1, n):
+        k0, d0, k1, d1 = k_vals[i - 1], d_vals[i - 1], k_vals[i], d_vals[i]
+        if cruce == "alcista" and k0 <= d0 and k1 > d1:
+            cross_idx = i
+        elif cruce == "bajista" and k0 >= d0 and k1 < d1:
+            cross_idx = i
+    if cross_idx is None:
+        return None
+    return len(k_vals) - 1 - cross_idx
+
+
 def compute_stoch(
     candles: Sequence[Candle],
     k_period: int = 14,
     d_period: int = 3,
+    slow_k_period: int = 3,
     overbought: float = 80.0,
     oversold: float = 20.0,
     direction: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Calcula el estocástico M15 (Slow/Full 14,3) + derivados.
+    """Calcula el estocástico FULL 14,3,3 (igual a la plataforma Quotex: 14 3 SMA:3 80 20).
+
+    Parámetros coinciden con el indicador de la plataforma:
+      - %K periodo 14 (Lane clásico, sin suavizar).
+      - %K suavizado por SMA de `slow_k_period` (3) -> es la línea %K que muestra
+        la plataforma ("SMA:3").
+      - %D periodo `d_period` (3) = SMA de %K suavizado.
 
     Args:
-        candles: velas 15m ya disponibles (htf_scanner cache).
+        candles: velas ya disponibles (htf_scanner cache).
         k_period, d_period: parámetros del estocástico.
+        slow_k_period: suavizado SMA del %K (3 = igual a plataforma). Poner 1
+            para usar el %K crudo (Slow 14,3, sin suavizar).
         overbought, oversold: umbrales de extremo.
         direction: "call"/"put" opcional para calcular `contradicts`.
 
@@ -72,15 +116,29 @@ def compute_stoch(
             "cruce": None, "divergencia": None, "contradicts": 0,
         }
 
-    # Reutiliza la fórmula de pyquotex ( Lane clásica ).
+    # Reutiliza la fórmula de pyquotex (Lane clásica) -> %K crudo(14), %D=SMA3(%K crudo).
     result = TechnicalIndicators.calculate_stochastic(closes, highs, lows, k_period, d_period)
-    k_vals: List[float] = result.get("k", []) or []
-    d_vals: List[float] = result.get("d", []) or []
-    if not k_vals:
+    k_crudo: List[float] = result.get("k", []) or []
+    if not k_crudo:
         return {
             "k": None, "d": None, "estado": "NEUTRO",
             "cruce": None, "divergencia": None, "contradicts": 0,
         }
+
+    # Full Stochastic 14,3,3: suaviza el %K crudo con SMA(slow_k_period) para
+    # obtener la línea %K que muestra la plataforma; %D = SMA3 de esa línea.
+    if slow_k_period and slow_k_period > 1:
+        k_smooth: List[float] = _sma(k_crudo, slow_k_period)
+    else:
+        k_smooth = k_crudo
+    if len(k_smooth) < d_period:
+        # sin suficientes velas suavizadas para el %D
+        return {
+            "k": None, "d": None, "estado": "NEUTRO",
+            "cruce": None, "divergencia": None, "contradicts": 0,
+        }
+    d_vals: List[float] = _sma(k_smooth, d_period)
+    k_vals = k_smooth  # el análisis (cruce/estado/divergencia) usa el %K suavizado
 
     k = round(float(k_vals[-1]), 2)
     d = round(float(d_vals[-1]), 2) if d_vals else None
@@ -101,6 +159,9 @@ def compute_stoch(
         elif k < d and k_vals[-2] >= d_vals[-2]:
             cruce = "bajista"
 
+    # Antiguedad del cruce en velas M15 (>=1 = confirmado ~5 min).
+    cross_ago = _cross_ago_in_series(k_vals, d_vals, cruce)
+
     # Divergencia (precio vs %K en ventana reciente, mín 3 velas)
     divergencia = _detect_divergence(closes, k_vals)
 
@@ -120,6 +181,8 @@ def compute_stoch(
         "k": k, "d": d, "estado": estado,
         "cruce": cruce, "divergencia": divergencia, "contradicts": contradicts,
         "k_prev": k_vals[-2] if len(k_vals) >= 2 else None,
+        "cross_ago": cross_ago,  # velas M15 desde el cruce (>=1 = confirmado ~5 min)
+        "k_vals": k_vals, "d_vals": d_vals,  # series para agotamiento confirmado
     }
 
 

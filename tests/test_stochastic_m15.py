@@ -182,3 +182,40 @@ def test_no_contradicts_put_in_overbought():
         TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, d_seq)
         r = sm.compute_stoch(candles, direction="PUT")
     assert r["contradicts"] == 0
+
+
+def test_full_stochastic_suaviza_k_con_sma3():
+    """El %K que reporta el bot debe ser el %K suavizado por SMA3 (Full 14,3,3),
+    igual a la linea %K que muestra la plataforma ('SMA:3'), NO el %K crudo."""
+    # termina en 30 para que el suavizado (media de 3) difiera claramente del crudo
+    k_seq = [10, 90, 20, 80, 30, 70, 40, 60, 50, 55, 45, 52, 48, 51, 49, 53, 47, 52, 48, 30]
+    candles = _candles_from_closes([100] * len(k_seq))
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, [50] * len(k_seq))
+        r = sm.compute_stoch(candles)  # slow_k_period=3 por defecto
+    # %K suavizado[-1] = SMA3 de los ultimos 3 del crudo
+    expected_k = round(sum(k_seq[-3:]) / 3, 2)
+    assert abs(r["k"] - expected_k) < 0.01
+    assert r["d"] is not None
+    # %D = SMA3 del %K suavizado (debe coincidir con la recalculada por la fn)
+    manual_d = round((r["k_vals"][-3] + r["k_vals"][-2] + r["k_vals"][-1]) / 3, 2)
+    assert abs(r["d"] - manual_d) < 0.01
+    # la serie expuesta es la suavizada (largo = len(k_seq) - 2 por el SMA3)
+    assert len(r["k_vals"]) == len(k_seq) - 2
+    # cada punto del %K suavizado es la media de 3 del crudo (efecto SMA:3)
+    for i in range(len(r["k_vals"])):
+        expected = round((k_seq[i] + k_seq[i + 1] + k_seq[i + 2]) / 3, 2)
+        assert abs(r["k_vals"][i] - expected) < 0.01
+    # y el %K suavizado difiere del crudo en el ultimo punto (efecto del SMA:3)
+    assert abs(r["k"] - k_seq[-1]) >= 0.01
+
+
+def test_slow_k_period_1_devuelve_crudo():
+    """Con slow_k_period=1 el bot usa el %K crudo (comportamiento Slow 14,3 previo)."""
+    k_seq = [10, 90, 20, 80, 30, 70, 40, 60, 50, 55, 45, 52, 48, 51, 49, 53, 47, 52, 48, 50]
+    candles = _candles_from_closes([100] * len(k_seq))
+    with patch.object(sm, "TechnicalIndicators") as TI:
+        TI.calculate_stochastic.side_effect = _fake_stoch(k_seq, [50] * len(k_seq))
+        r = sm.compute_stoch(candles, slow_k_period=1)
+    assert abs(r["k"] - k_seq[-1]) < 0.01
+    assert len(r["k_vals"]) == len(k_seq)
