@@ -556,6 +556,30 @@
       ],
       "created_at": "2026-07-25",
       "note": "Spec redactado por auditoria del sistema + logica validada en watchdog (stoch_exhaustion). Puerta SDD: espera aprobacion humana."
+    },
+    {
+      "name": "strat_f_spike_early_alert",
+      "title": "Capa de ALERTA TEMPRANA del SPIKE: anticipa el giro del estocástico M15 (cinemática %K/%D) antes del cruce confirmado, usada en el chequeo intravela (R10), nunca como disparador",
+      "sdd": true,
+      "status": "done",
+      "spec_path": "specs/strat_f_spike_early_alert/",
+      "depends_on": [
+        539
+      ],
+      "description": "Capa ADICIONAL y COMPLEMENTARIA a strat_f_spike_wyckoff_phase_a. No reemplaza R2 (cruce confirmado) ni R2-bis (separación adaptativa): es una marca de ATENCIÓN que anticipa el giro del estocástico M15 usando la cinemática de %K/%D (pendiente, aceleración 2ª derivada, ángulo arctan, proyección de velas a la línea 20/80, velocidad de convergencia). Se evalúa INTRAVELA (R10) sobre la M15 abierta + M1 lookback=15. Nunca promueve SPIKE ni relaja R2/R2-bis/R3/R3-bis (prohibido por R-EA1/R-EA2). Activación por puntaje combinado con umbral percentil 90 del historial propio del par (adaptativo, sin números fijos). Pesos 1/5 fijos por versión; ajuste por aciertos POSTPUESTO. Persistencia: ALT B (JSON por símbolo en data/early_alert/<SYM>.json, escritura atómica).",
+      "acceptance": [
+        "Alerta presente PERO sin cruce M15 confirmado → SPIKE NO se promueve (has_signal False / REBOUND)",
+        "Las 5 cantidades de R-EA4 se calculan y proyección es SIEMPRE positiva (bug de CALL sin abs corregido: |24-20|/|-2|=2.0)",
+        "Puntaje combinado: señales débiles vs historial del par → NO activa; decil alto (percentil 90) → SÍ activa",
+        "Ventana de proyección adaptativa del par; sin historial → lookback=15 + es_default=True",
+        "Alerta registrada en caja negra (early_alert) y NO altera has_signal (R-EA7)",
+        "INTRAVELA (R10): detectada sobre M15 abierta + M1 lookback=15, no solo al cierre",
+        "Persistencia ALT B: JSON por símbolo con escritura atómica (write-temp + os.replace); sobrevive reinicios; carga con fallback a vacío",
+        "pytest de módulos tocados en verde (sin romper spec vigente)"
+      ],
+      "created_at": "2026-07-26",
+      "spec_ready_at": "2026-07-26",
+      "note": "Aprobado por el usuario tras corrección de bug de cuentas en proyección CALL y elección ALT B de persistencia. Puerta SDD: espera OK para implementar (in_progress)."
     }
   ]
 }

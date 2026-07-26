@@ -15,11 +15,13 @@ from typing import List, Optional, Tuple
 from models import Candle, ConsolidationZone
 from config import MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE
 from config import STRAT_F_SPIKE_MODE
+from config import STRAT_F_SPIKE_OBSERVE
 from config import EXTREME_READ_BODY_MIN_RATIO
 from config import STOCH_HELP_MODE
 
 from stochastic_m15 import compute_stoch
 from stochastic_zones import apply_stoch_help
+from stoch_early_alert import evaluate_early_alert  # capa de alerta temprana (R-EA)
 
 
 @dataclass
@@ -42,6 +44,9 @@ class StratFEvaluation:
     exhaustion_candle: "Optional[str]" = None  # vela de rechazo: "martillo"/"doji"/"estrellafugaz"/"atrapado" / None
     separation_ok: "Optional[bool]" = None    # R2-bis: separacion %K/%D abierta tras cruce (adaptativa)
     separation_rel: "Optional[float]" = None  # |K-D| actual / max(|K-D| reciente) del propio oscilador
+    decision: "Optional[str]" = None         # "OBSERVE" cuando el SPIKE está en modo observación (no opera)
+    spike_observe: "Optional[dict]" = None   # desglose de las 6 condiciones del spec (modo observación)
+    early_alert: "Optional[dict]" = None     # R-EA7: marca de alerta temprana (AJENA a has_signal); puro aviso
 
 
 def _fractal_up(candles: List[Candle], i: int) -> bool:
@@ -280,6 +285,7 @@ def evaluate_strat_f(
     zone_strength: Optional[float] = None,  # % fuerza linea imaginaria (R7)
     stoch_m15: Optional[dict] = None,       # {k,d,k_vals,d_vals} M15 — si el scanner
                                             # lo pasa se reusa; si no, se calcula interno.
+    sym: Optional[str] = None,              # símbolo del par (persistencia ALT B de la alerta)
 ) -> StratFEvaluation:
     """Evaluador puro STRAT-F (sin I/O).
 
@@ -427,6 +433,7 @@ def evaluate_strat_f(
     exhaustion_candle: Optional[str] = None
     separation_ok: Optional[bool] = None
     separation_rel: Optional[float] = None
+    ea_dict: Optional[dict] = None  # marca de alerta temprana (R-EA), puro aviso
     if STRAT_F_SPIKE_MODE:
         # Reusa el stoch M15 que paso el scanner; si no, lo calcula interno
         # (fallback, p.ej. en tests que mockean strat_fractal.compute_stoch).
@@ -448,6 +455,35 @@ def evaluate_strat_f(
         # un ExhaustResult, sea BOOST o EXHAUST_WAIT (la caja negra debe ver
         # "cruce pegajoso" aunque no promueva a SPIKE).
         _ex = _help.exhaustion
+        # --- Capa de ALERTA TEMPRANA (R-EA): marca de atención INTRAVELA ---
+        # Evaluada sobre stoch_m15 (k_vals/d_vals) + candles_1m lookback=15.
+        # NO altera has_signal ni entry_mode: es puro aviso (R-EA1/R-EA2/R-EA7).
+        ea_dict = None
+        if direction is not None:
+            _ea_k = (stoch_m15 or {}).get("k_vals")
+            _ea_d = (stoch_m15 or {}).get("d_vals")
+            try:
+                _ea_res = evaluate_early_alert(
+                    direction, k_vals=_ea_k, d_vals=_ea_d,
+                    candles_15m=candles_15m, candles_1m=candles_1m, sym=sym or "",
+                )
+                ea_dict = {
+                    "activa": _ea_res.activa,
+                    "reason": _ea_res.reason,
+                    "pendiente_k": _ea_res.pendiente_k,
+                    "pendiente_d": _ea_res.pendiente_d,
+                    "aceleracion": _ea_res.aceleracion,
+                    "angulo": _ea_res.angulo,
+                    "proyeccion_velas": _ea_res.proyeccion_velas,
+                    "convergencia": _ea_res.convergencia,
+                    "puntaje": _ea_res.puntaje,
+                    "percentil_par": _ea_res.percentil_par,
+                    "ventana_proy": _ea_res.ventana_proy,
+                    "es_default": _ea_res.es_default,
+                }
+            except Exception:
+                ea_dict = None
+
         if _ex is not None:
             separation_ok = getattr(_ex, "separation_ok", None)
             separation_rel = getattr(_ex, "separation_rel", None)
@@ -457,6 +493,44 @@ def evaluate_strat_f(
                 is_spike = True
                 wyckoff_event = "spring" if direction == "CALL" else "upthrust"
                 exhaustion_candle = getattr(_ex, "exhaustion_candle", None)
+                # MODO OBSERVACIÓN (Ruben 2026-07-26): si está ON, registramos
+                # el desglose de las 6 condiciones del spec en la caja negra PERO
+                # NO OPERAMOS (has_signal=False). Sirve para medir con datos reales
+                # la frecuencia de disparo del setup antes de activarlo en vivo.
+                if STRAT_F_SPIKE_OBSERVE:
+                    spike_observe = {
+                        "R2_zona_franja": bool(getattr(_ex, "in_extreme_zone", False)),
+                        "R2bis_separacion_abierta": getattr(_ex, "separation_ok", None),
+                        "cruce_m15_confirmado": bool(getattr(_ex, "cross_confirmed", False)),
+                        "R3_m5_alineado": getattr(_ex, "m5_aligned", None),
+                        "R3bis_m5_agotado": getattr(_ex, "m5_exhausted", None),
+                        "R4_rechazo_o_atrapado": getattr(_ex, "path", "") in ("ruptura", "atrapado"),
+                        "razon": getattr(_ex, "reason", ""),
+                        "path": getattr(_ex, "path", None),
+                        "separation_rel": getattr(_ex, "separation_rel", None),
+                    }
+                    return StratFEvaluation(
+                        has_signal=False,           # NO opera en modo observación
+                        direction=direction,
+                        entry_mode=entry_mode,
+                        zone=zone,
+                        pattern_name=event,
+                        strength=strength,
+                        confirms=True,
+                        spike=is_spike,
+                        m15_context=ctx,
+                        m5_event=event,
+                        spring_margin=spring_margin,
+                        math_quality=mq,
+                        wyckoff_event=wyckoff_event,
+                        exhaustion_candle=exhaustion_candle,
+                        separation_ok=separation_ok,
+                        separation_rel=separation_rel,
+                        decision="OBSERVE",
+                        spike_observe=spike_observe,
+                        early_alert=ea_dict,
+                        info=f"STRAT-F OBSERVE {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
+                    )
 
     return StratFEvaluation(
         has_signal=True,
@@ -475,6 +549,7 @@ def evaluate_strat_f(
         exhaustion_candle=exhaustion_candle,
         separation_ok=separation_ok,
         separation_rel=separation_rel,
+        early_alert=ea_dict,
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
     )
 
