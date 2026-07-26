@@ -32,19 +32,42 @@ fractal, no un rango arbitrario).
 `compute_stoch(candles_15m)` ya expone `cross_ago` y las series `k_vals/d_vals`.
 Se pasan como `stoch_full` a `apply_stoch_help`. `evaluate_exhaustion` exige
 `cross_ago >= 1` antes de confirmar. Sin cruce → EXHAUST_WAIT → el SPIKE no se
-activa (queda REBOUND).
+activa (queda REBOUND). El precio debe estar respetando la franja/zona R1 al
+momento del cruce (rebote de Fase A EN la franja; NO hay requisito de
+tendencia M15 — esa idea quedó descartada). M15 es donde se OBSERVA el
+cruce-con-separación; la entrada NO dispara con el cruce M15 solo: requiere
+que R3 (M5 alineado) y R3-bis (M5 agotado) se cumplan JUNTOS en ese momento.
+
+### D3-bis — Separación %K/%D ADAPTATIVA (R2-bis), también intravela
+Además del cruce, se exige que |%K−%D| se ABRA dentro de la franja antes de
+salir de ella (líneas abiertas, no cruce pegajoso en el borde). El umbral de
+separación es ADAPTATIVO: relativo al rango reciente de |%K−%D| del propio
+oscilador del par (misma doctrina anti-umbral-fijo que la zona de precio:
+NADA de "3-5 puntos" fijos). Implementación prevista dentro de
+`evaluate_exhaustion`/`stochastic_m15` usando las series `k_vals/d_vals` ya
+expuestas por `compute_stoch`. CONEXIÓN R10: el chequeo debe funcionar
+también sobre la vela M15 EN CURSO usando la ventana M1 (lookback=15), no
+solo sobre M15 cerradas — si solo se valida al cierre se reproduce el
+problema original (señal formada y perdida).
 
 ### D4 — M15 y M5 AMBOS alineados = filtro de PACIENCIA (R3)
 El scanner ya calcula `stoch_m5_json` (k, d, cruce) en maturing_watchlist. Se
 inyecta como `stoch_m5` a `apply_stoch_help`. `_m5_aligned` exige M5 en la
-dirección (bajista para PUT / alcista para CALL). Reemplaza el
-`stoch_m5_exhausted` actual (que solo miraba extremo).
+dirección (bajista para PUT / alcista para CALL). Es un filtro DISTINTO y
+SEPARADO del agotamiento M5 (D4-bis/R3-bis): la alineación no sustituye al
+agotamiento ni viceversa; ambos deben cumplirse.
 Aclaración de significado (acordado 2026-07-25): NO es "sumar fuerza" a la
 tendencia. M15 = la foto grande (lo que la tendencia ya viene diciendo); M5 =
 el presente (lo que pasa minuto a minuto). El SPIKE entra solo cuando el corto
 plazo (M5) YA CONFIRMÓ en el presente lo que el largo plazo (M15) anunciaba.
 M5 en contra = el presente aún no confirmó → se descarta (evita entrar "muy
 pronto", como la pérdida de $1: M15 "baja" pero M5 subía).
+
+### D4-bis — M5 AGOTADO en su extremo (R3-bis), condición SEPARADA
+Además de la alineación (D4), el M5 debe estar AGOTADO en su propio extremo
+al momento de entrar (sobreventa para CALL / sobrecompra para PUT — el
+REQUIRE_M5_EXHAUSTED ya vivo). Son DOS condiciones explícitas e
+independientes; no se fusionan en una sola regla ni en un solo flag.
 
 ### D5 — Vela de rechazo: se REEMPLAZA cuerpo-a-favor por clasificación (R4)
 Decisión consciente y documentada: el SPIKE viejo usaba "cuerpo a favor ≥ ratio"

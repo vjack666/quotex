@@ -40,6 +40,8 @@ class StratFEvaluation:
     math_quality: "Optional[dict]" = None    # geometric analysis (hurst, r2, angle, squeeze)
     wyckoff_event: "Optional[str]" = None    # Fase A Wyckoff: "spring" (CALL en suelo) / "upthrust" (PUT en techo) / None
     exhaustion_candle: "Optional[str]" = None  # vela de rechazo: "martillo"/"doji"/"estrellafugaz"/"atrapado" / None
+    separation_ok: "Optional[bool]" = None    # R2-bis: separacion %K/%D abierta tras cruce (adaptativa)
+    separation_rel: "Optional[float]" = None  # |K-D| actual / max(|K-D| reciente) del propio oscilador
 
 
 def _fractal_up(candles: List[Candle], i: int) -> bool:
@@ -423,6 +425,8 @@ def evaluate_strat_f(
     is_spike = False
     wyckoff_event: Optional[str] = None
     exhaustion_candle: Optional[str] = None
+    separation_ok: Optional[bool] = None
+    separation_rel: Optional[float] = None
     if STRAT_F_SPIKE_MODE:
         # Reusa el stoch M15 que paso el scanner; si no, lo calcula interno
         # (fallback, p.ej. en tests que mockean strat_fractal.compute_stoch).
@@ -440,8 +444,14 @@ def evaluate_strat_f(
             stoch_m5=stoch_m5,
             zone_strength=zone_strength,
         )
-        if _help.action == "BOOST" and _help.exhaustion is not None:
-            _ex = _help.exhaustion
+        # Separacion %K/%D (R2-bis) se propaga SIEMPRE que el motor devuelva
+        # un ExhaustResult, sea BOOST o EXHAUST_WAIT (la caja negra debe ver
+        # "cruce pegajoso" aunque no promueva a SPIKE).
+        _ex = _help.exhaustion
+        if _ex is not None:
+            separation_ok = getattr(_ex, "separation_ok", None)
+            separation_rel = getattr(_ex, "separation_rel", None)
+        if _help.action == "BOOST" and _ex is not None:
             if getattr(_ex, "path", "") in ("ruptura", "atrapado"):
                 entry_mode = "SPIKE"
                 is_spike = True
@@ -463,6 +473,8 @@ def evaluate_strat_f(
         math_quality=mq,
         wyckoff_event=wyckoff_event,
         exhaustion_candle=exhaustion_candle,
+        separation_ok=separation_ok,
+        separation_rel=separation_rel,
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
     )
 

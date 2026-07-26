@@ -44,6 +44,9 @@ class ExhaustResult:
     exhaustion_candle: Optional[str] = None
     at_support_resistance: bool = False
     path: Optional[str] = None  # "ruptura" | "atrapado" | None
+    # R2-bis (spec strat_f_spike_wyckoff_phase_a): separacion %K/%D del cruce.
+    separation_ok: Optional[bool] = None    # None = sin datos para medir (no bloquea)
+    separation_rel: Optional[float] = None  # |K-D| actual / rango reciente de |K-D|
 
 
 # --- deteccion de vela de agotamiento (puro, sobre OHLC) -----------------
@@ -113,6 +116,40 @@ def _cross_ago(k_vals: List[float], d_vals: List[float], direction: str) -> Opti
     if cross_idx is None:
         return None
     return len(k_vals) - 1 - cross_idx
+
+
+def _cross_separation(
+    k_vals: List[float],
+    d_vals: List[float],
+    *,
+    sep_lookback: int = 14,
+    sep_min_frac: float = 0.35,
+) -> tuple[Optional[bool], Optional[float]]:
+    """R2-bis: separacion ADAPTATIVA entre %K y %D tras el cruce.
+
+    La estrategia exige que las lineas salgan de la franja ABIERTAS (la
+    separacion se formo antes de salir), filtrando cruces "pegajosos" en el
+    borde. La medida es RELATIVA al comportamiento reciente del PROPIO
+    oscilador del par: |K-D| actual comparado con el MAXIMO |K-D| de las
+    ultimas `sep_lookback` velas. PROHIBIDO un umbral absoluto fijo (nada
+    de "3-5 puntos") — doctrina del spec (misma regla que la zona de precio).
+
+    separation_rel = |K-D| actual / max(|K-D| reciente)
+    separation_ok  = separation_rel >= sep_min_frac (fraccion del propio rango)
+
+    Devuelve (ok, rel). (None, None) si no hay datos suficientes (no bloquea:
+    fail-safe igual que el resto del modulo).
+    """
+    n = min(len(k_vals), len(d_vals))
+    if n < 3:
+        return None, None
+    diffs = [abs(k_vals[-i] - d_vals[-i]) for i in range(1, min(sep_lookback, n) + 1)]
+    ref = max(diffs)
+    if ref <= 1e-9:
+        # oscilador plano: sin comportamiento reciente que sirva de vara
+        return None, None
+    rel = diffs[0] / ref
+    return rel >= sep_min_frac, round(rel, 4)
 
 
 def _trapped_in_extreme(
@@ -202,6 +239,24 @@ def _m5_aligned(stoch_m5: dict, direction_u: str) -> Optional[bool]:
         return None
 
 
+def _m5_exhausted(stoch_k: Optional[float], direction_u: str) -> bool:
+    """R3-bis: M5 agotado en SU propio extremo en el instante de la senal.
+
+    CALL: stoch M5 %K < 20 (sobreventa = el impulso bajista se agoto).
+    PUT:  stoch M5 %K > 80 (sobrecompra = el impulso alcista se agoto).
+    Separado de _m5_aligned (R3): el M5 puede ir a favor pero ya rebotado
+    (no agotado) -> aqui lo detectamos como 'm5_no_exhausted'.
+    Sin datos (None) -> False (no bloquea si no hay M5; el caller decide).
+    """
+    if stoch_k is None:
+        return False
+    if direction_u == "CALL":
+        return stoch_k < 20.0
+    if direction_u == "PUT":
+        return stoch_k > 80.0
+    return False
+
+
 def evaluate_exhaustion(
     *,
     k: Optional[float],
@@ -267,9 +322,21 @@ def evaluate_exhaustion(
             in_extreme_zone=True, cross_confirmed=False, cross_ago=ago,
         )
 
-    # 2b) ALINEACION M5 (regla del usuario: para que sea exitosa, M15 Y M5
-    # deben ir en la direccion de la entrada — ambas abajo para PUT, arriba
-    # para CALL). Si el M5 apunta en contra -> no entra (m5_contra).
+    # 2c) SEPARACION %K/%D ADAPTATIVA (R2-bis): el cruce debe salir de la
+    # franja con las lineas ABIERTAS. Relativa al rango reciente de |K-D|
+    # del propio par (nunca puntos fijos). Sin datos -> None (no bloquea).
+    sep_ok, sep_rel = _cross_separation(k_vals or [], d_vals or [])
+    if sep_ok is False:
+        return ExhaustResult(
+            "EXHAUST_WAIT",
+            f"cruce_pegajoso:sep_rel={sep_rel}",
+            in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
+            separation_ok=False, separation_rel=sep_rel,
+        )
+
+    # 2b) ALINEACION M5 (R3): para que sea exitosa, M15 Y M5 deben ir en la
+    # direccion de la entrada — ambas abajo para PUT, arriba para CALL.
+    # Si el M5 apunta en contra -> no entra (m5_contra).
     if stoch_m5 is not None:
         m5_aligned = _m5_aligned(stoch_m5, direction_u)
         if m5_aligned is False:
@@ -277,6 +344,19 @@ def evaluate_exhaustion(
                 "EXHAUST_WAIT",
                 "m5_contra",
                 in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
+            )
+        # 2b2) M5 AGOTADO EN SU EXTREMO (R3-bis): condicion SEPARADA de R3.
+        # El M5 debe estar agotado en SU propio extremo (CALL k<20 / PUT k>80)
+        # en el instante de la senal. Alineado (R3) NO alcanza: el M5 puede
+        # ir a favor pero ya rebotado (no agotado) -> el bot entraria en la
+        # mecha, no en el fondo. R3 y R3-bis son OBLIGATORIAS por separado.
+        # Razon distinta a m5_contra para que la caja negra las diferencie.
+        if not _m5_exhausted(stoch_m5.get("k"), direction_u):
+            return ExhaustResult(
+                "EXHAUST_WAIT",
+                "m5_no_exhausted",
+                in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
+                separation_ok=sep_ok, separation_rel=sep_rel,
             )
 
     # 3a) CAMINO A — ruptura: vela de agotamiento en/cerca de la zona
@@ -329,6 +409,7 @@ def evaluate_exhaustion(
             f"agotamiento_confirmado:ruptura:{exhaustion}",
             in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
             exhaustion_candle=exhaustion, at_support_resistance=True, path="ruptura",
+            separation_ok=sep_ok, separation_rel=sep_rel,
         )
 
     # 3b) CAMINO B — atrapado en extremo (tu regla USDPKR: cruces adentro de
@@ -342,6 +423,7 @@ def evaluate_exhaustion(
             f"agotamiento_confirmado:atrapado:{trapped}velas",
             in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
             at_support_resistance=False, path="atrapado",
+            separation_ok=sep_ok, separation_rel=sep_rel,
         )
 
     return ExhaustResult(

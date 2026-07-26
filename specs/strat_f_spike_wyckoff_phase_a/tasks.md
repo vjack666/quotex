@@ -35,6 +35,23 @@
 - [ ] Test: `apply_stoch_help` con %K atrapado en extremo + cruce + M5 alineado →
   BOOST 12 con `path="atrapado"` (R4-bis).
 
+## T3-bis — Separación %K/%D adaptativa en el cruce M15 (R2-bis, D3-bis)
+- [ ] Implementar chequeo de separación en `evaluate_exhaustion` (o helper en
+  `stochastic_m15`): |%K−%D| debe abrirse DENTRO de la franja antes de salir,
+  medido de forma RELATIVA al rango reciente de |%K−%D| del propio oscilador
+  del par. PROHIBIDO un umbral absoluto fijo (nada de "3-5 puntos").
+- [ ] Conectar con INTRAVELA (R10): el chequeo debe funcionar sobre la M15 EN
+  CURSO usando la ventana M1 (lookback=15), no solo sobre M15 cerradas.
+- [ ] Test (R11-g): cruce pegajoso (sin separación relativa) → NO SPIKE;
+  cruce con separación adaptativa → SPIKE. Variante intravela incluida.
+
+## T3-ter — M5 alineado y M5 agotado como filtros SEPARADOS (R3, R3-bis)
+- [ ] Verificar que el flujo exige AMBOS: `_m5_aligned` (dirección) Y M5
+  agotado en su extremo (REQUIRE_M5_EXHAUSTED), como condiciones distintas,
+  sin fusionarlas en un solo flag.
+- [ ] Test (R11-h): M5 alineado pero NO agotado → REBOUND; M5 agotado pero
+  NO alineado → REBOUND.
+
 ## T4 — ZONA S/R fractal + zone_strength como fuente principal (R1, R7, D8)
 - [ ] `evaluate_strat_f` ya construye `zone.floor/ceiling` del fractal. Pasarlos
   como `zone_lo/zone_hi`. Confirmar que `evaluate_exhaustion` usa la banda de
@@ -74,6 +91,10 @@
   (d) camino atrapado (R4-bis): %K atrapado en extremo sin vela de rechazo → SPIKE.
   (e) INTRAVELA (R10): señal ANTES de cerrar M15 vía M1 lookback=15.
   (f) `wyckoff_event` presente en (a).
+  (g) separación adaptativa (R2-bis): cruce pegajoso → NO SPIKE; con separación
+  relativa → SPIKE (incluye variante intravela).
+  (h) R3/R3-bis independientes: alineado sin agotar → REBOUND; agotado sin
+  alinear → REBOUND.
 - [ ] Ejecutar `pytest tests/test_strat_f_spike.py tests/test_strat_f_maturing_recheck.py tests/test_stoch_exhaustion.py tests/test_stochastic_zones.py -m "not slow"` → TODO VERDE.
 - [ ] Ejecutar subset amplio del scanner para no romper pipeline vivo.
 

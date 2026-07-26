@@ -21,12 +21,35 @@ M15 tenga un cruce %K/%D confirmado en la dirección de la entrada con
 `cross_ago >= 1` (>=1 vela M15 desde el cruce), usando `_cross_ago_in_series`
 de `stochastic_m15.compute_stoch`. SI no hay cruce confirmado, el sistema
 DEBE dejar la señal en modo REBOUND (no SPIKE).
+ADEMÁS, al momento del cruce el precio DEBE estar respetando la franja/zona
+S/R ya definida en R1 (el rebote de Fase A ocurre EN la franja; no existe
+ningún requisito de "tendencia M15" — la zona R1 es la que manda).
+ACLARACIÓN de rol: M15 es donde se OBSERVA el cruce-con-separación (R2-bis),
+NO dispara la entrada por sí solo. La entrada real solo se confirma cuando
+R2 + R2-bis + R3 (M5 alineado) + R3-bis (M5 agotado) se cumplen JUNTOS en el
+mismo momento — no apenas M15 cruza.
+
+## R2-bis — Separación %K/%D ADAPTATIVA en el cruce M15 (nuevo)
+CUANDO el sistema valida el cruce M15 (R2), el sistema DEBE exigir que %K y
+%D salgan de la franja de sobrecompra/sobreventa con las líneas ya ABIERTAS:
+el cruce se forma DENTRO de la franja y la separación |%K−%D| aparece antes
+de salir de ella (filtra cruces "pegajosos" en el borde). La medida de
+separación DEBE ser RELATIVA/ADAPTATIVA — por ejemplo, relativa al rango
+reciente de |%K−%D| del propio oscilador del par — y NUNCA un umbral
+absoluto fijo (nada de "3-5 puntos", nada de pips/puntos fijos; misma
+doctrina que la zona de precio en R1/R7).
+CONEXIÓN con R10 (intravela): este chequeo de separación DEBE poder
+validarse también sobre la vela M15 EN CURSO usando las velas M1 de su
+ventana (lookback=15), no solo sobre velas M15 ya cerradas. SI solo se
+revisa al cierre, la señal se forma y se pierde (el problema original del
+watchdog).
 
 ## R3 — M15 y M5 AMBOS alineados (filtro de paciencia, NO suma de fuerza)
 CUANDO el SPIKE evalúa la dirección, el sistema DEBE exigir que el estocástico
 M5 esté alineado con la entrada (M5 bajista para PUT, M5 alcista para CALL),
-vía `_m5_aligned` de `stoch_exhaustion`. Esto reemplaza el `stoch_m5_exhausted`
-(k<20/k>80) actual que solo miraba extremo sin dirección de cruce.
+vía `_m5_aligned` de `stoch_exhaustion`. Este filtro de ALINEACIÓN sustituye
+el rol direccional que hoy se le pedía (mal) a `stoch_m5_exhausted`; el
+agotamiento M5 sigue existiendo como condición SEPARADA en R3-bis.
 Significado exacto (acordado con el usuario 2026-07-25): NO es "sumar fuerza"
 a la tendencia — es un **filtro de paciencia**. M15 es la "foto grande" (la
 tendencia que ya viene diciendo a dónde va); M5 es el "presente" (lo que pasa
@@ -35,6 +58,15 @@ que el largo plazo (M15) anunciaba: ambos deben decir la misma dirección EN EL
 PRESENTE. SI el M5 va en contra (el presente aún no confirmó lo que M15 dijo),
 el sistema DEBE descartar el SPIKE (mantener REBOUND). Esto evita entrar "muy
 pronto" (la pérdida de $1 fue exactamente M15 diciendo "baja" pero M5 subiendo).
+
+## R3-bis — M5 AGOTADO en su propio extremo (condición SEPARADA de R3)
+CUANDO el SPIKE evalúa la entrada, el sistema DEBE exigir ADEMÁS que el
+estocástico M5 esté AGOTADO en su propio extremo al momento de entrar
+(sobreventa para CALL, sobrecompra para PUT — el fix REQUIRE_M5_EXHAUSTED ya
+vivo en el bot). R3 (alineación direccional) y R3-bis (agotamiento en
+extremo) son DOS filtros DISTINTOS y ambos deben cumplirse; NO se fusionan
+en una sola regla. Un M5 alineado pero sin agotar (o agotado pero en contra)
+NO habilita el SPIKE.
 
 ## R4 — Vela de agotamiento en la franja (rechazo con mecha)
 CUANDO el precio toca la ZONA S/R (R1) con cruce M15 confirmado (R2) y M5
@@ -119,3 +151,10 @@ y AÑADIR tests que cubran:
     M1 como ventana — el test debe inyectar una M15 abierta + M1 de la ventana
     y confirmar que el SPIKE dispara sin esperar el cierre.
 (f) Etiqueta `wyckoff_event` presente en el caso (a).
+(g) SEPARACIÓN (R2-bis): cruce M15 "pegajoso" (|%K−%D| sin abrirse de forma
+    relativa al rango reciente del propio oscilador antes de salir de la
+    franja) → NO SPIKE; cruce con separación adaptativa suficiente → sí.
+    Incluir variante INTRAVELA: la separación validada sobre la M15 abierta
+    vía M1 (lookback=15).
+(h) R3 y R3-bis independientes: M5 alineado pero NO agotado → REBOUND;
+    M5 agotado pero NO alineado → REBOUND.
