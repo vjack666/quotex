@@ -1,6 +1,10 @@
 # LAB-001 — La muerte del empuje predice el rebote
 
-Fecha: 2026-07-27 · Laboratorio (docs/FILOSOFIA.md) · Estado: VALIDADO
+Fecha: 2026-07-27 · Laboratorio (docs/FILOSOFIA.md) · Estado: VALIDADO · **CONGELADO (referencia histórica, no editable)**
+Fecha de congelación: 2026-07-27. La definición de "MUERTE TOTAL DEL EMPUJE"
+de este LAB no se modificará. Toda mejora nace como nuevo experimento
+(LAB-0XX "Muerte del impulso v2") para poder comparar generaciones.
+Validación cruzada: ver docs/LAB_UNIVERSALIDAD.md (9 pares, misma señal 72-77%).
 Reproducir: `PYTHONPATH=src python scripts/lab_001_muerte_empuje.py`
 Datos: 14 años EURUSD M1 real (Dukascopy vía SMC-SYSTEMS), 117,169 episodios
 grabados por el Observador Fase A (transitions_v1) en
