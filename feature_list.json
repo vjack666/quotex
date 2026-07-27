@@ -599,6 +599,20 @@
         "market_replay_engine"
       ],
       "spec": "specs/observador_nucleo/"
+    },
+    {
+      "name": "observador_fase_b",
+      "title": "Observador Fase B: calidad del rebote + pelicula completa (evolution/summary/capturemonitor)",
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/observador_fase_b/"
+    },
+    {
+      "name": "discovery_engine",
+      "title": "Discovery Engine: mineria de conocimiento del Atlas (propone leyes nuevas, no borra)",
+      "status": "spec_ready",
+      "sdd": true,
+      "spec_path": "specs/discovery_engine/"
     }
   ]
 }
