@@ -3,12 +3,15 @@
 Feature: discovery_engine
 Capa: 2.5 (sobre el Atlas / Observador Fase B). Lee episodios YA grabados
 (trazas + summaries) y EMITE LEYES (#N) como conocimiento de la Memoria del
-Mercado. NO decide, NO opera, NO toca el feed, NO toca el bot. Es la inversión
-de la pregunta: en vez de "¿esto funciona?" pregunta "Atlas, ¿qué funciona?".
+Mercado. NO decide, NO opera, NO toca el feed, NO toca el bot. Cambio de
+paradigma (Ruben 2026-07-27): el Laboratorio confirmaba "¿mi hipótesis
+funciona?"; el Discovery Engine pregunta "Mercado, ¿qué leyes escondes?". El
+motor BUSCA, no confirma.
 
 Documentos rectores: `docs/FILOSOFIA.md` (falsación, acumular no borrar),
 `docs/PTM_V3.md`, `docs/CONSTITUCION_REBOTE.md`, specs/observador_fase_b/,
-`progress/ARQUITECTURA_2GEN.md` (arquitectura de 4 capas + nota forex/OTC).
+`progress/ARQUITECTURA_2GEN.md` (arquitectura de 4 capas + nota forex/OTC +
+refinamientos de diseño).
 
 ## Principio rector (heredado de Fase B)
 > EL SDD DEFINE COMPORTAMIENTO, NO PARÁMETROS. Los umbrales de significancia,
@@ -59,13 +62,16 @@ cierre; usarlo como PREDICTOR está prohibido — es el desenlace.)
 **R9 — Agnóstico al vehículo.** El motor descubre propiedades del episodio, no
 de binarias/FX. La traducción a vehículo queda en la capa de Negocio (futura).
 
-**R9b — Candado forex/OTC (de `ARQUITECTURA_2GEN.md`).** El Atlas actual está
-entrenado SOLO con datos FOREX (+ oro) de Dukascopy; el bot opera forex Y OTC.
-El motor DEBE etiquetar cada ley con los MERCADOS en los que fue validada y
-DEBE poder correr por separado sobre una fuente OTC cuando exista. El scanner
-solo podrá consultar "¿Ley #N validada en este mercado?" y la Memoria contesta
-sí/no POR MERCADO. Una ley de forex NO se promueve como válida en OTC hasta no
-pasar R3+R4 sobre datos OTC. (Evita aplicar leyes no validadas al setup OTC.)
+**R9b — Candado Mercado Y FUENTE (de `ARQUITECTURA_2GEN.md`).** El Atlas actual
+está entrenado SOLO con datos FOREX (+ oro) de Dukascopy; el bot opera forex Y
+OTC. El motor DEBE etiquetar cada ley con los MERCADOS y las FUENTES concretas
+en las que fue validada (ej. Dukascopy, Quotex OTC, Broker X, IC Markets). Dos
+brokers OTC pueden comportarse distinto: la ley queda validada para la FUENTE
+donde se demostró, NO para "OTC" en general. El motor DEBE poder correr por
+separado sobre una fuente OTC cuando exista. El scanner solo podrá consultar
+"¿Ley #N validada en esta fuente?" y la Memoria contesta sí/no POR FUENTE. Una
+ley de una fuente NO se promueve como válida en otra hasta no pasar R3+R4 sobre
+datos de esa otra fuente. (Evita aplicar leyes no validadas al setup OTC.)
 
 **R10 — Determinismo.** Misma entrada + misma config => mismas leyes. Semilla
 de barajado versionada.
@@ -76,11 +82,25 @@ importa scanner/strat_fractal (candados reusados).
 **R12 — Emite LEYES (#N) como objeto de la Memoria.** El motor NO emite texto
 suelto ni código. Cada ley promovida DEBE materializarse como un registro
 estructurado con id `#N`, nombre, condiciones (variables+operadores),
-probabilidad, confianza, mercados, timeframes y casos estudiados, y DEBE
-guardarse en la tabla `leyes` de la Memoria del Mercado (junto al Atlas de
+probabilidad, confianza, mercados, fuentes, timeframes y casos estudiados, y
+DEBE guardarse en la tabla `leyes` de la Memoria del Mercado (junto al Atlas de
 episodios). El scanner del futuro consulta por id (#N) con un sí/no. Esto es
 el aporte central de la arquitectura de 4 capas: el laboratorio genera
-CONOCIMIENTO reutilizable, no estrategias.
+CONOCIMIENTO reutilizable para máquinas, no documentos para humanos.
+
+**R13 — Ciclo de vida de la ley.** Toda ley DEBE llevar un `state` que evoluciona
+con la evidencia acumulada: EXPERIMENTAL → VALIDADA → FUERTE → UNIVERSAL →
+OBSOLETA. Una ley NUNCA se borra: solo cambia de estado (conserva el historial
+científico y el grado de evidencia). Las transiciones de estado se registran
+con su `discovery_version` y motivo. El scanner consulta el estado para decidir
+el peso de la ley, no su existencia.
+
+**R14 — Grafo de conocimiento (relaciones entre leyes).** La Memoria DEBE admitir
+RELACIONES dirigidas entre leyes: `refuerza`, `contradice`, `requiere` (con
+fuerza y versión). Esto convierte la Memoria en un GRAFO, no solo una tabla. El
+scanner DEBE poder preguntar "¿qué leyes apoyan esta situación?" (consulta por
+relaciones) además de "¿existe la Ley #N?" (consulta por id). El motor puede
+proponer relaciones nuevas entre leyes ya existentes (acumulando estructura).
 
 ## Relación con el resto
 - Consume la SALIDA de Fase B (películas + summaries). Depende de que el
@@ -90,5 +110,7 @@ CONOCIMIENTO reutilizable, no estrategias.
 - Es el paso 3 del nuevo orden de Rubén: tras LAB-001 congelado y Fase B, antes
   del motor de trading y del puente scanner→Memoria.
 - Respeta la arquitectura de 4 capas (Laboratorio → Memoria → Estrategas): el
-  Discovery Engine es el Laboratorio; la tabla `leyes` es la Memoria; el scanner
-  futuro solo pregunta.
+  Discovery Engine es el Laboratorio; la tabla `leyes` + grafo es la Memoria;
+  el scanner futuro solo consulta. Las 5 responsabilidades (Laboratorio observa,
+  Discovery descubre, Memoria recuerda, Scanner consulta, Estrategia decide) se
+  mantienen separadas para que cada pieza evolucione sin romper las demás.

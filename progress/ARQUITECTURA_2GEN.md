@@ -116,3 +116,37 @@ sin validación (opción 3).
 - Auditoría TEORIA_VS_EVIDENCIA.md: veredictos por afirmación (VALIDADA/REFUTADA/PENDIENTE).
 - Discovery Engine: spec escrito (Capa 2.5), sin literales (comportamiento no parámetros).
 - feature_list.json: observador_fase_b=done, discovery_engine=spec_ready.
+
+## REFINAMIENTO DE DISEÑO (Ruben, 2026-07-27, durante review del SDD)
+Cambio de paradigma: el Laboratorio respondía "¿mi hipótesis funciona?"; el
+Discovery Engine responde "Mercado, ¿qué leyes escondes?". El motor BUSCA,
+no confirma. Eso cambia todo el enfoque.
+
+### Pipeline de la arquitectura (5 responsabilidades separadas)
+  Laboratorio → Atlas (episodios) → Discovery Engine → Memoria (Leyes #N)
+  → Scanner → Estrategia → Bot
+- El SCANNER deja de ser "inteligente": es un CONSULTOR. Detecta un episodio y
+  pregunta a la Memoria; la Memoria contesta "93% parecido a Ley #17, validada
+  en Forex, NO en OTC" y el scanner decide NO aplicarla. Toda la estadística
+  vive en la Memoria, no en el scanner.
+- R12 es clave: la ley dejó de ser DOCUMENTO (LAB_001.md) y pasó a ser OBJETO
+  (id, nombre, variables, condiciones, probabilidad, confianza, mercados,
+  timeframes, casos, discovery_version). Conocimiento para máquinas: verdadera
+  base de conocimiento.
+
+### 5 refinamientos acordados (integrados en el SDD)
+1) FUENTE, no solo MERCADO (extiende R9b): etiquetar la ley por FUENTE concreta
+   (Dukascopy, Quotex OTC, Broker X, IC Markets). Dos brokers OTC pueden diferir.
+   La ley queda validada para la fuente donde se demostró, no para "OTC" genérico.
+2) CICLO DE VIDA de la ley (R13): estados EXPERIMENTAL → VALIDADA → FUERTE →
+   UNIVERSAL → OBSOLETA. El mercado cambia; la ley cambia de estado, NUNCA se
+   borra. Conserva todo el historial científico (grado de evidencia).
+3) GRAFO de conocimiento (R14): la Memoria admite RELACIONES entre leyes
+   (refuerza / contradice / requiere). El scanner pregunta "¿qué leyes apoyan
+   esta situación?" en vez de "¿existe Ley #17?". La Memoria es un grafo, no
+   solo una tabla. Modelo: tabla de aristas ley→ley con tipo y fuerza.
+4) El candado forex/OTC se mantiene y se extiende con Fuente (punto 1).
+5) Separación de responsabilidades como valor central: Laboratorio observa,
+   Discovery descubre, Memoria recuerda, Scanner consulta, Estrategia decide.
+   Cada pieza evoluciona sin romper las demás; múltiples estrategias consultan
+   la MISMA Memoria (como científicos consultando la misma biblioteca).
