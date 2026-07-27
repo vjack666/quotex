@@ -589,6 +589,16 @@
       "spec_path": "specs/market_replay_engine/",
       "depends_on": [],
       "description": "Interfaz unica MarketFeed (next_event/now) + ReplayFeed (caja negra propia y CSV, velocidad 1x-1000x/MAX, pause/step/seek/bookmark, Regla Sagrada: nunca ve el futuro) + LiveFeed placeholder. Paquete nuevo src/marketfeed/, cero contacto con el bot vivo. Documentos rectores: docs/FILOSOFIA.md, docs/PTM_V3.md, docs/REPLAY_ENGINE.md."
+    },
+    {
+      "name": "observador_nucleo",
+      "title": "Observador Fase A: nucleo de episodios PTM v3",
+      "sdd": true,
+      "status": "done",
+      "depends_on": [
+        "market_replay_engine"
+      ],
+      "spec": "specs/observador_nucleo/"
     }
   ]
 }
