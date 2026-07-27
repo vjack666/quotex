@@ -580,6 +580,15 @@
       "created_at": "2026-07-26",
       "spec_ready_at": "2026-07-26",
       "note": "Aprobado por el usuario tras corrección de bug de cuentas en proyección CALL y elección ALT B de persistencia. Puerta SDD: espera OK para implementar (in_progress)."
+    },
+    {
+      "name": "market_replay_engine",
+      "title": "Market Replay Engine (Capa 0.5): reproduce mercado histórico como feed en vivo via interfaz MarketFeed; el consumidor no distingue vivo de replay. Acelera Observador/Atlas. NO es backtester.",
+      "sdd": true,
+      "status": "done",
+      "spec_path": "specs/market_replay_engine/",
+      "depends_on": [],
+      "description": "Interfaz unica MarketFeed (next_event/now) + ReplayFeed (caja negra propia y CSV, velocidad 1x-1000x/MAX, pause/step/seek/bookmark, Regla Sagrada: nunca ve el futuro) + LiveFeed placeholder. Paquete nuevo src/marketfeed/, cero contacto con el bot vivo. Documentos rectores: docs/FILOSOFIA.md, docs/PTM_V3.md, docs/REPLAY_ENGINE.md."
     }
   ]
 }
