@@ -150,3 +150,49 @@ no confirma. Eso cambia todo el enfoque.
    Discovery descubre, Memoria recuerda, Scanner consulta, Estrategia decide.
    Cada pieza evoluciona sin romper las demás; múltiples estrategias consultan
    la MISMA Memoria (como científicos consultando la misma biblioteca).
+
+## SEGUNDO LABORATORIO: STRATEGY LAB (Ruben, 2026-07-27)
+Cambio conceptual: hasta ahora el Laboratorio/Discovery responde "¿qué leyes
+existen en el mercado?". El Strategy Lab responde otra pregunta distinta:
+"¿cómo se comporta MI estrategia frente a esas leyes?". Son dos cosas distintas.
+
+### Pipeline ampliado (6 responsabilidades)
+  Mercado → Observador → Atlas (episodios) → Discovery Engine → Memoria (Leyes #N)
+                                                                  ├─ Strategy Lab
+                                                                  └─ Scanner
+                                                                        └─ Estrategia → Bot
+- Discovery sigue SIENDO completamente científico (descubre leyes del mercado).
+- Strategy Lab es OTRO módulo ENCIMA de Discovery: NO estudia la estrategia el
+  Discovery; hay un módulo aparte. Misión del Strategy Lab:
+  * Tengo esta estrategia (propuesta por Rubén).
+  * ¿En qué leyes se apoya?
+  * ¿Qué parte aporta más?
+  * ¿Qué parte sobra?
+  * ¿Qué filtros realmente mejoran la probabilidad?
+- NO inventa estrategias nuevas: PERFECCIONA la propuesta. Descompone en pasos
+  elementales, prueba miles de variantes, elimina pasos inútiles, ordena por
+  importancia estadística, devuelve la versión óptima basada en evidencia.
+
+### Geometría óptima del estocástico (descubierta por Discovery, no por Strategy Lab)
+- El usuario no quiere "usar estocástico 14,3,3" fijo; quiere DESCUBRIR la
+  geometría óptima. Discovery descompone el indicador en variables:
+  posición %K, %D, distancia(K,D), ángulo %K/%D, velocidad de apertura, tiempo
+  desde cruce, máx/mín alejamiento, distancia a niveles 20/50/80, pendiente,
+  aceleración. Prueba miles de combinaciones y descubre p.ej. Ley #34:
+  "K<18, D<16, dist(K,D)>4.8, pendiente K>22°, cruce antes de salir de 20,
+  impulso válido → 84% continuación". Eso es mucho más potente que "compra en
+  el cruce". La ley nace de los datos.
+- Strategy Lab CONSUME esa Ley #34 como un paso de la estrategia y mide su
+  contribución; NO la redescubre.
+
+### La secuencia lógica también se descubre
+- Strategy Lab compara órdenes: A) impulso→estocástico→entrada; B)
+  estocástico→impulso→entrada; C) impulso→liquidez→estocástico→entrada; y mide
+  cuál tiene mayor tasa de acierto walk-forward. El orden óptimo se descubre, no
+  se asume.
+
+### Valor central
+Cuando el scanner ejecute, ya no corre una estrategia de intuición: corre una
+cuyo orden y filtros fueron validados por el Laboratorio. Separación mantenida:
+Laboratorio observa, Discovery descubre, Memoria recuerda, Strategy Lab
+perfecciona, Scanner consulta, Estrategia decide.

@@ -613,6 +613,17 @@
       "status": "spec_ready",
       "sdd": true,
       "spec_path": "specs/discovery_engine/"
+    },
+    {
+      "name": "strategy_lab",
+      "title": "Strategy Lab (Laboratorio de estrategias) — perfecciona la estrategia propuesta",
+      "status": "spec_ready",
+      "sdd": true,
+      "depends_on": [
+        "discovery_engine",
+        "observador_fase_b"
+      ],
+      "layer": "2.6"
     }
   ]
 }

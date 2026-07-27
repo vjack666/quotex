@@ -30,7 +30,13 @@ re-reproduce 14 años. (Eficiencia: el costo de cómputo ya se pagó al grabar.)
 de variables ya grabadas (pressure/energy/continuity/volatility/spread por barra
 + campos del summary: quality, velocity, violence, curve_shape, symmetry,
 duration_bars, mfe, mae, end_reason, finished) SIN que el humano las liste
-una por una. Búsqueda automática sobre el espacio de features.
+una por una. Búsqueda automática sobre el espacio de features. El espacio TAMBIÉN
+incluye variables derivadas de INDICADORES descompuestos en primitivas (ej.
+geometría del estocástico: posición %K, %D, distancia(K,D), ángulo %K/%D,
+velocidad de apertura, tiempo desde cruce, máximo/mínimo alejamiento, distancia a
+niveles 20/50/80, pendiente media, aceleración) de modo que pueda descubrir leyes
+como "Ley #34: geometría óptima del estocástico → X% de continuación" que luego
+el Strategy Lab CONSUME como paso (ver specs/strategy_lab/).
 
 **R3 — Split temporal obligatorio.** Toda ley candidata DEBE validarse
 walk-forward: se descubre en años de entrenamiento y se confirma en años
