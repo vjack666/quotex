@@ -2,6 +2,8 @@
 
 CsvSource      — CSV asset,timeframe,ts,open,high,low,close[,volume] (R2.3, R2.4, R6.3, R7.2)
 BlackBoxSource — black_box_strat_*.db solo lectura, candles_1m/5m/15m (R6.1, R6.2, R7.1)
+ParquetSource  — parquet Dukascopy/MT5 (time,open,high,low,close[,volume]) prestado
+                 de SMC-SYSTEMS/data/raw, solo lectura, sin copiar (extensión R6.3)
 
 Ambas implementan el protocolo Source de base.py:
   iter_events() -> Iterator[Event] ordenado por ts
@@ -173,3 +175,72 @@ class BlackBoxSource(_BaseSource):
                 clean[key] = val
 
         yield from self._emit(clean, self.source)
+
+
+# ---------------------------------------------------------------------------
+
+
+class ParquetSource(_BaseSource):
+    """Parquet Dukascopy/MT5 prestado de SMC-SYSTEMS (solo lectura, sin copiar).
+
+    Esquema esperado: columnas time (datetime tz-aware o naive-UTC), open, high,
+    low, close y opcional volume/tick_volume. asset y timeframe se derivan del
+    nombre de archivo (p.ej. EURUSD_M1.parquet) o se pasan explícitos.
+
+    start/end (ISO 'YYYY-MM-DD') recortan el rango ANTES de materializar:
+    con 5.7M filas de M1 no se replaya 14 años por accidente.
+    Requiere pandas+pyarrow (ya en el venv del proyecto).
+    """
+
+    _TF_SUFFIX = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
+
+    def __init__(self, path: str, asset: str | None = None, timeframe: int | None = None,
+                 start: str | None = None, end: str | None = None) -> None:
+        super().__init__()
+        self._path, self._start, self._end = path, start, end
+        stem = os.path.splitext(os.path.basename(path))[0]  # EURUSD_M1
+        parts = stem.rsplit("_", 1)
+        self._asset = asset or parts[0]
+        if timeframe is not None:
+            self._tf = timeframe
+        elif len(parts) == 2 and parts[1].upper() in self._TF_SUFFIX:
+            self._tf = self._TF_SUFFIX[parts[1].upper()]
+        else:
+            raise ValueError(
+                f"ParquetSource {path!r}: no puedo inferir timeframe del nombre; "
+                f"pásalo explícito (R7.2)"
+            )
+        self.source = f"REPLAY:parquet:{os.path.basename(path)}"
+
+    def iter_events(self) -> Iterator[Event]:
+        import pandas as pd  # import diferido: solo quien usa parquet paga pandas
+
+        self._report = _empty_report()
+        df = pd.read_parquet(self._path)
+        required = {"time", "open", "high", "low", "close"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"Parquet {self._path!r} con esquema inválido: faltan {sorted(missing)} (R7.2)"
+            )
+        t = pd.to_datetime(df["time"], utc=True)
+        mask = pd.Series(True, index=df.index)
+        if self._start:
+            mask &= t >= pd.Timestamp(self._start, tz="UTC")
+        if self._end:
+            mask &= t < pd.Timestamp(self._end, tz="UTC")
+        df, t = df.loc[mask], t.loc[mask]
+        vol_col = "volume" if "volume" in df.columns else ("tick_volume" if "tick_volume" in df.columns else None)
+
+        candles: Dict[Tuple[str, int, float], tuple] = {}
+        ts_arr = (t - pd.Timestamp(0, tz="UTC")).dt.total_seconds().to_numpy()
+        o_a, h_a, l_a, c_a = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
+        v_a = df[vol_col].to_numpy() if vol_col else None
+        for i in range(len(df)):
+            key = (self._asset, self._tf, float(ts_arr[i]))
+            if key in candles:
+                self._report["discarded_dup"] += 1
+            else:
+                candles[key] = (float(o_a[i]), float(h_a[i]), float(l_a[i]), float(c_a[i]),
+                                float(v_a[i]) if v_a is not None else None)
+        yield from self._emit(candles, self.source)
