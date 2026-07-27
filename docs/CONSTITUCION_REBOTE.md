@@ -97,6 +97,17 @@ E. Freno correcto pero rebote insuficiente (murió antes de 15 min) →
 
 ## Estado de la evidencia (v1.0 — actualizar con cada hallazgo del Atlas)
 
+VALIDADO (LAB-001, 14 años EURUSD M1, 117,169 episodios, 2026-07-27):
+- LA PRUEBA CENTRAL PASÓ: la muerte del empuje predice el rebote.
+  MUERTE TOTAL (avance chico + <10% del pico + velas alternadas) →
+  REBOUND 69.8% (n=16,834) vs 23.7% el resto; empuje VIVO → 13.1%.
+  Walk-forward 2012-19: 69.3% / 2020-26: 70.5%. Placebo p<0.001.
+  Refina el M2: lo que predice NO es la suavidad de la caída (la
+  pendiente sola dio señal invertida) sino la MUERTE COMPLETA del
+  impulso. Ver docs/LAB_001_MUERTE_EMPUJE.md.
+- Límite: fenómeno ≠ trade (falta MFE/MAE y timing, Fase B) y
+  EURUSD real ≠ OTC Quotex (validación final con captura viva).
+
 VALIDADO (auditoría 3 días caja negra, 2026-07-27):
 - El sistema de 1ª generación NO implementa esta teoría (2 ausencias,
   3 contradicciones — ver auditoría teoría vs código).
