@@ -29,6 +29,8 @@ class FrenoConfig:
 
     NO son 'constantes a mano en produccion': vienen de cfg (yaml del
     strategy_lab) y el Discovery los reemplaza por hallazgos walk-forward.
+    Si existe leyes_freno_descubiertas.json (Bloque 3), se adoptan sus
+    valores minados sobre cajas negras reales (sep_min, salida_zona).
     """
     impulse_window: int = 8
     impulse_min_pips: float = 30.0
@@ -38,7 +40,31 @@ class FrenoConfig:
     rebote_min_pips: float = 8.0
     stoch_extreme: float = 80.0       # sobrecompra (PUT) / sobreventa (CALL)
     sep_min: float = 3.0              # separacion %K-%D minima (Ley 5 pendiente)
+    salida_zona: float = 20.0         # nivel de salida de la zona (Ley 6)
     zone_min_age: int = 3
+
+    def __post_init__(self):
+        self._load_discovered()
+
+    def _load_discovered(self) -> None:
+        """Adopta los umbrales minados por el laboratorio (Bloque 3) si existen.
+
+        El JSON es la fuente de verdad descubierta; la semilla es fallback.
+        """
+        try:
+            import json
+            from pathlib import Path
+            p = Path(__file__).parent / "leyes_freno_descubiertas.json"
+            if not p.exists():
+                return
+            data = json.loads(p.read_text(encoding="utf-8"))
+            ad = data.get("adoptados") or {}
+            if "sep_min" in ad:
+                self.sep_min = float(ad["sep_min"])
+            if "salida_zona" in ad:
+                self.salida_zona = float(ad["salida_zona"])
+        except Exception:
+            return
 
 
 def _brake_cfg(c: FrenoConfig) -> dict:
@@ -85,16 +111,18 @@ def ley_impulso_muerto(ctx: LawContext, cfg: FrenoConfig) -> LawResult:
 def ley_stoch_extremo(ctx: LawContext, cfg: FrenoConfig) -> LawResult:
     """Filtro secundario — estocastico en extremo EN LA ZONA (no coincidente).
 
-    CALL espera %K < 20 (sobreventa del impulso bajista). PUT espera %K>80.
+    CALL espera %K < salida_zona (sobreventa del impulso bajista).
+    PUT espera %K > 100 - salida_zona.
+    salida_zona es descubierto por el laboratorio (Bloque 3); semilla = 20.
     El estocastico es el reloj que dice 'es el momento' (Constitucion Ley 4).
     """
     k = (ctx.stoch_m15 or {}).get("k")
     if k is None:
         return LawResult(ok=True, weight=0.0, detail="stoch M15 ausente (soft)")
-    if ctx.direction_hint == "CALL" and k >= 20.0:
-        return LawResult(ok=False, detail=f"stoch {k:.1f} no sobreventa para CALL")
-    if ctx.direction_hint == "PUT" and k <= 80.0:
-        return LawResult(ok=False, detail=f"stoch {k:.1f} no sobrecompra para PUT")
+    if ctx.direction_hint == "CALL" and k >= cfg.salida_zona:
+        return LawResult(ok=False, detail=f"stoch {k:.1f} no sobreventa para CALL (>= {cfg.salida_zona})")
+    if ctx.direction_hint == "PUT" and k <= 100.0 - cfg.salida_zona:
+        return LawResult(ok=False, detail=f"stoch {k:.1f} no sobrecompra para PUT (<= {100.0-cfg.salida_zona})")
     return LawResult(ok=True, detail=f"stoch extremo k={k:.1f}")
 
 

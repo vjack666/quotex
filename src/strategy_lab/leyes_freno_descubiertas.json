@@ -1,0 +1,142 @@
+{
+  "meta": {
+    "db": "data\\db\\black_box_strat_2026-07-17.db",
+    "eventos_total": 98,
+    "wr_base_freno": 0.9082,
+    "cfg_usado": {
+      "stochastic": {
+        "k": 14,
+        "d": 3,
+        "smooth": 3
+      },
+      "impulse": {
+        "window": 8,
+        "min_pips": 30.0
+      },
+      "brake": {
+        "fwd": 3,
+        "max_advance_frac": 0.1,
+        "require_alternation": true
+      },
+      "rebote": {
+        "fwd": 3,
+        "min_pips": 8.0
+      }
+    }
+  },
+  "ley_5_separacion": {
+    "sep_min_opt": 8.0,
+    "wr_opt": 0.9268,
+    "n_opt": 41,
+    "curve": [
+      [
+        0.5,
+        0.9022,
+        92
+      ],
+      [
+        1.0,
+        0.9101,
+        89
+      ],
+      [
+        1.5,
+        0.907,
+        86
+      ],
+      [
+        2.0,
+        0.9259,
+        81
+      ],
+      [
+        2.5,
+        0.9259,
+        81
+      ],
+      [
+        3.0,
+        0.9221,
+        77
+      ],
+      [
+        3.5,
+        0.9167,
+        72
+      ],
+      [
+        4.0,
+        0.9091,
+        66
+      ],
+      [
+        5.0,
+        0.9167,
+        60
+      ],
+      [
+        6.0,
+        0.9074,
+        54
+      ],
+      [
+        8.0,
+        0.9268,
+        41
+      ]
+    ]
+  },
+  "ley_6_salida_zona": {
+    "salida_zona_opt": 30,
+    "wr_opt": 0.9512,
+    "n_opt": 41,
+    "curve": [
+      [
+        12,
+        1.0,
+        11
+      ],
+      [
+        14,
+        1.0,
+        19
+      ],
+      [
+        16,
+        1.0,
+        20
+      ],
+      [
+        18,
+        1.0,
+        22
+      ],
+      [
+        20,
+        1.0,
+        27
+      ],
+      [
+        22,
+        1.0,
+        29
+      ],
+      [
+        25,
+        0.9412,
+        34
+      ],
+      [
+        30,
+        0.9512,
+        41
+      ]
+    ]
+  },
+  "adoptados": {
+    "sep_min": 2.0,
+    "salida_zona": 30.0,
+    "justificacion": "sep_min: mejor compromiso volumen/calidad con n>=60 (el maximo de borde SUELE dar n chico). salida_zona: punto robusto con n>=30 (el 100%% de S<=20 es n chico / sobreajuste)."
+  },
+  "advertencia": "semilla estadistica sobre dataset fijo; requiere walk-forward antes de produccion (Bloque 3.5)"
+}
