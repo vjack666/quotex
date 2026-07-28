@@ -21,9 +21,14 @@ specs/observador_fase_b/, `progress/ARQUITECTURA_2GEN.md`.
 
 ## Requisitos funcionales
 
-**SL-R1 — Entrada es estrategia + Memoria + Atlas, no el mercado.** El motor DEBE
-leer la estrategia propuesta (como lista de pasos), la tabla `leyes` de la Memoria
-y los episodios del Atlas. NUNCA consume feed en vivo ni re-reproduce 14 años.
+**SL-R1 — Entrada es estrategia + Memoria + datos de velas, no el mercado vivo.** El
+motor DEBE leer la estrategia propuesta (como lista de pasos), la tabla `leyes` de la
+Memoria y DATOS DE VELAS (OHLC) vía el Market Replay Engine en modo READ-ONLY. NUNCA
+consume feed en vivo ni re-reproduce 14 años. Nota: el Atlas (episodios con estados
+QUIET/EXPANSION/PRESSURE/BRAKE) NO trae estocástico ni granularidad M15, por lo que la
+fuente de backtest del Strategy Lab son las VELAS CRUDAS (ej. EURUSD M15 14y prestada
+de SMC-Dukascopy), no el Atlas. El Atlas/Memoria se usan como REFERENCIAS de leyes, no
+como datos de backtest.
 
 **SL-R2 — Descomposición en pasos elementales.** Cada paso DEBE ser un predicado
 sobre features del episodio o una REFERENCIA a una Ley #N de la Memoria. El motor
@@ -75,6 +80,17 @@ Strategy Lab.
 PROPUESTA; el alcance está acotado a variantes de esa estrategia, no a estrategias
 nuevas. "Perfecciona la tuya, asigna prioridades, descarta filtros inútiles,
 cuantifica cuánto aporta cada condición."
+
+**SL-R14 — Primitivas calculadas desde velas (feature_calc).** El motor DEBE poder
+calcular features desde OHLC M15 para descomponer la estrategia propuesta en
+primitivas atómicas y verificables: (a) estocástico Full (14,3,3) como "reloj" que
+marca el momento del freno; (b) impulso = recorrido neto de cuerpos de N velas en
+una dirección; (c) freno = achique de cuerpos + alternancia de signo tras el pico
+(criterio LAB-001: avance chico + <10% del pico + velas alternadas); (d) POI/zona =
+nivel de reversión; (e) rebote = reversión de >=M pips en las K velas tras la señal.
+Estas primitivas son PREDICADOS sobre velas, no sobre estados del Atlas. La definición
+operativa de cada una (N, M, K, umbrales de "chico"/"alternado") vive en
+config/strategy_lab_v1.yaml, no en código.
 
 ## Relación con el resto
 - Consume SALIDA de Discovery Engine (leyes en Memoria) + Atlas (episodios).

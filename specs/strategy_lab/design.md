@@ -8,16 +8,19 @@ src/strategy_lab/
   config/strategy_lab_v1.yaml  # umbrales versionados (sin literales)
   strategy_parser.py  # descompone estrategia propuesta en pasos (SL-R2)
   variant_searcher.py # orden/inclusión/umbrales, acotado (SL-R3,R10)
-  backtester.py       # mide edge walk-forward sobre Atlas (SL-R4)
+  backtester.py       # mide edge walk-forward sobre velas M15 (SL-R4)
   ablator.py          # importancia por ablation (SL-R6,R7)
   falsifier.py        # placebo + p-valor por paso (SL-R5)
   orderer.py          # compara secuencias alternativas (SL-R8)
   optimizer.py        # orquesta: descubre variante óptima (SL-R3..R9,R13)
   strategy_store.py   # emite estrategia optimizada como objeto (SL-R9,R12)
-  config_loader.py    # carga cfg versionada
+  feature_calc.py     # estocastico(14,3,3)+impulso/freno/POI/rebote desde OHLC (SL-R14)
+  config_loader.py    # carga cfg versionado
 ```
-Lectura del Atlas SIN reposición de 14 años: todo viene de tablas pobladas por
-Fase B (SL-R1). La Memoria se lee en modo SOLO LECTURA (SL-R12).
+Lectura de datos SIN reposición de 14 años: todo viene de velas M15 vía Market Replay
+Engine (ParquetSource read-only sobre data/smc_borrowed/EURUSD_M15.parquet, prestado de
+SMC-Dukascopy). La Memoria se lee en modo SOLO LECTURA (SL-R12); el Atlas se usa solo
+como referencia de leyes, no como datos de backtest (carece de estocástico/M15).
 
 ## Principio: comportamiento, no parámetros (SD0)
 `strategy_lab_v1.yaml` contiene: min_contribution, p_cut, min_sample, max_depth,

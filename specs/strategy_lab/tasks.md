@@ -4,6 +4,14 @@ Regla del repo: una task a la vez, test verde antes de [x]. Sin literales
 numéricos en código (principio Fase B): umbrales en config/strategy_lab_v1.yaml.
 Depende de Fase B poblada (Atlas) y de Discovery Engine emitiendo Leyes #N.
 
+- [ ] T0. `feature_calc.py`: calcula features desde OHLC M15 (estocástico Full
+      14,3,3; impulso = recorrido de cuerpos N velas; freno = achique + alternancia
+      tras pico; POI = nivel; rebote = reversión M pips en K velas). Parámetros
+      desde config. Lee velas vía Market Replay ParquetSource (read-only sobre
+      data/smc_borrowed/EURUSD_M15.parquet, prestado SMC-Dukascopy). Test: features
+      calculadas sobre fixture M15 son finitas y coinciden con referencia manual.
+      (SL-R1,R14)
+
 - [ ] T1. `src/strategy_lab/config/strategy_lab_v1.yaml` + `config_loader.py`.
       Campos: min_contribution, p_cut, min_sample, max_depth, seed, split_year.
       Sin literales mágicos fijos. Test: loader devuelve cfg; seed/cut se reflejan.
@@ -53,6 +61,14 @@ Bitácora:
 - La geometría óptima del estocástico (Ley #34 tipo) la descubre Discovery
   (descompone indicador en variables, R2 ampliado); Strategy Lab la CONSUME como
   paso y mide su contribución. El orden óptimo (A/B/C) también se descubre.
+- PERFECCIÓN 2026-07-28: el Strategy Lab necesita datos M15 con estocástico, que
+  el Atlas v2 NO trae. Resuelto: se generó EURUSD M15 de 14 años (385,258 velas,
+  2012-2026) agregando EURUSD_M1 Dukascopy prestada de SMC (script
+  scripts/build_m15_from_m1.py, read-only). Esa es la fuente de backtest (SL-R1).
+  El Discovery ya emitió Leyes #1 (curva plana revierte 90%) y #2 (curva cóncava
+  65%); y el doc docs/DISCOVERY_MUERTE_EMPUJE.md aclara que la "muerte del empuje"
+  (72-77%) está VALIDADA en LAB-001 pero requiere estocástico+recorrido de vela que
+  el Atlas no graba — justo lo que feature_calc.py (T0) calculará desde M15.
 - Mantiene separación de 6 responsabilidades: Laboratorio observa, Discovery
   descubre, Memoria recuerda, Strategy Lab perfecciona, Scanner consulta,
   Estrategia decide.
