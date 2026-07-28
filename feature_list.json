@@ -610,7 +610,7 @@
     {
       "name": "discovery_engine",
       "title": "Discovery Engine: mineria de conocimiento del Atlas (propone leyes nuevas, no borra)",
-      "status": "spec_ready",
+      "status": "done",
       "sdd": true,
       "spec_path": "specs/discovery_engine/"
     },

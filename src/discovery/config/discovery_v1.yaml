@@ -1,0 +1,31 @@
+# Discovery Engine — configuración v1 (CONTRATO T1/T2/T3)
+# Todos los umbrales numéricos del Discovery Engine viven AQUÍ.
+# Cero literales numéricos de umbral en el código de src/discovery/.
+
+# Tamaño mínimo de muestra para promover una ley candidata (R3).
+min_sample: 30
+
+# p-value de corte para aceptar una ley tras falsificación (R4).
+p_cut: 0.05
+
+# Frecuencia mínima (proporción de casos) para que una condición sea considerada.
+min_freq: 0.10
+
+# Profundidad máxima del espacio de features compuestas (T3 space).
+max_depth: 12
+
+# Semilla de determinismo (splitter/falsifier/miner).
+seed: 20260727
+
+# Año de corte para walk-forward (split train/test).
+split_year: 2019
+
+# Fuentes de datos reconocidas (deben coincidir con classify_source).
+sources:
+  - Dukascopy
+  - Quotex OTC
+
+# Mercados reconocidos.
+markets:
+  - forex
+  - otc
