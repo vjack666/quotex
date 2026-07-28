@@ -39,15 +39,15 @@ Depende de Fase B poblada (Atlas) y de Discovery Engine emitiendo Leyes #N.
       Test: sobre fixture pequeño devuelve estrategia óptima que ELIMINA paso
       inútil y ORDENA por importancia. (SL-R3..R9,R13)
 
-- [ ] T8. `strategy_store.py`: emite estrategia optimizada como objeto + doc.
+- [x] T8. `strategy_store.py`: emite estrategia optimizada como objeto + doc.
       Test: objeto tiene pasos/importancia/contribución/edge; NO escribe leyes.
       (SL-R9,R12)
 
-- [ ] T9. Candados + integración: grep anti-bot limpio en src/strategy_lab/;
+- [x] T9. Candados + integración: grep anti-bot limpio en src/strategy_lab/;
       test no_wallclock cubre strategy_lab; grep unidireccional Memoria→strategy_lab
       ausente; pytest suite sin nuevos rojos. (SL-R11,R12)
 
-- [ ] T10. Smoke E2E: corre sobre estrategia propuesta fixture + DB poblada y
+- [x] T10. Smoke E2E: corre sobre estrategia propuesta fixture + DB poblada y
       devuelve estrategia optimizada con pasos ordenados, importancia por paso y
       edge walk-forward. (SL-R2..R9)
 
@@ -72,3 +72,20 @@ Bitácora:
 - Mantiene separación de 6 responsabilidades: Laboratorio observa, Discovery
   descubre, Memoria recuerda, Strategy Lab perfecciona, Scanner consulta,
   Estrategia decide.
+
+- EJECUCIÓN 2026-07-28 (COMPLETO, 23 tests verdes): se construyó src/strategy_lab/
+  con 9 módulos (config_loader, feature_calc, strategy_parser, variant_searcher,
+  backtester, ablator, falsifier, orderer, optimizer, strategy_store). TDD estricto
+  (test verde antes de [x]). 4 correcciones de diseño durante la construcción:
+  (1) brake eliminó filtro de rango que mataba señales legítimas (LAB-001 solo
+  exige avance <10% del pico + alternancia); (2) falsifier p=1 en variantes sin
+  estructura -> optimizer descarta TODO (comportamiento correcto, no bug);
+  (3) estocástico como "reloj previo" (stoch_k_prev desplazado fwd velas) porque
+  medirlo coincidente con el pico diluye la señal; (4) optimizer con variantes
+  vacías emite estrategia sin pasos en vez de reintroducir descartados.
+  Smoke E2E sobre EURUSD M15 real (200k velas, 14 años prestados SMC): corre en
+  segundos. Hallazgo: el paso "freno" AISLADO tiene edge 42% (sobre el azar 20%),
+  pero la estrategia completa (impulso+freno+sobrecompra) se diluye a ~20% -> el
+  Lab descarta todo (falsación honesta). Ese es el punto de partida de CALIBRACIÓN
+  (usar el Lab para encontrar qué combinación SÍ tiene edge), no un fallo del Lab.
+  Candados OK: cero imports al bot, cero wallclock, cero literales en código.

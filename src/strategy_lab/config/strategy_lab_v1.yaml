@@ -1,0 +1,30 @@
+# Strategy Lab v1 — umbrales versionados (sin literales en código).
+# Toda primitiva de feature_calc lee sus parámetros de aquí.
+
+seed: 20260728
+split_year: 2022          # walk-forward: train < año, hold-out >= año
+min_sample: 200           # mínimo de señales para confiar en una tasa
+min_contribution: 0.03    # un paso debe subir el edge >= este delta para tallo
+p_cut: 0.05               # p-valor máximo para retener un paso (placebo)
+max_depth: 6              # profundidad de búsqueda de variantes
+
+# --- Primitivas calculadas desde OHLC M15 (SL-R14) ---
+stochastic:
+  k: 14
+  d: 3
+  smooth: 3
+  oversold: 20            # %K <= este valor = sobreventa (rebote alcista)
+  overbought: 80          # %K >= este valor = sobrecompra (rebote bajista)
+
+impulse:
+  window: 8               # velas M5/M15 del recorrido del impulso
+  min_pips: 30            # recorrido neto mínimo para contar como impulso
+
+brake:
+  fwd: 3                  # velas tras el pico a inspeccionar
+  max_advance_frac: 0.10  # avance tras pico <= 10% del recorrido = freno
+  require_alternation: true
+
+rebote:
+  fwd: 3                  # velas M5/M15 de ventana de rebote
+  min_pips: 8             # reversión mínima a favor para contar como rebote

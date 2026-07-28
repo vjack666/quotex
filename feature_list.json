@@ -617,7 +617,7 @@
     {
       "name": "strategy_lab",
       "title": "Strategy Lab (Laboratorio de estrategias) — perfecciona la estrategia propuesta",
-      "status": "spec_ready",
+      "status": "done",
       "sdd": true,
       "depends_on": [
         "discovery_engine",
