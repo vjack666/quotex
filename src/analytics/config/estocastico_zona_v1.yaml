@@ -1,0 +1,7 @@
+zona:
+  os: 20.0          # %K <= os  -> zona de sobreventa
+  ob: 80.0          # %K >= ob  -> zona de sobrecompra
+  peg_max: 2.0      # |%K-%D| <= peg_max -> lineas PEGADAS
+  sep_min: 5.0      # |%K-%D| >= sep_min -> lineas SEPARADAS de verdad
+  fwd: 10           # velas M15 para medir el despegue de precio
+  rebote_min_pips: 15.0
