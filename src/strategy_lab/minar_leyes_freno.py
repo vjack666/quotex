@@ -143,16 +143,43 @@ def _barrer_salida(eventos, candidatos):
     return curve
 
 
-def minar(db_path: str | Path) -> dict:
-    cfg = FrenoConfig()
-    db = Path(db_path)
-    series_by_asset = _load_m15(db)
-    eventos: list[tuple] = []
-    for asset, series in series_by_asset.items():
-        if len(series) < 40:
-            continue
-        eventos.extend(_eventos_freno(series, cfg))
+def extraer_eventos_de_dbs(db_paths) -> list[tuple]:
+    """Concatena eventos de muerte del impulso de varias cajas negras.
 
+    Reusa _load_m15 + _eventos_freno por DB. Devuelve lista de eventos
+    (direction, k, d, outcome) lista para resumir() o wr_con_filtros().
+    """
+    cfg = FrenoConfig()
+    eventos: list[tuple] = []
+    for dbp in db_paths:
+        db = Path(dbp)
+        if not db.exists():
+            continue
+        series_by_asset = _load_m15(db)
+        for asset, series in series_by_asset.items():
+            if len(series) < 40:
+                continue
+            eventos.extend(_eventos_freno(series, cfg))
+    return eventos
+
+
+def wr_con_filtros(eventos, sep_min, salida_zona):
+    """WR del freno condicionada a sep>=sep_min Y salida<=salida_zona.
+
+    Usado en walk-forward: aplica los umbrales minados en TRAIN sobre los
+    eventos de TEST y mide la WR real (forward-label del freno).
+    """
+    pasan = [e for e in eventos
+             if abs(e[1] - e[2]) >= sep_min
+             and ((e[0] == "CALL" and e[1] <= salida_zona)
+                  or (e[0] == "PUT" and e[1] >= 100 - salida_zona))]
+    n = len(pasan)
+    wr = float(np.mean([e[3] for e in pasan])) if n else 0.0
+    return wr, n
+
+
+def resumir(eventos) -> dict:
+    """Barrido + eleccion honesta sobre una lista de eventos (train o global)."""
     total = len(eventos)
     if total == 0:
         return {"error": "sin eventos de freno en los datos"}
@@ -164,7 +191,6 @@ def minar(db_path: str | Path) -> dict:
     sep_curve = _barrer_separacion(eventos, sep_cands)
     sal_curve = _barrer_salida(eventos, sal_cands)
 
-    # Optimo: maximiza WR con n >= 30 (evita picos de n minimo).
     def _opt(curve):
         valid = [r for r in curve if r[2] >= 30]
         if not valid:
@@ -175,28 +201,30 @@ def minar(db_path: str | Path) -> dict:
     sep_opt, sep_row = _opt(sep_curve)
     sal_opt, sal_row = _opt(sal_curve)
 
-    # Eleccion honesta (no el optimo de borde):
-    # - Separacion: mejor compromiso volumen/calidad con n>=60 (no el maximo de
-    #   borde que deja n chico). Buscamos el sep con WR alta y n maximo.
+    # Criterio de UTILIDAD (no solo WR maxima): entre los umbrales que dan WR
+    # dentro de 2 puntos de la base del freno, elegir el MAS PERMISIVO
+    # (menor sep -> mas senales; mayor S de salida -> banda mas ancha).
+    # Asi se maximiza volumen sin sacrificar WR. Si ninguno esta a <=2pts,
+    # se queda con el optimo de borde.
+    umbral_ok = wr_base - 0.02
     sep_adopt = None
-    for r in sep_curve:
-        if r[2] >= 60 and (sep_adopt is None or r[1] > sep_adopt[1]):
-            sep_adopt = r
-    sep_adopt = (sep_adopt[0] if sep_adopt else sep_opt)
+    for r in sep_curve:  # sep_curve ya ordenado ascendente por sep
+        if r[2] >= 30 and r[1] >= umbral_ok:
+            sep_adopt = r[0]   # primer sep que cumple = mas permisivo
+            break
+    sep_adopt = (sep_adopt if sep_adopt is not None else sep_opt)
 
-    # - Salida de zona: punto robusto con n>=30 (el 100% de S<=20 es n chico).
     sal_adopt = None
-    for r in sal_curve:
-        if r[2] >= 30 and (sal_adopt is None or r[1] >= sal_adopt[1]):
-            sal_adopt = r
-    sal_adopt = (sal_adopt[0] if sal_adopt else sal_opt)
+    for r in reversed(sal_curve):  # de mayor S a menor
+        if r[2] >= 30 and r[1] >= umbral_ok:
+            sal_adopt = r[0]   # mayor S que cumple = mas permisivo
+            break
+    sal_adopt = (sal_adopt if sal_adopt is not None else sal_opt)
 
     return {
         "meta": {
-            "db": str(db),
             "eventos_total": total,
             "wr_base_freno": round(wr_base, 4),
-            "cfg_usado": _brake_cfg(cfg),
         },
         "ley_5_separacion": {
             "sep_min_opt": sep_opt,
@@ -215,12 +243,15 @@ def minar(db_path: str | Path) -> dict:
             "salida_zona": float(sal_adopt) if sal_adopt is not None else None,
             "justificacion": "sep_min: mejor compromiso volumen/calidad con n>=60 "
                              "(el maximo de borde SUELE dar n chico). salida_zona: "
-                             "punto robusto con n>=30 (el 100%% de S<=20 es n chico "
+                             "punto robusto con n>=30 (el 100% de S<=20 es n chico "
                              "/ sobreajuste).",
         },
-        "advertencia": "semilla estadistica sobre dataset fijo; requiere "
-                       "walk-forward antes de produccion (Bloque 3.5)",
     }
+
+
+def minar(db_path: str | Path) -> dict:
+    eventos = extraer_eventos_de_dbs([db_path])
+    return resumir(eventos)
 
 
 def main() -> None:

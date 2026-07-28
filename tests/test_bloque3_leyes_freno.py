@@ -31,15 +31,16 @@ def test_miner_produce_json_con_datos_reales():
     # Curvas presentes y con el barrido completo
     assert len(out["ley_5_separacion"]["curve"]) >= 8
     assert len(out["ley_6_salida_zona"]["curve"]) >= 6
-    # Adoptados explicitos (eleccion honesta, no borde)
-    assert out["adoptados"]["sep_min"] == 2.0
+    # Adoptados explicitos (eleccion honesta walk-forward 3.5): sep redundante
+    # (WR base ya alta) -> 0.5 (no filtrar); salida_zona=30 (banda mas ancha).
+    assert out["adoptados"]["sep_min"] == 0.5
     assert out["adoptados"]["salida_zona"] == 30.0
 
 
 def test_freno_config_adopta_descubiertos():
     # El JSON existe en el repo (lo escribio el miner en este turno).
     cfg = FrenoConfig()  # __post_init__ carga el JSON
-    assert cfg.sep_min == 2.0, f"esperado 2.0 adoptado, got {cfg.sep_min}"
+    assert cfg.sep_min == 0.5, f"esperado 0.5 adoptado, got {cfg.sep_min}"
     assert cfg.salida_zona == 30.0, f"esperado 30.0 adoptado, got {cfg.salida_zona}"
 
 

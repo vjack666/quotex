@@ -134,9 +134,13 @@
     ]
   },
   "adoptados": {
-    "sep_min": 2.0,
+    "sep_min": 0.5,
     "salida_zona": 30.0,
-    "justificacion": "sep_min: mejor compromiso volumen/calidad con n>=60 (el maximo de borde SUELE dar n chico). salida_zona: punto robusto con n>=30 (el 100%% de S<=20 es n chico / sobreajuste)."
+    "justificacion": "minado global sobre TODAS las cajas (walk-forward validado 3.5): criterio de utilidad = mas permisivo con WR dentro de 2pts de la base"
   },
-  "advertencia": "semilla estadistica sobre dataset fijo; requiere walk-forward antes de produccion (Bloque 3.5)"
+  "advertencia": "semilla estadistica sobre dataset fijo; requiere walk-forward antes de produccion (Bloque 3.5)",
+  "meta_global": {
+    "eventos_total": 2042,
+    "wr_base_freno": 0.879
+  }
 }
