@@ -1,12 +1,19 @@
-"""Estudio del estocástico en zona de sobrecompra/sobreventa (teoría de Rubén).
+"""Estudio del estocástico en zona OS/OB — teoría de Rubén (versión corregida).
 
-Para cada vela M15 registra CON NÚMEROS tu secuencia:
-  - zona: fuera / OS (sobreventa) / OB (sobrecompra)
+Corrección empírica (2026-07-28): el empuje no ocurre DENTRO de la zona, sino
+en la SALIDA de ella (%K abandona OS/OB). En binarias solo se mantiene 1 vela
+M15 (15 min), así que el horizonte es fwd=1, no 10.
+
+Para cada vela M15 se registra:
+  - zona: fuera / OS (%K<=os) / OB (%K>=ob)
   - estado_lineas: PEGADAS (|K-D|<=peg_max) / SEPARADAS (>=sep_min) / ENTRE
   - cruce: +1 K cruza D hacia arriba, -1 hacia abajo, 0 sin cruce
-  - en_zona_y_separadas: K y D ambas en la zona Y separadas de verdad
-  - despegue_precio: a fwd velas el precio se movió >= rebote_min_pips en el
-    sentido del cruce (la "vela que sale volando")
+  - salida: +1 %K salió de OS hacia arriba (empuje alcista), -1 salió de OB
+    hacia abajo (empuje bajista), 0 sin salida
+  - en_zona_sep: ambas líneas en zona Y separadas (métrica vieja, para auditar)
+
+Y la métrica de binaria: tras la SALIDA de zona, ¿el precio se mueve en el
+sentido del empuje en fwd velas? Eso es la operación binaria de 15 min.
 
 Sin wallclock. Reusa el estocástico Full de feature_calc.
 """
@@ -25,8 +32,8 @@ class ZonaLabels:
     zona: np.ndarray              # 0 fuera, 1 OS, 2 OB
     estado_lineas: np.ndarray     # 0 pegadas, 1 entre, 2 separadas
     cruce: np.ndarray             # -1,0,+1
+    salida: np.ndarray            # 0, +1 (sale OS arriba), -1 (sale OB abajo)
     en_zona_sep: np.ndarray       # bool: ambas lineas en zona Y separadas
-    despegue: np.ndarray          # bool: precio se movio >= min en sentido cruce
 
 
 def _classify(z: np.ndarray, os: float, ob: float) -> np.ndarray:
@@ -36,13 +43,13 @@ def _classify(z: np.ndarray, os: float, ob: float) -> np.ndarray:
     return out
 
 
-def label_series(k: np.ndarray, d: np.ndarray, close: np.ndarray,
-                 cfg: dict[str, Any]) -> ZonaLabels:
+def classify(k: np.ndarray, d: np.ndarray, close: np.ndarray,
+             cfg: dict[str, Any]) -> ZonaLabels:
     n = len(k)
     gap = np.abs(k - d)
     estado = np.where(gap <= cfg["peg_max"], 0,
               np.where(gap >= cfg["sep_min"], 2, 1)).astype(int)
-    # cruce K vs D (signo del diferencial previo vs actual)
+
     diff = k - d
     s_prev = np.sign(diff[:-1])
     s_curr = np.sign(diff[1:])
@@ -50,27 +57,51 @@ def label_series(k: np.ndarray, d: np.ndarray, close: np.ndarray,
     cruce[1:][(s_prev < 0) & (s_curr >= 0)] = 1
     cruce[1:][(s_prev > 0) & (s_curr <= 0)] = -1
 
-    zona_k = _classify(k, cfg["os"], cfg["ob"])
+    zona = _classify(k, cfg["os"], cfg["ob"])
+    in_prev = zona[:-1]
+    exited = (in_prev != 0) & (zona[1:] == 0)
+    salida = np.zeros(n, dtype=int)
+    salida[1:][exited & (in_prev == 1)] = 1     # salió de OS hacia arriba
+    salida[1:][exited & (in_prev == 2)] = -1    # salió de OB hacia abajo
+
     zona_d = _classify(d, cfg["os"], cfg["ob"])
-    en_zona = ((zona_k != 0) & (zona_d != 0) & (zona_k == zona_d))
+    en_zona = ((zona != 0) & (zona_d != 0) & (zona == zona_d))
     en_zona_sep = en_zona & (estado == 2)
 
-    # despegue: a fwd velas, el precio se aleja >= min_pips en el sentido del cruce
+    return ZonaLabels(zona=zona, estado_lineas=estado, cruce=cruce,
+                      salida=salida, en_zona_sep=en_zona_sep)
+
+
+def binary_stats(k: np.ndarray, d: np.ndarray, close: np.ndarray,
+                 cfg: dict[str, Any], cruce_en_salida: bool = False) -> dict[str, float]:
+    """Win-rate de la operación binaria de 15 min tras la SALIDA de zona.
+
+    Señal: %K sale de OS (alcista) u OB (bajista). Opcional: exigir |K-D|>=sep
+    y/o cruce %K/%D en la salida. Win: en fwd velas el precio se mueve >= min_pips
+    en el sentido del empuje.
+    """
+    lab = classify(k, d, close, cfg)
     fwd = int(cfg["fwd"])
     min_p = float(cfg["rebote_min_pips"]) * 1e-4
-    despegue = np.zeros(n, dtype=bool)
-    move = np.zeros(n)
-    move[:n - fwd] = close[fwd:] - close[:-fwd]
-    sense = np.where(cruce > 0, 1, np.where(cruce < 0, -1, 0))
-    despegue = (sense != 0) & (np.abs(move) >= min_p)
-    # el despegue solo cuenta si ocurrio estando en zona separada
-    despegue = despegue & en_zona_sep
+    sep = float(cfg.get("sep_min_barrido", cfg.get("sep_min", 0.0)))
+    n = len(close)
+    idx_all = np.arange(n)
+    sig = (lab.salida != 0) & (idx_all + fwd < n)
+    if sep > 0:
+        sig = sig & (np.abs(k - d) >= sep)
+    if cruce_en_salida:
+        sig = sig & (lab.cruce != 0)
 
-    return ZonaLabels(
-        zona=zona_k, estado_lineas=estado, cruce=cruce,
-        en_zona_sep=en_zona_sep, despegue=despegue,
-    )
+    def _wr(mask: np.ndarray) -> tuple[int, float]:
+        ix = np.where(mask)[0]
+        if len(ix) == 0:
+            return 0, 0.0
+        move = close[ix + fwd] - close[ix]
+        win = (np.sign(move) == np.sign(lab.salida[ix])) & (np.abs(move) >= min_p)
+        return int(len(ix)), float(win.mean())
 
-
-def classify(k: np.ndarray, d: np.ndarray, close: np.ndarray, cfg: dict[str, Any]) -> ZonaLabels:
-    return label_series(k, d, close, cfg)
+    n_all, wr_all = _wr(sig)
+    n_os, wr_os = _wr(sig & (lab.salida > 0))
+    n_ob, wr_ob = _wr(sig & (lab.salida < 0))
+    return {"n": n_all, "wr": wr_all, "n_os": n_os, "wr_os": wr_os,
+            "n_ob": n_ob, "wr_ob": wr_ob}
