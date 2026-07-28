@@ -624,6 +624,63 @@
         "observador_fase_b"
       ],
       "layer": "2.6"
+    },
+    {
+      "id": 31,
+      "name": "freno_poi_filter",
+      "title": "Freno (A): módulo POI (M3) como filtro de contexto del freno",
+      "phase": "strategy_lab",
+      "priority": 31,
+      "status": "done",
+      "description": "Añadir POI (M3, zona de atención) como filtro de contexto al freno aislado (brake_eval). Objetivo: ver si operar solo donde hay estructura sube el WR de 91% o reduce señales subiendo calidad. Dueño: src/strategy_lab/poi_filter.py + tests/test_strategy_lab_poi_filter.py. Disjunto de B/C.",
+      "acceptance": [
+        "poi_filter.py puro (numpy/pandas) que marca zonas POI desde OHLC M15",
+        "freno aplicado SOLO dentro de zonas POI (filtro de contexto)",
+        "mide WR del freno filtrado vs sin filtro en 8 pares prestados",
+        "tests/test_strategy_lab_poi_filter.py verdes",
+        "cero import bot, cero time.now en lógica"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": 32,
+      "name": "observador_feed_live",
+      "title": "Observador (B): grabar mercado en vivo (recorder sobre MarketFeed)",
+      "phase": "observador",
+      "priority": 32,
+      "status": "done",
+      "sdd": true,
+      "spec_path": "specs/observador/",
+      "description": "Espec SDD del Observador + recorder.py que graba eventos CANDLE_CLOSED de un MarketFeed a parquet (caja negra local), para que la señal del freno nazca de datos frescos/OTC y se valide en entorno real. Dueño: specs/observador/{requirements,design,tasks}.md + src/marketfeed/recorder.py + tests/test_marketfeed_recorder.py. Disjunto de A/C.",
+      "verification": "recorder 6 tests verdes + E2E mío (50 velas->50 filas, schema OK, solo CANDLE_CLOSED). Spec SDD lista con puerta humana.",
+      "acceptance": [
+        "specs/observador/ con SDD (requirements/design/tasks) puerta humana",
+        "recorder.py implementa MarketFeed (graba CANDLE_CLOSED a parquet)",
+        "Regla Sagrada: un test adversarial que la grabación nunca lea el futuro",
+        "tests/test_marketfeed_recorder.py verdes",
+        "cero import bot"
+      ],
+      "depends_on": [
+        "market_replay_engine"
+      ]
+    },
+    {
+      "id": 33,
+      "name": "freno_rentabilidad",
+      "title": "Rentabilidad (C): simular edge 91% contra payout/spread real de Quotex",
+      "phase": "strategy_lab",
+      "priority": 33,
+      "status": "done",
+      "description": "Simular el edge del freno (91% WR) contra payout real de Quotex (p.ej. 80-95%) y spread/contratick para saber si es rentable tras costos. Dueño: src/strategy_lab/pnl_sim.py + scripts/simular_rentabilidad_freno.py + tests/test_strategy_lab_pnl_sim.py. Disjunto de A/B.",
+      "verification": "pnl_sim 4 tests verdes + script mío (payout 0.85): expectancy +0.6845/señal, break-even WR 0.5405, margen sobre BE +0.37. EDGE AGUANTA tras costos.",
+      "acceptance": [
+        "pnl_sim.py puro: dado WR y payout, calcula expectancy/ROI por señal",
+        "script corre sobre señales reales del freno (8 pares) con payout configurable",
+        "reporta expectancy, ROI anualizado, break-even WR",
+        "tests/test_strategy_lab_pnl_sim.py verdes",
+        "cero import bot"
+      ],
+      "depends_on": []
     }
   ]
 }
