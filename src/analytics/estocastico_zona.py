@@ -105,3 +105,38 @@ def binary_stats(k: np.ndarray, d: np.ndarray, close: np.ndarray,
     n_ob, wr_ob = _wr(sig & (lab.salida < 0))
     return {"n": n_all, "wr": wr_all, "n_os": n_os, "wr_os": wr_os,
             "n_ob": n_ob, "wr_ob": wr_ob}
+
+
+def magnitude_stats(k: np.ndarray, d: np.ndarray, close: np.ndarray,
+                    cfg: dict[str, Any], rng: np.random.Generator | None = None
+                    ) -> dict[str, float]:
+    """Magnitud del empuje tras la SALIDA de zona (no dirección).
+
+    Mide |movimiento| en fwd velas tras salir de OS/OB, y lo compara contra
+    una base aleatoria (mismas velas, índices al azar) para ver si el empuje
+    es real como EXPLOSIÓN DE VOLATILIDAD y no solo ruido direccional.
+    """
+    lab = classify(k, d, close, cfg)
+    fwd = int(cfg["fwd"])
+    n = len(close)
+    idx = np.where((lab.salida != 0) & (np.arange(n) + fwd < n))[0]
+    rng = rng or np.random.default_rng(20260728)
+    if len(idx) == 0:
+        return {"n": 0, "mean_abs_salida": 0.0, "mean_abs_base": 0.0,
+                "ratio": 0.0, "p_value": 1.0}
+    abs_sal = np.abs(close[idx + fwd] - close[idx])
+    hi = n - fwd
+    base_idx = rng.integers(0, hi, size=len(idx))
+    abs_base = np.abs(close[base_idx + fwd] - close[base_idx])
+    mean_sal = float(abs_sal.mean())
+    mean_base = float(abs_base.mean())
+    ratio = mean_sal / mean_base if mean_base else 0.0
+    n_perm = 200
+    ge = 0
+    for _ in range(n_perm):
+        b = rng.integers(0, hi, size=len(idx))
+        if np.abs(close[b + fwd] - close[b]).mean() >= mean_sal:
+            ge += 1
+    p = (ge + 1) / (n_perm + 1)
+    return {"n": int(len(idx)), "mean_abs_salida": mean_sal / 1e-4,
+            "mean_abs_base": mean_base / 1e-4, "ratio": ratio, "p_value": p}

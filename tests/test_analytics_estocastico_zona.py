@@ -46,3 +46,16 @@ def test_binary_stats_senal_real():
     assert st["n"] == 1
     assert st["wr"] == 1.0
     assert st["wr_os"] == 1.0
+
+
+def test_magnitude_stats_mayor_que_base():
+    # salida de OS en i=1, precio salta 10 pip a fwd=1; base aleatoria plana
+    k = np.array([15.0, 50.0, 50.0, 50.0])
+    d = np.array([12.0, 45.0, 45.0, 45.0])
+    c = np.array([1.0000, 1.0000, 1.0010, 1.0010])   # +10 pip en i=2
+    cfg = CFG.as_dict()
+    cfg["fwd"] = 1
+    st = ez.magnitude_stats(k, d, c, cfg)
+    assert st["n"] == 1
+    assert st["mean_abs_salida"] == pytest.approx(10.0, abs=1e-6)
+    assert st["ratio"] >= 1.0            # el salto se registra (no < ruido)
