@@ -1,53 +1,47 @@
-"""Agrega EURUSD M1 -> M15 usando los datos Dukascopy prestados de SMC-SYSTEMS.
+"""Genera M15 desde M1 (Dukascopy prestado de SMC, read-only).
 
-READ-ONLY sobre la fuente: NO se copia ni modifica el parquet de SMC.
-El resultado se guarda en data/smc_borrowed/EURUSD_M15.parquet (prestamo
-registrado, separado del repo SMC). Esto da M15 de 14 anos sin re-descargar.
-
-Uso:
-  PYTHONPATH=src .venv/Scripts/python.exe scripts/build_m15_from_m1.py
+Agrega velas M1 a M15 por ventana de 15 min alineada al reloj. Reutilizable
+para cualquier par. Salida: data/smc_borrowed/<PAR>_M15.parquet.
 """
 from __future__ import annotations
 
-import os
+import sys
+from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 
-SRC = "C:/Users/v_jac/Desktop/SMC-SYSTEMS/data/raw/EURUSD_M1.parquet"
-OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "data", "smc_borrowed")
-OUT = os.path.join(OUT_DIR, "EURUSD_M15.parquet")
+ROOT = Path(__file__).resolve().parent.parent
+SRC = Path("C:/Users/v_jac/Desktop/SMC-SYSTEMS/data/raw")
+DST = ROOT / "data" / "smc_borrowed"
 
 
-def main() -> None:
-    os.makedirs(OUT_DIR, exist_ok=True)
-    print(f"[build] leyendo {SRC}")
-    df = pq.read_table(SRC).to_pandas()
-    df = df.sort_values("time").reset_index(drop=True)
-    # time viene como datetime64[ms, UTC]; pasamos a tz-naive para agrupar por 15min.
-    t = df["time"].dt.tz_localize(None) if df["time"].dt.tz is not None else df["time"]
-    df["bucket"] = t.dt.floor("15min")
-    g = df.groupby("bucket", sort=True)
-    out = pd.DataFrame({
-        "time": g["time"].min(),
-        "open": g["open"].first(),
-        "high": g["high"].max(),
-        "low": g["low"].min(),
-        "close": g["close"].last(),
-        "tick_volume": g["tick_volume"].sum(),
-        "volume": g["volume"].sum() if "volume" in df.columns else g["tick_volume"].sum(),
-    }).reset_index(drop=True)
-    out = out.rename(columns={"bucket": "time"})
-    # descartar velas incompletas al inicio/fin (bucket sin 15min completos)
-    out = out.dropna(subset=["open", "high", "low", "close"])
-    print(f"[build] M15 filas: {len(out)}  rango: {out['time'].min()} -> {out['time'].max()}")
-    span = (out["time"].max() - out["time"].min()).days / 365.0
-    print(f"[build] ~{span:.1f} anos")
-    out.to_parquet(OUT, index=False)
-    print(f"[build] guardado en {OUT}")
+def m1_to_m15(src: Path, dst: Path) -> None:
+    df = pd.read_parquet(src)
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df = df.set_index("time").sort_index()
+    vol = "tick_volume" if "tick_volume" in df.columns else "volume"
+    agg = df.resample("15min").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last",
+        vol: "sum",
+    }).dropna()
+    agg = agg.reset_index().rename(columns={vol: "volume"})
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    agg.to_parquet(dst, index=False)
+    print(f"[OK] {src.name} -> {dst.name}: {len(agg):,} velas M15 "
+          f"({agg['time'].min()} .. {agg['time'].max()})")
+
+
+def main() -> int:
+    pairs = sys.argv[1:] or ["EURUSD", "XAUUSD"]
+    for p in pairs:
+        s = SRC / f"{p}_M1.parquet"
+        d = DST / f"{p}_M15.parquet"
+        if not s.exists():
+            print(f"[SKIP] {s} no existe")
+            continue
+        m1_to_m15(s, d)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
