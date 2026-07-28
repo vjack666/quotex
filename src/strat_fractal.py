@@ -18,6 +18,7 @@ from config import STRAT_F_SPIKE_MODE
 from config import STRAT_F_SPIKE_OBSERVE
 from config import EXTREME_READ_BODY_MIN_RATIO
 from config import STOCH_HELP_MODE
+from config import STRAT_F_FRENO_BRAIN
 
 from stochastic_m15 import compute_stoch
 from stochastic_zones import apply_stoch_help
@@ -272,6 +273,104 @@ def _spring_heuristic_5m1m(
     return None
 
 
+def _run_freno_brain(
+    candles_15m: List[Candle],
+    *,
+    stoch_m15: Optional[dict] = None,
+    payout: int = 80,
+    min_score: float = STRAT_F_MIN_SCORE,
+    sym: Optional[str] = None,
+) -> "Optional[StratFEvaluation]":
+    """Ejecuta el motor de leyes (freno = cerebro) y traduce a StratFEvaluation.
+
+    Lazy-import de strategy_lab para no acoplar el bot al laboratorio: si
+    strategy_lab no está disponible, retorna None y STRAT-F cae al fractal
+    clásico (graceful). Construye el LawContext desde las velas M15 y el
+    stoch que ya trae el scanner.
+
+    Retorna:
+    - StratFEvaluation(has_signal=True, ...) si el motor decide entrar.
+    - StratFEvaluation(has_signal=False, skip_reason=...) si el motor bloquea.
+    - None si no puede evaluar (datos insuficientes / import fallido) → el
+      caller (evaluate_strat_f) cae al fractal clásico.
+    """
+    if not candles_15m or len(candles_15m) < 35:
+        return None
+    try:
+        from strategy_lab.law_engine import LawContext, LawEngine
+        from strategy_lab.laws_freno import (
+            FrenoConfig, build_freno_laws,
+        )
+    except Exception:
+        return None  # strategy_lab ausente -> fractal clasico
+
+    import numpy as np
+    o = np.array([float(c.open) for c in candles_15m], float)
+    h = np.array([float(c.high) for c in candles_15m], float)
+    l = np.array([float(c.low) for c in candles_15m], float)
+    c = np.array([float(c.close) for c in candles_15m], float)
+
+    cfg = FrenoConfig()
+    # Pesos semilla: el Discovery los sobreescribe cuando mine las leyes.
+    # Mientras tanto, pesos proporcionales a la evidencia ya validada.
+    seed_weights = {
+        "FRENO-IMPULSO-MUERTO": 40.0,
+        "STOCH-EXTREMO": 20.0,
+        "SEPARACION-KD": 15.0,
+        "ZONA-HTF": 10.0,
+        "RECHAZO-M1": 5.0,
+    }
+    laws = build_freno_laws(cfg, lambda lid, d: seed_weights.get(lid, d))
+    eng = LawEngine(laws, lambda lid, d: seed_weights.get(lid, d))
+    ctx = LawContext(o15=o, h15=h, l15=l, c15=c, stoch_m15=stoch_m15 or {}, sym=sym)
+    res = eng.evaluate(ctx)
+    if not res.ok:
+        return StratFEvaluation(
+            has_signal=False,
+            m15_context="IMPULSE_DYING",
+            m5_event="freno",
+            direction=res.direction,
+            skip_reason=f"freno:{res.failed_at} " + (res.detail or ""),
+            info=f"FRENO-BRAIN bloqueado por {res.failed_at}: {res.detail}",
+        )
+    # Señal: normaliza la confianza (suma de pesos) a strength 0-1.
+    max_conf = sum(seed_weights.values())
+    strength = max(0.1, min(1.0, res.confianza / max_conf))
+    # R6 — score minimo (igual que el fractal clasico)
+    if strength * 100 < min_score:
+        return StratFEvaluation(
+            has_signal=False,
+            m15_context="IMPULSE_DYING",
+            m5_event="freno",
+            direction=res.direction,
+            strength=strength,
+            skip_reason=f"score freno {strength*100:.0f} < minimo {min_score}",
+            info=f"FRENO-BRAIN score {strength*100:.0f} < {min_score}",
+        )
+    # Zona simple alrededor del nivel actual para que el bot tenga contexto.
+    lvl = float(c[-1])
+    zone = ConsolidationZone(
+        asset=sym or "",
+        ceiling=lvl * 1.001,
+        floor=lvl * 0.999,
+        bars_inside=0,
+        detected_at=getattr(candles_15m[-1], "ts", 0.0),
+        range_pct=0.002,
+    )
+    return StratFEvaluation(
+        has_signal=True,
+        direction=res.direction,
+        entry_mode="REBOUND",
+        zone=zone,
+        pattern_name="freno_rebound",
+        strength=strength,
+        confirms=True,
+        m15_context="IMPULSE_DYING",
+        m5_event="freno",
+        info=f"FRENO-BRAIN OK leyes={res.passed} conf={res.confianza:.0f} dir={res.direction}",
+    )
+
+
 def evaluate_strat_f(
     candles_15m: List[Candle],
     candles_5m: List[Candle],
@@ -286,6 +385,7 @@ def evaluate_strat_f(
     stoch_m15: Optional[dict] = None,       # {k,d,k_vals,d_vals} M15 — si el scanner
                                             # lo pasa se reusa; si no, se calcula interno.
     sym: Optional[str] = None,              # símbolo del par (persistencia ALT B de la alerta)
+    freno_brain: Optional[bool] = None,     # override de STRAT_F_FRENO_BRAIN (tests)
 ) -> StratFEvaluation:
     """Evaluador puro STRAT-F (sin I/O).
 
@@ -293,13 +393,30 @@ def evaluate_strat_f(
     2. M5 busca fractal Bill Williams en una banda (zona Wyckoff).
     3. M1 confirma el rechazo en la banda.
 
+    CEREBRO DE FRENO (Ruben 2026-07-28): si STRAT_F_FRENO_BRAIN (o freno_brain
+    override) está ON, STRAT-F YA NO manda el fractal. Delega en el motor de
+    leyes (law_engine): la Ley #1 (freno / muerte del impulso M15) es el
+    disparador; el fractal queda como filtro secundario dentro de las leyes.
+    El scanner sigue consumiendo StratFEvaluation igual — no cambia el bot.
+
     Filtros de calidad (SDD strat_f_quality_validation):
     - R2 payout minimo, R3 edad minima de zona, R6 score minimo.
     """
+    _use_freno = freno_brain if freno_brain is not None else STRAT_F_FRENO_BRAIN
+
     # R2 — payout minimo
     if payout < min_payout:
         return StratFEvaluation(has_signal=False, m15_context="unknown",
                                 skip_reason=f"payout {payout}% < minimo {min_payout}%")
+
+    # CEREBRO DE FRENO: el motor de leyes manda. Si corre y decide, retorna.
+    if _use_freno:
+        r = _run_freno_brain(
+            candles_15m, stoch_m15=stoch_m15, payout=payout, min_score=min_score,
+            sym=sym,
+        )
+        if r is not None:
+            return r
 
     ctx = _m15_context(candles_15m)
     if ctx == "broken":

@@ -243,6 +243,12 @@ STRAT_F_ONLY = True  # opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
 STRAT_F_MIN_PAYOUT = 80  # overridden by web min_payout on Guardar bankroll
 STRAT_F_MIN_SCORE = 60
 STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona antes de operar
+# CEREBRO DE FRENO (Ruben 2026-07-28): STRAT-F deja de mandar el fractal y
+# pasa a ejecutar el motor de leyes (freno = Ley #1). OFF = STRAT-F fractal
+# clasico. ON = el freno manda, el fractal baja a filtro secundario.
+# Encendido para prueba en DEMO (sin riesgo de real). El Discovery alimenta
+# los pesos/umbrales; mientras tanto usa FrenoConfig semilla.
+STRAT_F_FRENO_BRAIN = True
 # Maturing zone watchlist: hold R3 "zona muy joven" until re-eval admits or drops.
 # Mode off|shadow|live (default live). Invalid env → treated as off by normalize_mode.
 MATURING_WATCHLIST_MODE = os.getenv("MATURING_WATCHLIST_MODE", "live").strip().lower()
@@ -413,9 +419,11 @@ ML_COLLECTION_START = "2026-07-23 17:18:39"
 # Si entra en minimo/maximo con cuerpo CONTRA (rebote) -> rechazar.
 # Empirico (black-box): PUT ganadoras en minimo 100% cuerpo a favor;
 # PUT perdedoras solo 67%. El gate filtra el rebote sin prohibir el spike.
-# Bandera OFF por defecto: cuando la enciendas, marca en black-box (columna
-# `extreme_read`) cuáles senales pasaron por esta lectura, para analizar.
-EXTREME_READ_ENABLED = False
+# Bandera ON por defecto (Ruben 2026-07-26): el extremo del rango es el MEJOR
+# sitio de entrada (spike), pero solo si la vela de ENTRADA tiene cuerpo a FAVOR.
+# Filtra el rebote de absorcion disfrazado de spike. Apagable si se quiere
+# analizar sin el gate.
+EXTREME_READ_ENABLED = True
 EXTREME_READ_POS = 0.15        # umbral de "extremo": top/bottom 15% del rango local
 EXTREME_READ_BODY_MIN_RATIO = 0.5  # cuerpo debe ser >=50% del rango de la vela
 
@@ -425,6 +433,22 @@ EXTREME_READ_BODY_MIN_RATIO = 0.5  # cuerpo debe ser >=50% del rango de la vela
 # maximo) — el spike con conviccion — en vez de esperar el rebote en la banda.
 # Mejora la estrategia existente; el rebote sigue vivo cuando no hay agotamiento.
 STRAT_F_SPIKE_MODE = True
+
+# MODO OBSERVACIÓN del SPIKE (Ruben 2026-07-26): cuando está ON, el motor
+# SPIKE evalúa y registra en la caja negra el desglose de las 6 condiciones
+# del spec (qué pasa / qué falla en cada ciclo de scan) PERO NO OPERA.
+# Sirve para medir con datos reales la frecuencia de disparo del setup
+# (si quedó demasiado estricto) antes de activarlo en vivo. OFF por defecto:
+# el SPIKE opera normalmente. Encender solo para la fase de medición.
+STRAT_F_SPIKE_OBSERVE = False
+
+# Condición #3 del "setup perfecto" (Ruben 2026-07-26): el stoch M5 debe estar
+# AGOTADO en el instante de la decisión STRAT-F (CALL: k<20 / PUT: k>80).
+# Si el M5 ya rebotó (k subiendo desde el fondo), RECHAZAR -> el bot NO entra en
+# la mecha del rebote, sino en el fondo del agotamiento. ON por defecto: tu setup
+# perfecto lo exige. Apagar solo si quieres volver al comportamiento previo
+# (operar en BOOST M15 aunque el M5 ya no confirme agotamiento).
+REQUIRE_M5_EXHAUSTED = True
 
 # Enhanced Kelly Criterion
 KELLY_ENABLED = True
@@ -450,3 +474,16 @@ OBSERVATION_ENABLED = True
 # IA de Zonas (Feature 28): segunda IA lectora de la memoria única. Reemplaza
 # el detector por reglas zone_memory.py. Emite zone_confidence para STRAT-A/F.
 ZONE_IA_ENABLED = True
+
+# ZONE STRENGTH (reemplazo completo de la evaluación media de S/R): modelo
+# físico de "línea imaginaria" con % de fuerza de rebote medible (grosor de
+# línea histórico + velocidad de impacto de la pierna + order-flow/ticks en el
+# rechazo). Cuando está ON, entry_scorer usa ZoneStrength en vez de
+# zone_confidence + _score_bounce + _score_extreme_direction para STRAT-F/REBOUND.
+ZONE_STRENGTH_ENABLED = True
+
+# Contexto Geométrico M15 (Feature 29): usa smc_analysis.detect_structure sobre
+# ~96 velas M15 de pares OTC para trazar soportes/resistencias del día y cruzarlo
+# con la memoria (IA de Zonas) + confirmación por cuerpo como consenso de
+# dirección en el extremo. Sin reglas, sin Bollinger, sin majors.
+MARKET_GEOMETRY_ENABLED = True
