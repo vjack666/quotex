@@ -1719,6 +1719,31 @@ class TradeExecutor:
                             _j._conn.commit()
                     return False
 
+            from stoch_cross_state import StochCrossState
+            cross_rec = StochCrossState.get().get_cross(sym, direction)
+            if cross_rec is None:
+                cross_reason = "no_active_cross"
+                log.info(
+                    "⏭ Cross state: %s %s blocked (%s)",
+                    sym,
+                    direction.upper(),
+                    cross_reason,
+                )
+                self._set_last_order_attempt(sym, direction, "failed", cross_reason)
+                if journal_cid:
+                    _j = get_journal()
+                    if _j._conn is not None:
+                        _j._conn.execute(
+                            """UPDATE candidates
+                               SET decision='REJECTED_CROSS_STATE',
+                                   reject_reason=?,
+                                   outcome='CROSS_STATE_SKIPPED'
+                               WHERE id=?""",
+                            (cross_reason, journal_cid),
+                        )
+                        _j._conn.commit()
+                return False
+
             self._set_last_order_attempt(sym, direction, "sending")
             log.info("  → buy() llamando a %s %s $%.2f %ds (event loop limpio)",
                      direction.upper(), sym, amount, duration_sec)
@@ -1763,6 +1788,7 @@ class TradeExecutor:
             return False
 
         self._set_last_order_attempt(sym, direction, "accepted")
+        StochCrossState.get().consume(sym, direction)
         if register_entry_asset:
             self._register_successful_entry_asset(sym)
 

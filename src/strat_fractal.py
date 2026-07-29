@@ -23,6 +23,7 @@ from config import STRAT_F_FRENO_BRAIN
 from stochastic_m15 import compute_stoch
 from stochastic_zones import apply_stoch_help
 from stoch_early_alert import evaluate_early_alert  # capa de alerta temprana (R-EA)
+from stoch_cross_state import StochCrossState
 
 
 @dataclass
@@ -48,6 +49,10 @@ class StratFEvaluation:
     decision: "Optional[str]" = None         # "OBSERVE" cuando el SPIKE está en modo observación (no opera)
     spike_observe: "Optional[dict]" = None   # desglose de las 6 condiciones del spec (modo observación)
     early_alert: "Optional[dict]" = None     # R-EA7: marca de alerta temprana (AJENA a has_signal); puro aviso
+    ob_cross_idx: "Optional[int]" = None     # idx del primer cruce K/D bajista post-overbought en M15
+    ob_cross_ago: "Optional[int]" = None     # velas M15 desde el cruce hasta el final de la serie
+    stoch_k_last: "Optional[float]" = None   # último %K M15 disponible (trazabilidad)
+    stoch_d_last: "Optional[float]" = None   # último %D M15 disponible (trazabilidad)
 
 
 from math_utils import fractal_up as _fractal_up, fractal_down as _fractal_down
@@ -250,6 +255,42 @@ def _spring_heuristic_5m1m(
     return None
 
 
+def _require_ob_cross(
+    k_vals: list[float],
+    d_vals: list[float],
+    direction: str,
+) -> "Optional[int]":
+    """Gate forense: exige que el estocástico haya visitado el extremo y luego
+    haya cruzado K/D en la dirección de entrada. Solo el primer cruce válido
+    post-extremo cuenta.
+
+    - PUT / freno_rebound: K tuvo que tocar >=80, luego cruzar K<D (bajista).
+    - CALL / suelo: K tuvo que tocar <=20, luego cruzar K>D (alcista).
+    """
+    if not k_vals or not d_vals:
+        return None
+    n = min(len(k_vals), len(d_vals))
+    target_extreme = 80.0 if direction == "PUT" else 20.0
+    cross_confirmed = (
+        (lambda i: i > 0 and k_vals[i - 1] >= d_vals[i - 1] and k_vals[i] < d_vals[i])
+        if direction == "PUT"
+        else (lambda i: i > 0 and k_vals[i - 1] <= d_vals[i - 1] and k_vals[i] > d_vals[i])
+    )
+    touched_extreme = False
+    for idx in range(n):
+        k = k_vals[idx]
+        d = d_vals[idx]
+        if k is None or d is None:
+            continue
+        if direction == "PUT" and k >= target_extreme:
+            touched_extreme = True
+        elif direction == "CALL" and k <= target_extreme:
+            touched_extreme = True
+        if touched_extreme and cross_confirmed(idx):
+            return idx
+    return None
+
+
 def _run_freno_brain(
     candles_15m: List[Candle],
     *,
@@ -310,6 +351,20 @@ def _run_freno_brain(
             skip_reason=f"freno:{res.failed_at} " + (res.detail or ""),
             info=f"FRENO-BRAIN bloqueado por {res.failed_at}: {res.detail}",
         )
+    # ── GATE ESTRICTO: cruce K/D bajista post-entry para PUT (orden temporal 4→6) ──
+    # Exigimos evidencia forense de que K superó >=80 y luego cruzó a la baja.
+    _m15_k = (stoch_m15 or {}).get("k_vals") or []
+    _m15_d = (stoch_m15 or {}).get("d_vals") or []
+    _ob_cross = _require_ob_cross(_m15_k, _m15_d, direction or "")
+    if _ob_cross is None:
+        return StratFEvaluation(
+            has_signal=False,
+            m15_context="IMPULSE_DYING",
+            m5_event="freno",
+            direction=res.direction,
+            skip_reason="stoch_no_ob_cross",
+            info="FRENO-BRAIN bloqueado: falta cruce K/D post-overbought para PUT",
+        )
     # Señal: normaliza la confianza (suma de pesos) a strength 0-1.
     max_conf = sum(seed_weights.values())
     strength = max(0.1, min(1.0, res.confianza / max_conf))
@@ -334,6 +389,15 @@ def _run_freno_brain(
         detected_at=getattr(candles_15m[-1], "ts", 0.0),
         range_pct=0.002,
     )
+    _freno_last_ts = getattr(candles_15m[-1], "ts", 0.0)
+    StochCrossState.get().register_cross(
+        asset=sym or "",
+        direction=res.direction or "",
+        idx=_ob_cross,
+        k_last=float((stoch_m15 or {}).get("k") or _m15_k[-1]),
+        d_last=float((stoch_m15 or {}).get("d") or _m15_d[-1]),
+        ts=str(_freno_last_ts) if _freno_last_ts is not None else None,
+    )
     return StratFEvaluation(
         has_signal=True,
         direction=res.direction,
@@ -344,6 +408,10 @@ def _run_freno_brain(
         confirms=True,
         m15_context="IMPULSE_DYING",
         m5_event="freno",
+        ob_cross_idx=_ob_cross,
+        ob_cross_ago=len(_m15_k) - 1 - _ob_cross,
+        stoch_k_last=float((stoch_m15 or {}).get("k") or _m15_k[-1]),
+        stoch_d_last=float((stoch_m15 or {}).get("d") or _m15_d[-1]),
         info=f"FRENO-BRAIN OK leyes={res.passed} conf={res.confianza:.0f} dir={res.direction}",
     )
 
@@ -439,6 +507,34 @@ def evaluate_strat_f(
         return StratFEvaluation(has_signal=False, m15_context=ctx, m5_event=event, skip_reason="CALL contra tendencia M15")
     if ctx == "uptrend" and direction == "PUT":
         return StratFEvaluation(has_signal=False, m15_context=ctx, m5_event=event, skip_reason="PUT contra tendencia M15")
+
+    # OB cross hard gate (classic path only; freno already checks inside)
+    if not _use_freno:
+        _m15_k = (stoch_m15 or {}).get("k_vals") or []
+        _m15_d = (stoch_m15 or {}).get("d_vals") or []
+        if len(_m15_k) < 2 or len(_m15_d) < 2 or len(_m15_k) != len(_m15_d):
+            return StratFEvaluation(
+                has_signal=False,
+                m15_context=ctx,
+                m5_event=event,
+                direction=direction,
+                skip_reason="stoch_m15_missing",
+                info="STRAT-F bloqueado: datos M15 incompletos para verificar cruce",
+                stoch_k_last=(_m15_k[-1] if _m15_k else None),
+                stoch_d_last=(_m15_d[-1] if _m15_d else None),
+            )
+        _ob_cross = _require_ob_cross(_m15_k, _m15_d, direction or "")
+        if _ob_cross is None:
+            return StratFEvaluation(
+                has_signal=False,
+                m15_context=ctx,
+                m5_event=event,
+                direction=direction,
+                skip_reason="stoch_no_ob_cross",
+                info="STRAT-F bloqueado: falta cruce K/D post-overbought",
+                stoch_k_last=_m15_k[-1],
+                stoch_d_last=_m15_d[-1],
+            )
 
     # M1 confirma el rechazo en la banda (R4)
     if not _m1_rejects_band(candles_1m, band, direction):
@@ -626,7 +722,7 @@ def evaluate_strat_f(
                         info=f"STRAT-F OBSERVE {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
                     )
 
-    return StratFEvaluation(
+    res = StratFEvaluation(
         has_signal=True,
         direction=direction,
         entry_mode=entry_mode,
@@ -643,9 +739,41 @@ def evaluate_strat_f(
         exhaustion_candle=exhaustion_candle,
         separation_ok=separation_ok,
         separation_rel=separation_rel,
-        early_alert=ea_dict,
+        ob_cross_idx=(
+            _require_ob_cross(
+                (stoch_m15 or {}).get("k_vals") or [],
+                (stoch_m15 or {}).get("d_vals") or [],
+                direction,
+            )
+            if not _use_freno
+            else None
+        ),
+        ob_cross_ago=None,
+        stoch_k_last=((stoch_m15 or {}).get("k") if isinstance(stoch_m15, dict) else None),
+        stoch_d_last=((stoch_m15 or {}).get("d") if isinstance(stoch_m15, dict) else None),
         info=f"STRAT-F {direction} banda={band:.5f} ctx={ctx} mode={entry_mode}{_mq_info}",
     )
+    classic_cross_idx = (
+        _require_ob_cross(
+            (stoch_m15 or {}).get("k_vals") or [],
+            (stoch_m15 or {}).get("d_vals") or [],
+            direction,
+        )
+        if _use_freno is False
+        else None
+    )
+    res.ob_cross_idx = classic_cross_idx
+    if res.has_signal and classic_cross_idx is not None:
+        _classic_ts = getattr(candles_15m[-1], "ts", 0.0)
+        StochCrossState.get().register_cross(
+            asset=sym or "",
+            direction=direction,
+            idx=classic_cross_idx,
+            k_last=res.stoch_k_last,
+            d_last=res.stoch_d_last,
+            ts=str(_classic_ts) if _classic_ts is not None else None,
+        )
+    return res
 
 
 def recheck_m15_alignment(candles_15m: List[Candle], direction: str) -> bool:

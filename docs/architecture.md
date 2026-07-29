@@ -81,8 +81,8 @@ Parámetros de sesión (`config.py`):
 
 | Capa | Módulos |
 |------|---------|
-| Facade | `consolidation_bot.py`, `main.py` |
-| Conexión | `connection.py` |
+| Facade / ejecución | `consolidation_bot.py`, `main.py`, `app.py`, `src/hub_bankroll_store.py` |
+| Conexión | `connection.py`, `src/caffeine.py`, `src/ConnectionWatchdog` |
 | Análisis | `scanner.py`, `entry_scorer.py` |
 | Estrategias | `strat_a.py`, `strat_b.py`, `strategy_spring_sweep.py`, `candle_patterns.py` |
 | Ejecución | `executor.py`, `massaniello_engine.py`, `massaniello_risk.py` |
