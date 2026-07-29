@@ -681,6 +681,20 @@
     </div>
   </div>
 
+  <!-- EVALUACIÓN DEL ESCANEO (reject reasons) -->
+  <div class="card col-6">
+    <h2>🔍 Evaluación del escaneo <span class="sub2" id="eval-cycle"></span></h2>
+    <div class="rows">
+      <div class="row"><span class="k">Activos evaluados</span><span class="v" id="eval-assets">–</span></div>
+      <div class="row"><span class="k">Candidatos (STRAT-A)</span><span class="v" id="eval-candidates">–</span></div>
+      <div class="row"><span class="k">Señales STRAT-F</span><span class="v" id="eval-sf">–</span></div>
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:6px;">
+        <span class="k" style="border-bottom:1px solid var(--border-2);padding-bottom:4px;">Razones de rechazo</span>
+        <div id="eval-rejects" style="font-size:12px;color:var(--silver);">—</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ACEPTADAS -->
   <div class="card col-6">
     <h2>✅ Señales aceptadas <span class="sub2" id="acc-count">0</span></h2>
@@ -690,9 +704,6 @@
     </table>
     <div class="barwrap"><i id="bar-acc" style="width:0%"></i></div>
   </div>
-
-  <!-- RECHAZADAS: eliminado del hub por decisión del usuario (2026-07-26). -->
-  <!-- El detalle de rechazos vive en el black box, no en el dashboard. -->
 
   <!-- MADURANDO (R3 young watchlist) -->
   <div class="card col-12">
@@ -1102,6 +1113,24 @@ function render(s){
   setText("a-wins", s.live_wins);
   setText("a-losses", s.live_losses);
   setText("a-assets", s.total_assets_scanned || sf.total_assets);
+
+  // ---- Evaluación del escaneo (reject reasons) ----
+  const ev = s.last_scan_eval || {};
+  setText("eval-cycle", ev.cycle != null ? `ciclo #${ev.cycle}` : "");
+  setText("eval-assets", ev.assets);
+  setText("eval-candidates", ev.candidates);
+  setText("eval-sf", ev.strat_f_accepts != null ? ev.strat_f_accepts : "–");
+  const erEl = document.getElementById("eval-rejects");
+  if (ev.reject_counts && Object.keys(ev.reject_counts).length > 0) {
+    const parts = [];
+    for (const [reason, count] of Object.entries(ev.reject_counts)) {
+      const label = reason.replace(/^[AF]:/,""); // strip prefix
+      parts.push(`<span style="display:inline-block;background:var(--surface-3);border-radius:4px;padding:2px 8px;margin:2px 4px 2px 0;white-space:nowrap;"><span style="color:var(--orange);font-weight:510;">${label}</span> <span style="color:var(--muted);">×${count}</span></span>`);
+    }
+    erEl.innerHTML = parts.join("");
+  } else {
+    erEl.textContent = "—";
+  }
 
   // ---- STRAT-F aceptadas ----
   const acc = sf.accepted || [];
@@ -2049,12 +2078,6 @@ function refreshBankroll(force){
 
 function saveBankroll(){
   const msg = document.getElementById("br-msg");
-  if(_brLocked){
-    msg.style.display = "block";
-    msg.style.color = "var(--orange)";
-    msg.textContent = "Sesión en curso: capital/Ops/ITM/payout se desbloquean al terminar (o al detener el bot).";
-    return;
-  }
   const raw = parseFloat(document.getElementById("br-assigned").value);
   let ops = parseInt(document.getElementById("br-ops").value, 10);
   let itm = parseInt(document.getElementById("br-itm").value, 10);

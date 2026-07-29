@@ -393,12 +393,10 @@ async def get_config():
 
 
 @_hub_app.post("/api/config")
-async def update_config(body: dict[str, Any]):
-    """Update bot configuration (only when bot is stopped)."""
-    if _runner.state in ("running", "starting"):
-        return {"error": "Cannot change config while bot is running. Stop it first."}
+async def update_config(body: dict[str, Any]) -> dict[str, Any]:
+    """Update bot configuration and apply bankroll shape immediately."""
     log = logging.getLogger("app")
-    # Audit trail: what the user committed from the hub
+    # Audit trail
     keys_of_interest = (
         "massaniello_ops",
         "massaniello_wins",
@@ -415,6 +413,11 @@ async def update_config(body: dict[str, Any]):
     interesting = {k: body.get(k) for k in keys_of_interest if k in body}
     if interesting:
         log.info("HUB config save (antes de aplicar): %s", interesting)
+
+    # Check if this is a bankroll shape update (ops/ITM/capital/payout)
+    bankroll_keys = ("massaniello_ops", "massaniello_wins", "massaniello_virtual_capital", "min_payout")
+    is_bankroll_update = any(k in body for k in bankroll_keys)
+
     _runner.update_config(**body)
     cfg = _runner.get_config()
     log.info(
@@ -427,6 +430,23 @@ async def update_config(body: dict[str, Any]):
         cfg.get("schedule_mode"),
         cfg.get("duration_min"),
     )
+
+    # If bankroll shape changed, apply immediately to running bot's manager
+    if is_bankroll_update:
+        try:
+            bot = _runner.bot
+            if bot is not None and hasattr(bot, "massaniello") and bot.massaniello is not None:
+                from hub_bankroll_store import apply_bankroll_shape_to_manager
+                apply_bankroll_shape_to_manager(bot.massaniello, force=True)
+                log.info(
+                    "Bankroll shape aplicada en vivo: %s ops / %s ITM | capital=$%s",
+                    cfg.get("massaniello_ops"),
+                    cfg.get("massaniello_wins"),
+                    cfg.get("massaniello_virtual_capital"),
+                )
+        except Exception as exc:
+            log.warning("No se pudo aplicar bankroll shape en vivo: %s", exc)
+
     return {"status": "updated", "config": cfg}
 
 

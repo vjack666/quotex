@@ -62,7 +62,14 @@ def save_bankroll(settings: dict[str, Any], path: Path = DEFAULT_PATH) -> None:
 
 
 def apply_bankroll_shape_to_manager(manager: Any, *, force: bool = False) -> None:
-    """Push live config module ops/ITM onto manager when safe (no progress)."""
+    """Push live config module ops/ITM onto manager.
+
+    By default, if the session already has wins/losses we keep the current
+    shape because a live Massaniello sequence should not change mid-flight.
+    Call with `force=True` to override this and reset the manager to the
+    current config values (used when the user explicitly updates the hub
+    bankroll inputs and expects them to take effect immediately).
+    """
     import config as cfg
 
     played = int(getattr(manager, "wins", 0) or 0) + int(getattr(manager, "losses", 0) or 0)

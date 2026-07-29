@@ -55,3 +55,14 @@ def test_apply_shape_skips_when_progress(monkeypatch):
     apply_bankroll_shape_to_manager(mgr, force=False)
     assert mgr.operations == 5
     assert mgr.expected_wins == 3
+
+
+def test_apply_shape_forces_even_with_progress(monkeypatch):
+    monkeypatch.setattr(cfg, "MASSANIELLO_OPERATIONS", 7)
+    monkeypatch.setattr(cfg, "MASSANIELLO_EXPECTED_WINS", 4)
+    mgr = MassanielloRiskManager(operations=5, expected_wins=3)
+    mgr.wins = 2
+    mgr.losses = 1
+    apply_bankroll_shape_to_manager(mgr, force=True)
+    assert mgr.operations == 7
+    assert mgr.expected_wins == 4
