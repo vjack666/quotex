@@ -73,25 +73,24 @@ def compute_brake_and_rebote(open_: np.ndarray, high: np.ndarray, low: np.ndarra
     # (replica feature_calc: c[i+1:i+1+fwd], no incluye i)
     fwd_lo = np.empty_like(c); fwd_lo[:-fwd] = _roll_min(c, fwd)[fwd:]
     fwd_hi = np.empty_like(c); fwd_hi[:-fwd] = _roll_max(c, fwd)[fwd:]
-    adv_up_full = fwd_lo - peak_dn             # net>0: bajó desde el peak
-    adv_dn_full = peak_up - fwd_hi            # net<0: subió desde el mínimo
+    adv_up_full = fwd_hi - peak_up             # net>0: fwd max vs peak (nuevo max = sigue vivo)
+    adv_dn_full = peak_dn - fwd_lo            # net<0: trough vs fwd min (nuevo min = sigue vivo)
     adv = np.full(n, np.inf)
     seg = slice(L, n - fwd)
     adv[seg] = np.where(net[seg] > 0, adv_up_full[seg], adv_dn_full[seg])
-    achic = np.abs(adv) <= max_adv * np.abs(net)
-    brake = big & achic
+    # signed comparison: solo un nuevo extremo mata el brake (coincide con feature_calc)
+    brake = big & (adv <= max_adv * np.abs(net))
     if alt:
-        sub_sign = np.sign(body)
-        changes = (sub_sign[1:] != sub_sign[:-1]) & (sub_sign[1:] != 0)
-        # changes[j] = True si entre vela j y j+1 hubo cambio de signo
-        # queremos any(changes[i+1 : i+fwd]) para la ventana [i+1, i+fwd]
-        w = max(fwd - 1, 1)
-        ch_w = sliding_window_view(changes, w)     # (len-w+1, w)
-        has_alt = np.zeros(n, dtype=bool)
-        # ch_w[j] cubre changes[j : j+w]; anclado en i+1 -> j = i+1
-        if ch_w.shape[0] > 0:
-            has_alt[1:1 + ch_w.shape[0]] = ch_w.any(axis=1)
-        brake[:n - fwd] = brake[:n - fwd] & has_alt[:n - fwd]
+        # alternancia de signo del cuerpo en [i+1, i+fwd] (coincide con feature_calc)
+        # body[i+1:i+1+fwd] con signo -> np.any(np.diff(np.sign(sub)) != 0)
+        b = body[1:]                        # length n-1
+        if n > fwd:
+            win = sliding_window_view(b, fwd)            # (n-fwd, fwd): win[i] = body[i+1:i+1+fwd]
+            signs = np.sign(win)
+            # diffs[i] = signos cambian entre velas adyacentes dentro de la ventana
+            diffs = np.diff(signs, axis=1)               # (n-fwd, fwd-1)
+            has_changes = np.any(diffs != 0, axis=1)     # (n-fwd,)
+            brake[:n - fwd] = brake[:n - fwd] & has_changes
 
     rb = cfg["rebote"]
     rfwd = int(rb["fwd"])

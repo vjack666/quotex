@@ -13,6 +13,7 @@ from config import (
     H1_CANDLES_LOOKBACK,
     H1_FETCH_TIMEOUT_SEC,
     H1_TF_SEC,
+    HISTORICAL_M15_COUNT,
     MIN_CONSOLIDATION_BARS,
     ORDER_BLOCK_CANDLES,
     ORDER_BLOCK_TF_SEC,
@@ -269,3 +270,45 @@ async def prefetch_strat_a_secondary(
         blocks_by_symbol[sym] = await asyncio.to_thread(detect_order_blocks, ob)
 
     return candles_ob, candles_h1, ob_tf_labels, blocks_by_symbol
+
+
+async def prefetch_historical_m15_initial(
+    client: Any,
+    symbols: list[str],
+    cache: "CandleCache | None",
+    concurrency: int,
+    *,
+    ws_sem: "asyncio.Semaphore | None" = None,
+) -> dict[str, list[Candle]]:
+    """Precarga histórico M15 (30 días) al conectar.
+
+    Solo se usa en el primer ciclo del scanner cuando el bot no tiene datos
+    históricos M15 suficientes. Usa HISTORICAL_M15_COUNT (2880 velas = 30 días).
+
+    Devuelve dict[asset] = lista de velas M15 históricas.
+    """
+    if not symbols:
+        return {}
+
+    sem = ws_sem if ws_sem is not None else asyncio.Semaphore(max(1, int(concurrency)))
+    tasks = []
+    for sym in symbols:
+        tasks.append(
+            _fetch_with_optional_stagger(
+                sem,
+                client,
+                sym,
+                TF_15M,
+                HISTORICAL_M15_COUNT,
+                timeout_sec=CANDLE_FETCH_TIMEOUT_SEC,
+                cache=cache,
+                retries=2,
+            )
+        )
+
+    results = await asyncio.gather(*tasks)
+    candles_15m: dict[str, list[Candle]] = {}
+    for sym, tf_sec, candles in results:
+        if tf_sec == TF_15M:
+            candles_15m[sym] = candles
+    return candles_15m

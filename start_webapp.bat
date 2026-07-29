@@ -1,8 +1,14 @@
 @echo off
 REM ============================================================================
-REM ONE process: this console runs app.py.
+REM SINGLE INSTANCE: this console runs main.py (BOT + dashboard HUB in ONE
+REM process). main.py is the UNIQUE executor: levanta el bot DEMO y el HUB
+REM integrado, y le pasa el bot al HUB para panel STRAT-F en vivo.
 REM On ANY exit (Ctrl+C, X, crash, code != 0): full cleanup, NO "press a key".
 REM Window closes; no python / Edge hub zombies left.
+REM
+REM Ruben 2026-07-26: main.py = unico ejecutor (bot+HUB unificados). El acceso
+REM directo del escritorio lo levanta. Single-instance guard mata instancias
+REM previas para quedar EXACTAMENTE UNA.
 REM ============================================================================
 setlocal EnableExtensions
 title QUOTEX Web App
@@ -12,6 +18,8 @@ set "PORT=8080"
 set "PY=%~dp0.venv\Scripts\python.exe"
 set "URL=http://127.0.0.1:%PORT%/"
 set "HUB_NO_OPEN="
+REM Agente vivo STRAT-F: aprende de cada trade resuelto en tiempo real (Ruben 2026-07-24).
+set "AGENT_LIVE=1"
 set "CLEANUP=%~dp0scripts\cleanup_webapp_orphans.ps1"
 
 if not exist "%PY%" (
@@ -19,32 +27,31 @@ if not exist "%PY%" (
   call :full_cleanup
   exit /b 1
 )
-if not exist "%~dp0app.py" (
-  echo [ERROR] Missing app.py
+if not exist "%~dp0main.py" (
+  echo [ERROR] Missing main.py
   call :full_cleanup
   exit /b 1
 )
 
-REM Case A: already healthy - open hub once and exit (no second server)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:%PORT%/api/bot/status' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
-if %ERRORLEVEL% equ 0 (
-  echo [OK] Server already running.
-  echo [OK] Opening hub dashboard...
-  if exist "%~dp0scripts\open_hub_when_ready.ps1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\open_hub_when_ready.ps1" -Port %PORT% -MaxAttempts 3
-  )
-  exit /b 0
-)
-
-REM Case B: cold start
+REM --- SINGLE INSTANCE GUARD ------------------------------------------------
+REM Garantizar EXACTAMENTE UNA instancia: matar cualquier instancia previa de
+REM este proyecto (app.py + bot + uvicorn + Edge hub + otros .bat del acceso
+REM directo) antes de arrancar. El acceso directo puede usarse varias veces;
+REM el ultimo que arranca mata a los anteriores y queda uno solo.
 if exist "%CLEANUP%" (
-  echo [..] Cleaning previous orphans...
+  echo [..] Single-instance guard: killing previous instances...
   powershell -NoProfile -ExecutionPolicy Bypass -File "%CLEANUP%"
 )
+REM Kill-and-verify loop: asegurar EXACTAMENTE 0 instancias de app.py de este
+REM proyecto antes de arrancar (evita bots duplicados por timing/race).
+REM Tambien mata el Edge hub: si el hub revivia el server, aparecerian bots
+REM duplicados. Se mata en bucle hasta 0 app.py.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$n=1; while($n -gt 0){ $p=Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object { ($_.CommandLine -like '*main.py*') -or ($_.CommandLine -like '*app.py*') -or ($_.CommandLine -like '*quotex_hub_edge*') }; $n=$p.Count; if($n -gt 0){ $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }; Start-Sleep -Milliseconds 500 } }; Write-Host '[OK] 0 instancias previas (main.py/app.py/hub)'"
+timeout /t 2 >nul
 
 echo.
 echo ============================================================
-echo   QUOTEX Web App - single process
+echo   QUOTEX Web App - single instance (bot + dashboard unificados via main.py)
 echo   %URL%
 echo.
 echo   Hub opens automatically
@@ -52,7 +59,7 @@ echo   Close window or Ctrl+C = full stop + cleanup (no pause)
 echo ============================================================
 echo.
 
-"%PY%" app.py --port %PORT%
+"%PY%" app.py
 set "RC=%ERRORLEVEL%"
 
 echo.

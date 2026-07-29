@@ -79,7 +79,8 @@ def test_render_contains_sections():
     panel = render_dashboard(snap)
     assert "STRAT-F" in panel
     assert "ACEPTADAS" in panel
-    assert "RECHAZADAS" in panel
+    # El hub ya NO muestra la sección de rechazadas (Ruben: no la necesita allí).
+    assert "RECHAZADAS" not in panel
     assert "USDPKR_otc" in panel     # aceptada
-    assert "AUDNZD_otc" in panel     # rechazada
+    assert "AUDNZD_otc" not in panel  # rechazada ya no se lista en el hub
     assert "Principio" in panel

@@ -1,27 +1,17 @@
-"""Fixtures compartidas para tests del bot."""
-from __future__ import annotations
+"""Pytest fixture: asegura que scripts/ sea importable como modulo.
+
+El agente offline vive en scripts/agent_review.py y no es un paquete;
+lo agregamos al sys.path para que `import agent_review` funcione en tests.
+"""
 
 import os
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock
 
-# Isolate tests from live hub bankroll (min_payout=90 etc.) BEFORE any config import.
-os.environ.setdefault("QUOTEX_TEST_MODE", "1")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SCRIPTS = os.path.join(_ROOT, "scripts")
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
 
-ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-# Project root on path so `import hub` / `import app` work in lifecycle tests.
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-# Mock pyquotex antes de importar módulos del bot (tests sin broker real).
-if "pyquotex" not in sys.modules:
-    _pyquotex = MagicMock()
-    _stable = MagicMock()
-    _stable.Quotex = MagicMock
-    _pyquotex.stable_api = _stable
-    sys.modules["pyquotex"] = _pyquotex
-    sys.modules["pyquotex.stable_api"] = _stable
+_SRC = os.path.join(_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)

@@ -79,18 +79,7 @@ class StratAEvaluation:
     force_execute: bool = False
 
 
-def _clamp(val: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, val))
-
-
-def _ema(values: List[float], period: int) -> List[float]:
-    if len(values) < period:
-        return []
-    k = 2 / (period + 1)
-    result = [mean(values[:period])]
-    for v in values[period:]:
-        result.append(v * k + result[-1] * (1 - k))
-    return result
+from math_utils import clamp, ema
 
 
 def avg_body(candles: List[Candle], n: int = VOLUME_LOOKBACK) -> float:
@@ -129,8 +118,8 @@ def infer_h1_trend(candles_h1: List[Candle]) -> str:
     if len(candles_h1) < H1_EMA_SLOW + 5:
         return "neutral"
     closes = [c.close for c in candles_h1]
-    ef = _ema(closes, H1_EMA_FAST)
-    es = _ema(closes, H1_EMA_SLOW)
+    ef = ema(closes, H1_EMA_FAST)
+    es = ema(closes, H1_EMA_SLOW)
     if not ef or not es:
         return "neutral"
     ef_last = ef[-1]
@@ -574,14 +563,14 @@ def compute_dynamic_range(candles: List[Candle]) -> tuple[float, float, float]:
         mid = candles[-1].close if candles[-1].close > 0 else 0.0
         if atr > 0 and mid > 0:
             atr_pct = atr / mid
-            dynamic_max_range = _clamp(
+            dynamic_max_range = clamp(
                 atr_pct * ATR_RANGE_FACTOR,
                 MIN_DYNAMIC_RANGE_PCT,
                 MAX_DYNAMIC_RANGE_PCT,
             )
     dynamic_touch_tolerance = TOUCH_TOLERANCE_PCT
     if atr_pct > 0:
-        dynamic_touch_tolerance = _clamp(atr_pct * 0.12, 0.00015, 0.00080)
+        dynamic_touch_tolerance = clamp(atr_pct * 0.12, 0.00015, 0.00080)
     return dynamic_max_range, atr_pct, dynamic_touch_tolerance
 
 

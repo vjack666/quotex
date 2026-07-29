@@ -185,6 +185,9 @@
   .ctrl-btn.stop:hover:not(:disabled) { background: #d94040; }
   .ctrl-btn.shutdown { background: #555; color:#fff; font-size:11px; padding:4px 10px; }
   .ctrl-btn.shutdown:hover { background: #333; }
+  .ctrl-btn.force-kill { background: #b91c1c; color:#fff; font-size:11px; padding:4px 10px; animation: pulse-forcekill 1.5s ease-in-out infinite; }
+  .ctrl-btn.force-kill:hover:not(:disabled) { background: #991b1b; }
+  @keyframes pulse-forcekill { 0%,100%{opacity:1} 50%{opacity:.6} }
   .ctrl-btn.reconnect { background: var(--orange); color:#fff; font-size:11px; padding:4px 10px; }
   .ctrl-btn.reconnect:hover:not(:disabled) { background: #e07830; }
   .ctrl-btn.reconnect.reconnecting { animation: pulse-reconnect 1s ease-in-out infinite; }
@@ -558,6 +561,7 @@
   <span class="ctrl-state stopped" id="ctrl-state">STOPPED</span>
   <button class="ctrl-btn start" id="btn-toggle" onclick="botToggle()">Iniciar</button>
   <button class="ctrl-btn reconnect" id="btn-reconnect" onclick="reconnectBot()" style="display:none;" title="Reconectar WebSocket al broker">🔄 Reconectar</button>
+  <button class="ctrl-btn force-kill" id="btn-force-kill" onclick="forceKillBot()" style="display:none;" title="Forzar detención del bot (zombie)">☠ Matar</button>
   <span class="ctrl-state stopped" id="schedule-badge" style="display:none;" title="Estado del schedule"></span>
   <span class="ctrl-spacer"></span>
   <button class="ctrl-btn shutdown" onclick="shutdownApp()">Finalizar</button>
@@ -687,15 +691,8 @@
     <div class="barwrap"><i id="bar-acc" style="width:0%"></i></div>
   </div>
 
-  <!-- RECHAZADAS -->
-  <div class="card col-6">
-    <h2>❌ Rechazadas (y por qué) <span class="sub2" id="rej-count">0</span></h2>
-    <table>
-      <thead><tr><th>Activo</th><th>Motivo</th></tr></thead>
-      <tbody id="rej-body"><tr><td class="empty" colspan="2">ninguna rechazada</td></tr></tbody>
-    </table>
-    <div class="barwrap rej"><i id="bar-rej" style="width:0%"></i></div>
-  </div>
+  <!-- RECHAZADAS: eliminado del hub por decisión del usuario (2026-07-26). -->
+  <!-- El detalle de rechazos vive en el black box, no en el dashboard. -->
 
   <!-- MADURANDO (R3 young watchlist) -->
   <div class="card col-12">
@@ -1125,16 +1122,8 @@ function render(s){
     accB.appendChild(tr);
   });
 
-  // ---- STRAT-F rechazadas ----
-  const rej = sf.rejected || [];
-  const rejB = document.getElementById("rej-body"); rejB.innerHTML="";
-  document.getElementById("rej-count").textContent = rej.length;
-  if(rej.length===0){ rejB.innerHTML='<tr><td class="empty" colspan="2">ninguna rechazada</td></tr>'; }
-  else rej.forEach(c=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML = `<td class="asset">${c.asset||""}</td><td class="reason">${reasonLabel(c.skip_reason||"")}</td>`;
-    rejB.appendChild(tr);
-  });
+  // ---- STRAT-F rechazadas: panel eliminado del hub (2026-07-26). ----
+  // El detalle de rechazos se consulta en el black box, no en el dashboard.
 
   // ---- STRAT-F madurando (R3 young watchlist) ----
   const mat = sf.maturing || [];
@@ -1162,11 +1151,11 @@ function render(s){
     }
   }
 
-  // ---- Barras aceptadas/rechazadas ----
-  const total = acc.length + rej.length;
-  const pct = total ? Math.round(acc.length/total*100) : 0;
-  document.getElementById("bar-acc").style.width = pct+"%";
-  document.getElementById("bar-rej").style.width = (100-pct)+"%";
+  // ---- Barras aceptadas (rechazadas eliminadas del hub) ----
+  const total = acc.length;
+  const pct = total ? 100 : 0;
+  const barAcc = document.getElementById("bar-acc");
+  if (barAcc) barAcc.style.width = pct + "%";
 }
 
 const dot = document.getElementById("conn-dot");
@@ -1357,13 +1346,27 @@ function updateRunnerUI(runner){
     btn.disabled = false;
     setBankrollLocked(false);
   }
+  // Show force-kill button when zombie detected (stopped but task still alive)
+  const fkBtn = document.getElementById("btn-force-kill");
+  if(fkBtn){
+    if(runner.zombie){
+      fkBtn.style.display = "";
+      fkBtn.title = "El bot quedó zombie — forzar detención";
+    } else {
+      fkBtn.style.display = "none";
+    }
+  }
   // Info line
   const info = document.getElementById("ctrl-info");
   if(st==="running"){
     const up = runner.uptime_sec!=null ? Math.floor(runner.uptime_sec)+"s" : "";
     info.textContent = up ? "uptime: "+up : "";
+  } else if(runner.zombie){
+    info.textContent = "⚠ Zombie detectado";
+    info.style.color = "#f44";
   } else {
     info.textContent = "";
+    info.style.color = "";
   }
   // Update session info if available
   if(runner.session) updateSessionInfo(runner.session);
@@ -1411,16 +1414,26 @@ function botToggle(){
   const st = document.getElementById("ctrl-state").textContent;
   if(st==="RUNNING" || st==="STARTING"){
     btn.disabled = true;
+    btn.textContent = "Deteniendo…";
     fetch("/api/bot/stop",{method:"POST"}).then(r=>r.json()).then(d=>{
       updateRunnerUI(d);
       pollRunnerStatus();
-    }).catch(()=>{ btn.disabled = false; });
+    }).catch(()=>{ btn.disabled = false; btn.textContent = "Detener"; });
   } else {
     btn.disabled = true;
+    btn.textContent = "Iniciando…";
     fetch("/api/bot/start",{method:"POST"}).then(r=>r.json()).then(d=>{
+      if(d.zombie){
+        // Zombie detected — show force-kill button, re-enable start
+        btn.disabled = false;
+        btn.textContent = "Iniciar";
+        updateRunnerUI(d);
+        pollRunnerStatus();
+        return;
+      }
       updateRunnerUI(d);
       pollRunnerStatus();
-    }).catch(()=>{ btn.disabled = false; });
+    }).catch(()=>{ btn.disabled = false; btn.textContent = "Iniciar"; });
   }
 }
 
@@ -1454,6 +1467,23 @@ function reconnectBot(){
     btn.disabled = false;
     btn.classList.remove("reconnecting");
     btn.textContent = "⚠ Error — reiniciar";
+  });
+}
+
+// ── Force Kill (zombie recovery) ───────────────────────────────────────────
+function forceKillBot(){
+  if(!confirm("¿Forzar detención del bot? Útil si quedó zombie.")) return;
+  const btn = document.getElementById("btn-force-kill");
+  btn.disabled = true;
+  btn.textContent = "☠ Matando…";
+  fetch("/api/bot/force_kill",{method:"POST"}).then(r=>r.json()).then(d=>{
+    btn.disabled = false;
+    btn.textContent = "☠ Matar";
+    btn.style.display = "none";
+    pollRunnerStatus();
+  }).catch(()=>{
+    btn.disabled = false;
+    btn.textContent = "☠ Matar";
   });
 }
 

@@ -41,7 +41,48 @@ CREATE TABLE IF NOT EXISTS pressure_points (
     confidence REAL,
     formula_version TEXT
 );
+CREATE TABLE IF NOT EXISTS episode_evolution (
+    episode_id INTEGER,
+    bar_index INTEGER,
+    ts REAL,
+    price REAL,
+    distance_pips REAL,
+    mfe REAL,
+    mae REAL,
+    state TEXT,
+    vars_json TEXT,
+    vars_version TEXT,
+    PRIMARY KEY (episode_id, bar_index)
+);
+CREATE TABLE IF NOT EXISTS episode_summary (
+    episode_id INTEGER PRIMARY KEY,
+    quality REAL,
+    velocity TEXT,
+    violence TEXT,
+    curve_shape TEXT,
+    symmetry REAL,
+    episode_type TEXT,
+    duration_bars INTEGER,
+    mfe REAL,
+    mae REAL,
+    end_reason TEXT,
+    end_confidence REAL,
+    finished INTEGER,
+    capture_limit INTEGER
+);
+CREATE TABLE IF NOT EXISTS episode_version (
+    episode_id INTEGER PRIMARY KEY,
+    vars_version TEXT,
+    summary_version TEXT
+);
 """
+
+_EVOLUTION_FIELDS = ("bar_index", "ts", "price", "distance_pips", "mfe",
+                     "mae", "state", "vars_json", "vars_version")
+_SUMMARY_FIELDS = ("episode_id", "quality", "velocity", "violence",
+                   "curve_shape", "symmetry", "episode_type", "duration_bars",
+                   "mfe", "mae", "end_reason", "end_confidence", "finished",
+                   "capture_limit")
 
 _STATE_FIELDS = ("state", "ts_enter", "trigger_raw", "trigger_norm",
                  "trigger_confidence", "trigger_formula")
@@ -144,6 +185,61 @@ class EpisodeStore:
                 (row["id"],))
         ]
         return episode
+
+    # -- Fase B ---------------------------------------------------------
+    def save_evolution(self, episode_id: int, rows: list[dict]) -> None:
+        """UPSERT de filas de evolución por (episode_id, bar_index)."""
+        self._conn.executemany(
+            "INSERT INTO episode_evolution (episode_id, bar_index, ts, price, "
+            "distance_pips, mfe, mae, state, vars_json, vars_version) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(episode_id, bar_index) DO UPDATE SET "
+            "ts=excluded.ts, price=excluded.price, "
+            "distance_pips=excluded.distance_pips, mfe=excluded.mfe, "
+            "mae=excluded.mae, state=excluded.state, "
+            "vars_json=excluded.vars_json, vars_version=excluded.vars_version",
+            [(episode_id,) + tuple(r[f] for f in _EVOLUTION_FIELDS)
+             for r in rows],
+        )
+        self._conn.commit()
+
+    def save_summary(self, summary: dict) -> None:
+        """UPSERT de episode_summary por episode_id (+ episode_version)."""
+        placeholders = ",".join("?" for _ in _SUMMARY_FIELDS)
+        sets = ",".join(f"{f}=excluded.{f}" for f in _SUMMARY_FIELDS[1:])
+        self._conn.execute(
+            f"INSERT INTO episode_summary ({','.join(_SUMMARY_FIELDS)}) "
+            f"VALUES ({placeholders}) "
+            f"ON CONFLICT(episode_id) DO UPDATE SET {sets}",
+            tuple(summary.get(f) for f in _SUMMARY_FIELDS),
+        )
+        if "vars_version" in summary or "summary_version" in summary:
+            self._conn.execute(
+                "INSERT INTO episode_version (episode_id, vars_version, "
+                "summary_version) VALUES (?,?,?) "
+                "ON CONFLICT(episode_id) DO UPDATE SET "
+                "vars_version=excluded.vars_version, "
+                "summary_version=excluded.summary_version",
+                (summary["episode_id"], summary.get("vars_version"),
+                 summary.get("summary_version")),
+            )
+        self._conn.commit()
+
+    def get_evolution(self, episode_id: int) -> list:
+        return [
+            {f: r[f] for f in _EVOLUTION_FIELDS}
+            for r in self._conn.execute(
+                "SELECT * FROM episode_evolution WHERE episode_id=? "
+                "ORDER BY bar_index", (episode_id,))
+        ]
+
+    def get_summary(self, episode_id: int):
+        row = self._conn.execute(
+            "SELECT * FROM episode_summary WHERE episode_id=?",
+            (episode_id,)).fetchone()
+        if row is None:
+            return None
+        return {f: row[f] for f in _SUMMARY_FIELDS}
 
     def count_episodes(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]

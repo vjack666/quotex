@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from config import DURATION_SEC, MIN_PAYOUT
 
@@ -67,6 +67,9 @@ class CandidateEntry:
     candles_h1: List[Candle] = field(default_factory=list)
     candles_15m: List[Candle] = field(default_factory=list)
     zone_confidence: Optional[float] = None  # Feature 28: salida cruda de la IA de Zonas
+    geometry: Optional[Any] = None  # Feature 29: contexto geométrico M15 (dict de market_geometry_ctx)
+    math_quality: Optional[dict] = None  # Feature: calidad geométrica (hurst/r2/angle/squeeze)
+    reject_reason: Optional[str] = None  # motivo de rechazo (p.ej. WEAK_LINE_STRENGTH)
 
     def __str__(self) -> str:
         bd = self.score_breakdown

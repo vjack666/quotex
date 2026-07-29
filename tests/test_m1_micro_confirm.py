@@ -111,7 +111,9 @@ def test_call_not_blocked_when_bullish():
 
 
 def test_config_enabled_by_default():
-    assert cfg.M1_MICRO_CONFIRM_ENABLED is True
+    # Ruben 2026-07-24: el bot debe operar lo que el escaneo elija (OTC), sin
+    # un filtro M1 extra que anule la decision. Flag OFF a proposito.
+    assert cfg.M1_MICRO_CONFIRM_ENABLED is False
 
 
 def _zone(asset: str = "EURUSD_otc") -> ConsolidationZone:
@@ -171,7 +173,9 @@ def _ok_timing() -> EntryTimingInfo:
 
 
 @pytest.mark.asyncio
-async def test_enter_trade_blocks_on_m1_against(monkeypatch):
+async def test_enter_trade_not_blocked_on_m1_against_when_flag_off(monkeypatch):
+    # Ruben 2026-07-24: con M1_MICRO_CONFIRM_ENABLED=False, lo que el scanner
+    # elige opera aunque M1 vaya en contra (el filtro no anula la decision).
     bot = _bot()
     ex = TradeExecutor(MagicMock(), bot)
     monkeypatch.setattr(ex, "_resolve_entry_timing", AsyncMock(return_value=_ok_timing()))
@@ -188,10 +192,8 @@ async def test_enter_trade_blocks_on_m1_against(monkeypatch):
         "EURUSD_otc", "call", 1.0, _zone(), "m1-test", "initial",
         skip_open_wait=True,
     )
-    assert ok is False
-    place.assert_not_awaited()
-    assert bot.last_order_attempt["status"] == "failed"
-    assert bot.last_order_attempt["reason"] == "m1_against_call"
+    assert ok is True
+    place.assert_awaited_once()
 
 
 @pytest.mark.asyncio

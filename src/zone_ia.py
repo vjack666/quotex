@@ -128,6 +128,18 @@ class ZoneIA:
             if candles:
                 last = candles[-1]
                 level = getattr(last, "close", None) or getattr(last, "c", None)
+        # Feature 29 (RG4): consenso con geometría. Solo LECTURA de métricas
+        # (level_role). No es regla: la confianza sigue siendo el WR de memoria;
+        # la geometría solo se adjunta para trazabilidad/consenso en el scorer.
+        geom = getattr(candidate, "geometry", None)
+        if geom and level:
+            try:
+                from market_geometry_ctx import level_role
+                role = level_role(geom, float(level))
+                if role.get("is_support") or role.get("is_resistance"):
+                    setattr(candidate, "zone_geom_role", role)
+            except Exception:
+                pass
         return _zone_confidence_for_level(asset, direction, level, mem)
 
     @classmethod

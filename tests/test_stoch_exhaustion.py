@@ -233,14 +233,17 @@ def test_m5_contra_bloquea_put():
 
 
 def test_m5_ali_neado_permite_put():
-    """M5 bajista (alineado con PUT) -> CONFIRMADO si hay vela de rechazo."""
+    """M5 bajista Y AGOTADO (k>80, alineado con PUT + R3-bis) -> CONFIRMADO
+    si hay vela de rechazo. Desde que R3-bis (M5 agotado) es obligatoria y
+    separada de R3 (alineado), el M5 debe estar en sobrecompra (k>80), no
+    solo 'abajo'."""
     k, d = _crossed_series_put()
     ex = evaluate_exhaustion(
         k=88.0, d=70.0, direction="PUT",
         k_vals=k, d_vals=d,
         candles_15m=[_c(1.0005, 1.0040, 1.0003, 1.0006)],
         zone_lo=1.0037, zone_hi=1.0043,
-        stoch_m5={"k": 40.0, "d": 55.0, "cruce": "bajista"},  # M5 abajo
+        stoch_m5={"k": 85.0, "d": 55.0, "cruce": "bajista"},  # M5 abajo + agotado
     )
     assert ex.action == "EXHAUST_CONFIRMED"
     assert ex.path == "ruptura"

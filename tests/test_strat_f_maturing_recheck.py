@@ -118,6 +118,7 @@ def _f_eval(direction, m15_ctx):
         has_signal=True, direction=direction, m15_context=m15_ctx,
         m5_event="fractal_down", skip_reason=None, strength=0.7,
         pattern_name="fractal_down", zone=zone, spring_margin=0.0,
+        math_quality=0.5,
     )
 
 

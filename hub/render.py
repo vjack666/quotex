@@ -57,7 +57,6 @@ def _plain(state: StratFHubState) -> str:
     lines.append("")
     lines.append(f"  Activos evaluados : {state.total_assets or total}")
     lines.append(f"  Señales aceptadas: {accepted}  {_bar(accepted, total)} {pct}%")
-    lines.append(f"  Rechazadas       : {rejected}  {_bar(rejected, total)} {100 - pct}%")
     lines.append("")
     lines.append("ACEPTADAS")
     if state.accepted:
@@ -68,13 +67,6 @@ def _plain(state: StratFHubState) -> str:
             )
     else:
         lines.append("  (ninguna pasó los filtros)")
-    lines.append("")
-    lines.append("RECHAZADAS (y por qué)")
-    if state.rejected:
-        for c in state.rejected:
-            lines.append(f"  {c.asset:<14} {_shorten(c.skip_reason)}")
-    else:
-        lines.append("  (ninguna rechazada)")
     lines.append("")
     lines.append("Principio: el bot prefiere NO operar a entrar mal.")
     return "\n".join(lines)
@@ -96,10 +88,6 @@ def _rich(state: StratFHubState) -> str:
         Text("Aceptadas", style="bold green"),
         Text(f"{accepted}  {_bar(accepted, total)} {pct}%", style="green"),
     )
-    table.add_row(
-        Text("Rechazadas", style="bold red"),
-        Text(f"{rejected}  {_bar(rejected, total)} {100 - pct}%", style="red"),
-    )
 
     acc_panel = Table(show_header=True, header_style="bold green")
     acc_panel.add_column("Activo", style="cyan", no_wrap=True)
@@ -114,22 +102,11 @@ def _rich(state: StratFHubState) -> str:
     else:
         acc_panel.add_row("(ninguna pasó los filtros)", "", "", "")
 
-    rej_panel = Table(show_header=True, header_style="bold red")
-    rej_panel.add_column("Activo", style="cyan", no_wrap=True)
-    rej_panel.add_column("Razón del rechazo", style="red")
-    if state.rejected:
-        for c in state.rejected:
-            rej_panel.add_row(c.asset, _shorten(c.skip_reason))
-    else:
-        rej_panel.add_row("(ninguna rechazada)", "")
-
     console = Console(width=72, record=True)
     console.print(title)
     console.print(table)
     console.print(Text("✅ ACEPTADAS", style="bold green"))
     console.print(acc_panel)
-    console.print(Text("❌ RECHAZADAS (y por qué)", style="bold red"))
-    console.print(rej_panel)
     console.print(
         Text("Principio: el bot prefiere NO operar a entrar mal.", style="dim")
     )

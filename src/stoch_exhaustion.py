@@ -47,6 +47,10 @@ class ExhaustResult:
     # R2-bis (spec strat_f_spike_wyckoff_phase_a): separacion %K/%D del cruce.
     separation_ok: Optional[bool] = None    # None = sin datos para medir (no bloquea)
     separation_rel: Optional[float] = None  # |K-D| actual / rango reciente de |K-D|
+    # R3 (spec): M5 alineado con la direccion de entrada.
+    m5_aligned: Optional[bool] = None       # None = sin datos M5 para decidir
+    # R3-bis (spec): M5 agotado en SU propio extremo (k<20 CALL / k>80 PUT).
+    m5_exhausted: Optional[bool] = None
 
 
 # --- deteccion de vela de agotamiento (puro, sobre OHLC) -----------------
@@ -344,6 +348,7 @@ def evaluate_exhaustion(
                 "EXHAUST_WAIT",
                 "m5_contra",
                 in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
+                m5_aligned=False,
             )
         # 2b2) M5 AGOTADO EN SU EXTREMO (R3-bis): condicion SEPARADA de R3.
         # El M5 debe estar agotado en SU propio extremo (CALL k<20 / PUT k>80)
@@ -357,6 +362,7 @@ def evaluate_exhaustion(
                 "m5_no_exhausted",
                 in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
                 separation_ok=sep_ok, separation_rel=sep_rel,
+                m5_aligned=True, m5_exhausted=False,
             )
 
     # 3a) CAMINO A — ruptura: vela de agotamiento en/cerca de la zona
@@ -410,6 +416,7 @@ def evaluate_exhaustion(
             in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
             exhaustion_candle=exhaustion, at_support_resistance=True, path="ruptura",
             separation_ok=sep_ok, separation_rel=sep_rel,
+            m5_aligned=True, m5_exhausted=True,
         )
 
     # 3b) CAMINO B — atrapado en extremo (tu regla USDPKR: cruces adentro de
@@ -424,6 +431,7 @@ def evaluate_exhaustion(
             in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
             at_support_resistance=False, path="atrapado",
             separation_ok=sep_ok, separation_rel=sep_rel,
+            m5_aligned=True, m5_exhausted=True,
         )
 
     return ExhaustResult(
@@ -431,4 +439,5 @@ def evaluate_exhaustion(
         "sin_vela_agotamiento",
         in_extreme_zone=True, cross_confirmed=True, cross_ago=ago,
         at_support_resistance=at_franja,
+        m5_aligned=True, m5_exhausted=True,
     )

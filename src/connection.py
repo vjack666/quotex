@@ -95,10 +95,89 @@ def _min_expected_candles(count: int) -> int:
     return max(3, int(count * 0.5))
 
 
+# Un solo pedido de velas en vuelo por proceso: los buzones compartidos de
+# pyquotex (candles_data / historical_candles) no distinguen activo ni tf.
+_CANDLES_FETCH_LOCK = asyncio.Lock()
+
+
 def _candles_from_raw(raw_list: list) -> List[Candle]:
     candles = [raw_to_candle(r) for r in raw_list if isinstance(r, dict)]
     valid = [c for c in candles if c and c.high > 0]
     return sorted(valid, key=lambda c: c.ts)
+
+
+def _dominant_spacing(candles: List[Candle]) -> int:
+    """Spacing (segundos) más frecuente entre velas consecutivas. 0 si n<2."""
+    if len(candles) < 2:
+        return 0
+    counts: dict[int, int] = {}
+    for a, b in zip(candles, candles[1:]):
+        d = int(b.ts - a.ts)
+        if d > 0:
+            counts[d] = counts.get(d, 0) + 1
+    if not counts:
+        return 0
+    return max(counts, key=lambda k: counts[k])
+
+
+def _resample_candles(candles: List[Candle], tf_sec: int) -> List[Candle]:
+    """Agrega velas finas a tf_sec por bucket de tiempo (OHLC + suma de ticks).
+
+    Regla de integridad: NUNCA inventar datos — solo recomponer el timeframe
+    pedido desde velas reales más finas. La última vela (bucket abierto) se
+    incluye igual que la vela en curso de un fetch normal.
+    """
+    buckets: dict[int, list[Candle]] = {}
+    for c in candles:
+        buckets.setdefault((int(c.ts) // tf_sec) * tf_sec, []).append(c)
+    out: List[Candle] = []
+    for bts in sorted(buckets):
+        grp = sorted(buckets[bts], key=lambda c: c.ts)
+        out.append(Candle(
+            ts=bts,
+            open=grp[0].open,
+            high=max(c.high for c in grp),
+            low=min(c.low for c in grp),
+            close=grp[-1].close,
+            ticks=sum(getattr(c, "ticks", 0) or 0 for c in grp),
+        ))
+    return out
+
+
+def _enforce_timeframe(candles: List[Candle], tf_sec: int, asset: str) -> List[Candle]:
+    """Valida que las velas correspondan al timeframe pedido.
+
+    Causa raíz 2026-07-27: Quotex a veces responde velas de OTRO timeframe
+    (p.ej. M1 cuando se pidieron M5/M15). Sin este guard, el evaluador leía
+    'contexto M15' sobre velas de 1 minuto → dirección mal leída en el extremo
+    (caso USDPHP_otc CALL en pleno spike de venta).
+
+    - spacing == tf_sec → OK, pasa tal cual.
+    - spacing más fino y divisor de tf_sec → resamplea (datos reales, no inventados).
+    - spacing incompatible (más grueso u otro) → devuelve [] para que
+      fetch_candles_with_retry reintente / use el fallback histórico.
+    """
+    if tf_sec <= 60 or len(candles) < 3:
+        return candles
+    spacing = _dominant_spacing(candles)
+    if spacing == 0 or spacing == tf_sec:
+        return candles
+    # Solo actuar sobre spacings de timeframe real del broker (>=60s).
+    # Fixtures/series sintéticas con spacing menor pasan intactas.
+    if spacing < 60:
+        return candles
+    if spacing < tf_sec and tf_sec % spacing == 0:
+        resampled = _resample_candles(candles, tf_sec)
+        log.warning(
+            "%s tf=%ss: broker devolvió velas de %ss — resampleadas %d→%d velas",
+            asset, tf_sec, spacing, len(candles), len(resampled),
+        )
+        return resampled
+    log.warning(
+        "%s tf=%ss: velas con spacing %ss incompatible — descartadas (retry/fallback)",
+        asset, tf_sec, spacing,
+    )
+    return []
 
 
 async def fetch_candles(
@@ -113,13 +192,18 @@ async def fetch_candles(
     end_time = time.time()
     offset = count * tf_sec
     valid: List[Candle] = []
-    try:
-        raw_list = await client.get_candles(asset, end_time, offset, tf_sec)
-    except Exception as exc:
-        log.debug("Error velas %s tf=%ss: %s", asset, tf_sec, exc)
-        raw_list = None
+    # Causa raíz cruce de respuestas (2026-07-28): pyquotex guarda la respuesta
+    # de get_candles en UN buzón compartido (api.candles.candles_data). Dos
+    # pedidos en vuelo simultáneos se roban las respuestas entre sí → velas de
+    # otro activo/timeframe. Serializamos: un solo pedido en vuelo por proceso.
+    async with _CANDLES_FETCH_LOCK:
+        try:
+            raw_list = await client.get_candles(asset, end_time, offset, tf_sec)
+        except Exception as exc:
+            log.debug("Error velas %s tf=%ss: %s", asset, tf_sec, exc)
+            raw_list = None
     if raw_list:
-        valid = _candles_from_raw(raw_list)
+        valid = _enforce_timeframe(_candles_from_raw(raw_list), tf_sec, asset)
         if len(valid) >= min_expected:
             return valid
     got = len(valid)
@@ -131,11 +215,14 @@ async def fetch_candles(
         amount_of_seconds = count * tf_sec
         hist_timeout = int(timeout_sec) if timeout_sec is not None else 30
         try:
-            historical = await client.get_historical_candles(
-                asset, amount_of_seconds, tf_sec, timeout=hist_timeout,
-            )
+            async with _CANDLES_FETCH_LOCK:
+                historical = await client.get_historical_candles(
+                    asset, amount_of_seconds, tf_sec, timeout=hist_timeout,
+                )
             if historical:
-                valid_hist = _candles_from_raw(historical)
+                valid_hist = _enforce_timeframe(
+                    _candles_from_raw(historical), tf_sec, asset,
+                )
                 if len(valid_hist) > count:
                     valid_hist = valid_hist[-count:]
                 if valid_hist:

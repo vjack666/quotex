@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, TextIO
 
 from config import ALIGN_SCAN_TO_CANDLE, SCAN_INTERVAL_SEC, SCAN_LEAD_SEC, TF_5M
@@ -284,11 +284,19 @@ def seconds_until_next_scan(now_ts: Optional[float] = None) -> float:
     return max(0.0, target - now)
 
 
-# ── ProcessPool global para FASE 3 del scanner (parallel_scan_fase3) ──
-# Se crea una vez al arrancar y se reusa entre ciclos (R2). Dimensionado a
-# la mitad de los núcleos para no fundir la máquina. Degrada a None si no
-# puede crearse (test mode / sin pickle) → el scan cae a serial (R6).
-_SCAN_POOL: Optional[ProcessPoolExecutor] = None
+# ── Pool de hilos global para FASE 3 del scanner (parallel_scan_fase3) ──
+# NOTA HISTÓRICA (causa raíz del error "grupo de procesos se rompio"):
+# antes era un ProcessPoolExecutor (spawn de Windows) con 50% de núcleos.
+# Cada worker hijo REIMPORTABA todo el bot pesado (~40MB c/u) al arrancar,
+# lo que agotaba el page file de Windows (WinError 1455) y mataba a los
+# workers con exitcode=1 → BrokenProcessPool en cada ciclo.
+# Cambiado a ThreadPoolExecutor: los hilos comparten el proceso padre, NO
+# reimportan nada y consumen memoria marginal, Elimina el OOM y el
+# BrokenProcessPool de raíz. La lógica de evaluación es idéntica
+# (run_in_executor funciona igual para hilos). Dimensionado a una fracción
+# de los núcleos para no saturar el bucle. Degrada a None si no puede
+# crearse → el scan cae a serial (R6).
+_SCAN_POOL: Optional[ThreadPoolExecutor] = None
 
 
 def scan_pool_workers() -> int:
@@ -297,20 +305,20 @@ def scan_pool_workers() -> int:
 
 
 def init_scan_pool() -> None:
-    """Crea el ProcessPoolExecutor global. Idempotente (no recrea si ya existe)."""
+    """Crea el ThreadPoolExecutor global. Idempotente (no recrea si ya existe)."""
     global _SCAN_POOL
     if _SCAN_POOL is not None:
         return
     try:
-        _SCAN_POOL = ProcessPoolExecutor(max_workers=scan_pool_workers())
-        log.info("🧵 Scan pool listo: %d workers (50%% de %d núcleos).",
+        _SCAN_POOL = ThreadPoolExecutor(max_workers=scan_pool_workers())
+        log.info("🧵 Scan pool (hilos) listo: %d workers (50%% de %d núcleos).",
                  scan_pool_workers(), os.cpu_count() or 1)
-    except Exception as exc:  # pragma: no cover - entorno sin fork/pickle
+    except Exception as exc:  # pragma: no cover - entorno sin hilos
         _SCAN_POOL = None
         log.warning("⚠ No se pudo crear scan pool (%s) — FASE 3 va en serial.", exc)
 
 
-def get_scan_pool() -> Optional[ProcessPoolExecutor]:
+def get_scan_pool() -> Optional[ThreadPoolExecutor]:
     """Devuelve el pool global o None (degradación serial, R6)."""
     return _SCAN_POOL
 
@@ -318,39 +326,33 @@ def get_scan_pool() -> Optional[ProcessPoolExecutor]:
 def shutdown_scan_pool() -> None:
     """Cierra el pool global si existe. Seguro llamar varias veces.
 
-    `shutdown(wait=False)` solo marca el pool como "no acepta más trabajo";
-    NO mata los workers. En Windows (spawn) esos procesos quedan vivos en
-    `call_queue.get(block=True)` y se tragan el Ctrl+C del padre (traceback
-    sucio + procesos huérfanos). Los terminamos explícitamente.
-
-    Nota: `ProcessPoolExecutor.shutdown()` deja `._processes` en None, así
-    que capturamos la referencia ANTES de llamarlo.
+    Es un ThreadPoolExecutor: NO hay procesos hijos que matar (comparten el
+    proceso padre y el wrapper `_evaluate_strat_f_safe` ya captura TODA
+    excepción, así que un hilo nunca muere de golpe). Solo marcamos el pool
+    como "no acepta más trabajo" y dejamos que los hilos terminen su tarea.
     """
     global _SCAN_POOL
     pool = _SCAN_POOL
     _SCAN_POOL = None
     if pool is None:
         return
-    procs = getattr(pool, "_processes", None) or {}
     try:
         pool.shutdown(wait=False)
     except Exception:
         pass
-    # Mata los workers restantes (Windows: spawn deja procesos colgados).
-    for proc in procs.values():
-        try:
-            if proc.is_alive():
-                proc.terminate()
-        except Exception:
-            pass
-    for proc in procs.values():
-        try:
-            proc.join(timeout=2)
-        except Exception:
-            pass
-        try:
-            if proc.is_alive():
-                proc.kill()
-        except Exception:
-            pass
+
+
+def diagnose_scan_pool_broken(pool) -> str:
+    """Fallback inerte para el pool de hilos.
+
+    Con ThreadPoolExecutor los workers son hilos del proceso padre y el
+    wrapper `_evaluate_strat_f_safe` captura cualquier excepción, por lo que
+    un hilo no puede "morir de golpe" con exit code (ya no hay
+    BrokenProcessPool). Se conserva la firma para no romper el caller en
+    scanner.py; si llega a llamarse, reporta que no aplica el diagnóstico de
+    procesos.
+    """
+    if pool is None:
+        return "pool=None (no se pudo inspeccionar)"
+    return "pool de hilos: los workers no mueren con exit code (no aplica diagnóstico de procesos)"
 

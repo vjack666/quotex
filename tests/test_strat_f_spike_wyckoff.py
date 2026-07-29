@@ -299,3 +299,47 @@ def test_r3bis_m5_exhausted_pasa():
     )
     # No se corta en m5_contra ni m5_no_exhausted; llega al chequeo de vela/atrapado
     assert ex.reason not in ("m5_contra", "m5_no_exhausted")
+
+
+# ── MODO OBSERVACIÓN (Ruben 2026-07-26): SPIKE registra breakdown y NO opera ──
+
+def test_modo_observacion_spike_no_opera():
+    """Con STRAT_F_SPIKE_OBSERVE=True, un setup SPIKE candidato debe devolver
+    has_signal=False y decision='OBSERVE', con el desglose de las 6 condiciones
+    en spike_observe, PERO sin operar. Verifica que el modo observacion
+    registra sin enviar orden."""
+    band = 96.5
+    m5 = _m5_with_fractal_down(band)
+    m1 = _m1_rejecting_band(band)
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help",
+               return_value=_boost_exhaust("ruptura", "martillo", sep_ok=True, sep_rel=0.6)), \
+         patch("strat_fractal.STRAT_F_SPIKE_OBSERVE", True):
+        ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
+    assert ev.has_signal is False, "modo observacion: NO debe operar"
+    assert ev.decision == "OBSERVE"
+    assert ev.spike is True  # el setup SI es SPIKE, solo que no opera
+    assert isinstance(ev.spike_observe, dict)
+    # breakdown de las 6 condiciones presentes (la que falta por datos queda None)
+    assert "R2_zona_franja" in ev.spike_observe
+    assert "R2bis_separacion_abierta" in ev.spike_observe
+    assert "cruce_m15_confirmado" in ev.spike_observe
+    assert "R3_m5_alineado" in ev.spike_observe
+    assert "R3bis_m5_agotado" in ev.spike_observe
+    assert "R4_rechazo_o_atrapado" in ev.spike_observe
+
+
+def test_modo_observacion_off_opera_normal():
+    """Con STRAT_F_SPIKE_OBSERVE=False (default), el SPIKE opera normalmente
+    (has_signal=True, decision=None). El observador no debe silenciar nada."""
+    band = 96.5
+    m5 = _m5_with_fractal_down(band)
+    m1 = _m1_rejecting_band(band)
+    with patch("strat_fractal.compute_stoch", return_value={"k": 50.0, "d": 50.0}), \
+         patch("strat_fractal.apply_stoch_help",
+               return_value=_boost_exhaust("ruptura", "martillo", sep_ok=True, sep_rel=0.6)), \
+         patch("strat_fractal.STRAT_F_SPIKE_OBSERVE", False):
+        ev = evaluate_strat_f(_range_15m(), m5, m1, payout=90)
+    assert ev.has_signal is True, "modo normal: el SPIKE debe operar"
+    assert ev.decision is None
+    assert ev.spike is True

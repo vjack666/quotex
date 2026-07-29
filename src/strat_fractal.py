@@ -50,30 +50,7 @@ class StratFEvaluation:
     early_alert: "Optional[dict]" = None     # R-EA7: marca de alerta temprana (AJENA a has_signal); puro aviso
 
 
-def _fractal_up(candles: List[Candle], i: int) -> bool:
-    """Fractal alcista (techo): maximo central mas alto que los 2 a cada lado."""
-    if i < 2 or i > len(candles) - 3:
-        return False
-    h = candles[i].high
-    return (
-        h > candles[i - 1].high
-        and h > candles[i - 2].high
-        and h > candles[i + 1].high
-        and h > candles[i + 2].high
-    )
-
-
-def _fractal_down(candles: List[Candle], i: int) -> bool:
-    """Fractal bajista (suelo): minimo central mas bajo que los 2 a cada lado."""
-    if i < 2 or i > len(candles) - 3:
-        return False
-    l = candles[i].low
-    return (
-        l < candles[i - 1].low
-        and l < candles[i - 2].low
-        and l < candles[i + 1].low
-        and l < candles[i + 2].low
-    )
+from math_utils import fractal_up as _fractal_up, fractal_down as _fractal_down
 
 
 def _m15_context(candles_15m: List[Candle]) -> str:

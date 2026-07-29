@@ -1,0 +1,56 @@
+# Config versionada Observador Fase B (D0).
+# Los VALORES son parámetros experimentales del Atlas: placeholders explícitos
+# (TODO_atlas_tune) o referencias a percentiles; NUNCA números mágicos fijos.
+version: evolution_v1
+
+vars: [continuity, pressure, energy, volatility, spread]   # R3
+
+capture:                                                   # R5/R6/R7
+  dimensions: [structural, pressure, energy, direction, volatility]
+  change_version: capture_v1
+  per_asset:
+    default:
+      silence_meaning: all_dimensions_unchanged
+      flat_range: TODO_atlas_tune
+      pressure_delta_threshold: percentile_ref
+      energy_delta_threshold: percentile_ref
+      volatility_delta_threshold: percentile_ref
+      # umbrales operativos v1 (valores experimentales, Atlas los ajusta)
+      silence_window_bars: 5
+      pressure_delta_threshold_pips: 1.0
+      energy_delta_threshold_pips: 1.0
+      direction_delta_threshold_pips: 0.5
+      volatility_range_threshold_pips: 1.5
+    EURUSD:
+      silence_meaning: all_dimensions_unchanged
+      flat_range: TODO_atlas_tune
+      pressure_delta_threshold: percentile_ref
+      energy_delta_threshold: percentile_ref
+      volatility_delta_threshold: percentile_ref
+      silence_window_bars: 5
+      pressure_delta_threshold_pips: 1.0
+      energy_delta_threshold_pips: 1.0
+      direction_delta_threshold_pips: 0.5
+      volatility_range_threshold_pips: 1.5
+    XAUUSD:
+      silence_meaning: all_dimensions_unchanged
+      flat_range: TODO_atlas_tune
+      pressure_delta_threshold: percentile_ref
+      energy_delta_threshold: percentile_ref
+      volatility_delta_threshold: percentile_ref
+      silence_window_bars: 5
+      pressure_delta_threshold_pips: 1.0
+      energy_delta_threshold_pips: 1.0
+      direction_delta_threshold_pips: 0.5
+      volatility_range_threshold_pips: 1.5
+
+summary:                                                   # R8/R10
+  quality_formula: v1
+  summary_version: summary_v1
+  velocity_buckets: TODO_atlas_tune
+  violence_buckets: TODO_atlas_tune
+  quality_symmetry_weight: 0.5
+  velocity_fast_pips_per_bar: 1.0
+  violence_high_pips_per_bar: 5.0
+  curve_flat_mfe_pips: 1.0
+  curve_convex_retention: 0.5

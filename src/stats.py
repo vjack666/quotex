@@ -43,6 +43,49 @@ def _stoch_bucket(stoch: Optional[Dict[str, Any]]) -> str:
     return "neutro"
 
 
+def get_rejections(db_path: Optional[str] = None, limit: int = 300) -> Dict[str, Any]:
+    """Lee las rechazadas REALES de la caja negra (scan_candidates, decision REJECTED_*).
+
+    A diferencia de strat_f_panel (contadores en memoria del bot), esta fuente es
+    persistente: sobrevive a reinicios y refleja la verdad del black box. El hub
+    debe mostrar ESTO, no los contadores en memoria que se pierden al reiniciar.
+    """
+    bb = get_black_box()
+    path = db_path or bb.db_path
+    try:
+        con = sqlite3.connect(path)
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            """
+            SELECT asset, direction, decision, reject_reason, stoch_m15, created_at
+            FROM scan_candidates
+            WHERE decision LIKE 'REJECTED%'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        con.close()
+    except sqlite3.OperationalError:
+        # DB aún no creada o sin tabla
+        return {"total": 0, "by_reason": {}, "rows": []}
+
+    by_reason: Dict[str, int] = defaultdict(int)
+    out_rows = []
+    for r in rows:
+        reason = r["reject_reason"] or r["decision"] or "sin_motivo"
+        by_reason[reason] += 1
+        out_rows.append({
+            "asset": r["asset"] or "",
+            "direction": (r["direction"] or "").upper(),
+            "decision": r["decision"] or "",
+            "reject_reason": reason,
+            "stoch_m15": _parse_stoch(r["stoch_m15"]),
+            "created_at": r["created_at"] or "",
+        })
+    return {"total": len(out_rows), "by_reason": dict(by_reason), "rows": out_rows}
+
+
 def build_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
     """Calcula todas las métricas desde la caja negra.
 

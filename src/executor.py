@@ -25,7 +25,10 @@ from config import (
     CYCLE_TARGET_WINS,
     ENTRY_MAX_LAG_SEC,
     ENTRY_REJECT_LAST_SEC,
+    ENTRY_SYNC_TF_SEC,
     ENTRY_SYNC_TO_CANDLE,
+    FAST_ENTRY,
+    FAST_ENTRY_TF_SEC,
     MARTIN_ALERT_PCT,
     MARTIN_LIVE_WINDOW_MAX_SEC,
     MARTIN_LIVE_WINDOW_MIN_SEC,
@@ -114,8 +117,12 @@ class TradeExecutor:
         self.trade_client = trade_client if trade_client is not None else client
         # Referencia directa al HTF scanner para pausarlo durante la orden.
         self.htf = htf_scanner
-        self.entry_sync = EntrySynchronizer()
-        # Session manager for lifecycle tracking
+        # Entrada sincronizada al open de la vela de entry.
+        # FAST_ENTRY=True => open de vela de 1 min (60s) en vez de 5 min (300s).
+        # El vencimiento (DURATION_SEC, 15 min) queda intacto.
+        _entry_tf = FAST_ENTRY_TF_SEC if FAST_ENTRY else ENTRY_SYNC_TF_SEC
+        self.entry_sync = EntrySynchronizer(tf_sec=_entry_tf)
+
         self.session_manager = session_manager
 
     async def _reconnect_if_needed(self, label: str) -> bool:
@@ -928,16 +935,17 @@ class TradeExecutor:
             return False
 
         drawdown = (self.bot.session_start_balance - bal) / self.bot.session_start_balance
-        if drawdown >= MAX_LOSS_SESSION:
-            self.bot.session_stop_hit = True
-            log.error(
-                "🛑 STOP-LOSS DE SESIÓN activado: drawdown=%.1f%% (inicio=%.2f, actual=%.2f)",
-                drawdown * 100,
-                self.bot.session_start_balance,
-                bal,
-            )
-            alerter.alert_stop_loss(drawdown * 100, bal)
-            return True
+        if getattr(_cfg, "SESSION_STOP_LOSS_ENABLED", True):
+            if drawdown >= MAX_LOSS_SESSION:
+                self.bot.session_stop_hit = True
+                log.error(
+                    "🛑 STOP-LOSS DE SESIÓN activado: drawdown=%.1f%% (inicio=%.2f, actual=%.2f)",
+                    drawdown * 100,
+                    self.bot.session_start_balance,
+                    bal,
+                )
+                alerter.alert_stop_loss(drawdown * 100, bal)
+                return True
         return False
     async def reconcile_pending_candidates(self, max_age_minutes: Optional[float] = None) -> None:
         """

@@ -1,0 +1,18 @@
+BACKFILL_FASE_B done: {'events_consumed': 5771726, 'episodes_closed': 89833, 'episodes_open': 0} time=15165.1s
+Traceback (most recent call last):
+  File "C:\Users\v_jac\Desktop\QUOTEX\scripts\backfill_fase_b.py", line 21, in <module>
+    for y in YEARS:
+    
+AttributeError: 'EpisodeStore' object has no attribute 'count'
+9 closed=6225 open=0 | acum=37269 | 117.2s
+[2018] events=373593 closed=6106 open=1 | acum=43375 | 134.4s
+[2019] events=373510 closed=6245 open=1 | acum=49620 | 151.7s
+[2020] events=374550 closed=6097 open=1 | acum=55717 | 169.9s
+[2021] events=373617 closed=6158 open=0 | acum=61875 | 184.0s
+[2022] events=373984 closed=5855 open=1 | acum=67730 | 197.9s
+[2023] events=372620 closed=6080 open=0 | acum=73810 | 212.1s
+[2024] events=374406 closed=6286 open=0 | acum=80096 | 229.4s
+[2025] events=373056 closed=6196 open=1 | acum=86292 | 249.2s
+[2026] events=210068 closed=3540 open=0 | acum=89832 | 260.8s
+BACKFILL_FASE_B DONE: total_closed=89832 time=260.8s
+episodes=89832 evolution_rows=2822619 summaries=89830

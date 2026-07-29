@@ -1,5 +1,78 @@
 # Estado de sesión
 
+## AUDITORÍA DE RECHAZOS + columna `band` — 2026-07-25 (tarde)
+### Objetivo (Ruben)
+Investigar mañana por qué el bot rechaza entradas y si los rechazos "zona muy
+joven" luego se reusaron vía maturing watchlist. El agente que aprende debe
+manejar mejor la estrategia. Estudio del estocástico centrado en la hora del
+rechazo: 1 día antes + 3h después ("foto" del gráfico). Explicación técnica + dumi.
+
+### Hallazgos previos (verificados en código/datos)
+- Black box = scan_candidates (data/db/black_box_strat_*.db). STRAT-F SÍ graba
+  rechazados; STRAT-A solo va a trade_journal. Foco en STRAT-F.
+- 25-07: 17 REJECTED_STOCH + 1450 REJECTED_STRAT_F. Motivos típicos: "zona muy
+  joven (2<3 velas M5)", "M1 no rechaza la banda", "M15 rango roto".
+- MaturingWatchlist es EN MEMORIA y se borra al promover, PERO la promoción SÍ
+  escribe en scan_candidates (SHADOW_PROMOTED / ACCEPTED). Clave = asset|dir|band.
+- PROBLEMA: scan_candidates NO guarda `band` (nivel) -> cruce rechazo->promoción
+  es aproximado. Solución: agregar columna `band` REAL y poblarla en STRAT-F.
+- candles_15m solo trae 20 velas (~5h); para [-1d,+3h] hay que bajar por API demo
+  (fetch_candles en connection.py). Activos rechazados son *_otc (no en parquet).
+
+### Plan en curso
+1. Subagente (deleg_7d378988, BACKGROUND) construye:
+   - columna `band` en black_box_recorder.record_candidate (idempotente)
+   - poblar `band` en scanner.py (REJECTED_STRAT_F joven, SHADOW_PROMOTED, ACCEPTED STRAT-F)
+   - scripts/audit_rechazos.py (extract/download/analyze/report offline)
+   - tests/test_audit_rechazos.py
+2. CUANDO el subagente termine (confirmar ediciones + tests verdes), REINICIAR
+   el sistema (start_webapp.bat) para que el bot acumule datos con `band` esta noche.
+3. Mañana: solo investigar con scripts/audit_rechazos.py sobre datos acumulados.
+
+### Estado
+- Sistema vivo ahora: app.py PIDs 16768, 13448 + hub Edge. NO reiniciado aún
+  (espero a que el subagente termine de editar el código).
+- Watchdogs borrados (sesión previa): watchdog_quotex/bot/collect/hub + audusd +
+  install_task_24x7. Quedan caffeine.py (keepalive) y app.py:_battery_watchdog.
+
+
+
+## FIX: Cafeína (keepalive) + 24/7 — 2026-07-23
+
+### Diagnóstico (por qué "la cafeína no funcionaba")
+1. La caffeine NUNCA corrió en la instancia viva: el bot que corría arrancó ~08:57 y
+   `src/caffeine.py` se creó a las 11:11. El proceso vivo era código viejo.
+2. Al ponerle caffeine, el bot "se dormía" porque el PROCESO moría al cerrar la ventana
+   cmd (no es idle del WS, es el server que cae al cerrar sesión). Mi lanzamiento
+   desde la terminal de Hermes tampoco dejaba proceso vivo al cerrar.
+3. Bug introducido: `basicConfig(force=True)` duplicaba el handler del log ->
+   `PermissionError` (WinError 32) en rollover porque server + trader (2 procesos)
+   abren `data/logs/runtime/consolidation_bot.log`.
+
+### Cambios aplicados (verificados en vivo)
+- `src/config.py`: CAFFEINE_INTERVAL_SEC=15, TICK_AFTER_IDLE_SEC=30 (era 20/45).
+- `src/caffeine.py`: ya enviaba "2" (texto) + 42["tick"]; sin cambios de fondo.
+- `src/consolidation_bot.py`: logger propio "consolidation_bot" + handler
+  `_SafeRotatingFileHandler` (override rotate con reintento + copy/truncate para
+  soportar 2 procesos en Windows). Logger "caffeine" conectado al mismo archivo.
+- `scripts/watchdog_bot.py`: LOG_PATH corregido a `data/logs/runtime/consolidation_bot.log`;
+  añadida `frequent_reconnects()` (14 reconexiones/600s) y `main()` convertido a bucle
+  persistente (vigila 24/7 en un solo proceso).
+
+### Verificación empírica
+- Bot vivo (API state=running), caffeine arrancada: "☕ Caffeine arrancado — ping app
+  cada 15s, tick tras 30s idle".
+- 0 reconexiones WS en ~2 min con caffeine 15/30 (antes se reconectaba cada rato).
+- Logger "caffeine" ya escribe a la bitácora.
+
+### Pendiente 24/7 REAL (sin ventana abierta)
+- Mi lanzamiento no deja el proceso vivo al cerrar sesión. Creado
+  `install_task_24x7.bat` (schtasks /RU SYSTEM /SC ONSTART /RET 3 /RI 1) que arranca
+  `run_bot_task.bat` (bot + watchdog) como tarea programada. REQUERE correr como
+  ADMINISTRADOR. Hasta que el usuario lo corra, el bot vive solo mientras la sesión de
+  Hermes esté abierta.
+- El watchdog reparado revive el bot si Quotex lo desconecta (reconexiones frecuentes).
+
 ## Experimento spring_margin — Validación Wyckoff Fase C (STRAT-F)
 
 ### SPRING_EXPERIMENT_START
@@ -262,5 +335,64 @@ Al promover desde maturing_watchlist se re-evalúa el M15 ACTUAL:
   alineado/contra-tendencia, stoch exhaust/none, integración promoter-vs-drop.
 - Suite completa: 21 failed pre-existentes (sin cambio vs baseline), 521 passed
   + 13 nuevos. Sin regresiones introducidas.
+
+---
+
+## FIX INFRA — Caffeine (keepalive de APLICACIÓN) — 2026-07-22
+
+### SÍNTOMA (reporte usuario)
+El bot "se duerme" si lo dejan mucho tiempo solo → "Connection to remote host
+was lost". El usuario sospechaba que el módulo de reactivación ("cafeina") no
+llegaba a tiempo. No había ningún módulo keepalive propio escrito.
+
+### DIAGNÓSTICO (empírico, no suposición)
+- `src/connection.py` solo reconecta DE MANERA REACTIVA (ensure_connection en
+  top del loop / tras excepción). Nada envía "estoy vivo" en idle.
+- pyquotex configura el WebSocket con `ping_interval=24, ping_timeout=20,
+  ping_payload="2"` (api.py:454). SUENA bien...
+- ...pero websocket-client 1.9.0 manda ese "2" como **ping frame binario**
+  (`WebSocket.ping()` → `send(payload, ABNF.OPCODE_PING)`). Confirmado leyendo
+  el código fuente de la librería instalada en `.venv`.
+- Quotex habla **engine.io v3 / socket.io**: el keepalive de app es el mensaje
+  de **TEXTO** "2", no un ping frame. El servidor ignora el golpecito binario.
+- Respaldo de pyquotex roto en idle: `on_pong` manda "2" de texto, pero el
+  servidor no responde pong al ping frame binario → on_pong nunca corre.
+  `on_message` manda `42["tick"]` solo si un mensaje cae justo en segundos
+  múltiplos de 5 → en idle real no pasa.
+- Resultado: en inactividad (espera de vela 146s, entre scans) nadie le manda
+  "2" de texto al server → Cloudflare cierra por idle → "se duerme".
+
+### SOLUCIÓN
+Creé `src/caffeine.py`: `CaffeineLoop` que cada `CAFFEINE_INTERVAL_SEC` (20s,
+con jitter) manda el **TEXTO** "2" por `client.websocket.send()` (engine.io
+ping de app), y además un `42["tick"]` si lleva rato sin tráfico de ENTRADA del
+servidor (`CAFFEINE_TICK_AFTER_IDLE_SEC=45s`). Comparte `_RECONNECT_LOCK`
+(RT-02) para no mandar tráfico mientras otra ruta reconecta. Engancha
+`mark_traffic()` al on_message de pyquotex para medir inactividad real.
+
+### CABLEADO (call sites reales — no queda muerto)
+- `src/consolidation_bot.py`:
+  - import `from caffeine import CaffeineLoop, install_traffic_hook`.
+  - tras arrancar `_hub_sync`, crea `bot._caffeine = CaffeineLoop(...)` +
+    `asyncio.create_task(bot._caffeine.run(), name="caffeine")` + instala hook.
+  - en el `finally` del loop 24/7: `bot._caffeine.stop()` + cancela la task
+    limpio antes de cerrar el client.
+  - attrs inicializados en `__init__`: `self._caffeine_task`, `self._caffeine`.
+- `src/config.py`: parámetros `CAFFEINE_ENABLED / _INTERVAL_SEC / _TICK_AFTER_IDLE_SEC / _JITTER_SEC`.
+
+### TESTS (prueba de que el café llega en formato correcto)
+`tests/test_caffeine.py` — 6 passed:
+- el "2" se envía como TEXTO (opcode None), NO ping frame binario.
+- maneja socket cerrado sin romper.
+- loop manda ping periódico.
+- loop manda `42["tick"]` tras idle.
+- deshabilitado no manda nada.
+- respeta `_RECONNECT_LOCK` (no envía mientras está tomado).
+
+### NOTA ENTORNO (no introducida por este fix)
+`tests/test_consolidation_bot.py` (6 tests) fallan por `numpy` no instalado en
+`.venv` (pandas no importa) — deuda de entorno preexistente. `test_caffeine.py`
+y `test_connection.py` pasan (21 passed). `consolidation_bot` importa OK.
+
 
 

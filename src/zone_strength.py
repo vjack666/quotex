@@ -54,14 +54,7 @@ MIN_REBOUND_STRENGTH = 0.50
 MIN_LINE_THICKNESS = 0.20
 
 
-def _clamp(v: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, v))
-
-
-def _norm(v: float, lo: float, hi: float) -> float:
-    if hi <= lo:
-        return 0.0
-    return _clamp((v - lo) / (hi - lo), 0.0, 1.0)
+from math_utils import clamp, normalize as _norm
 
 
 def compute_support_efficacy(
@@ -140,7 +133,7 @@ def compute_support_efficacy(
     # eficacia normalizada: bounce_rate y nº de toques ambos importan
     eff_rate = _norm(bounce_rate, 0.0, EFFICACY_SATURATION)
     eff_touch = _norm(touch_count, 1, TOUCHES_SATURATION)
-    efficacy = _clamp(0.6 * eff_rate + 0.4 * eff_touch, 0.0, 1.0)
+    efficacy = clamp(0.6 * eff_rate + 0.4 * eff_touch, 0.0, 1.0)
 
     detail = (
         f"nivel={level:.4f} toques={touch_count} aguantaron={bounce_count} "
@@ -244,7 +237,7 @@ def _line_thickness(
     Experience Memory es refuerzo secundario (solo si hay muestra).
     Order-flow (ticks) es el modulador en vivo.
     """
-    eff_component = _clamp(efficacy, 0.0, 1.0)
+    eff_component = clamp(efficacy, 0.0, 1.0)
 
     mem_norm = _norm(n_reactions, 3, 20)
     wr_factor = win_rate if n_reactions >= 3 else 0.5
@@ -257,7 +250,7 @@ def _line_thickness(
         + W_MEMORY * mem_component
         + W_TICKS * ticks_component
     )
-    return _clamp(thickness, 0.0, 1.0)
+    return clamp(thickness, 0.0, 1.0)
 
 
 def _impact_velocity(angle_deg: Optional[float]) -> float:
@@ -331,7 +324,7 @@ def compute_rebound_strength(
 
     # % de fuerza = grosor * (1 - velocidad). Si la línea es gruesa y el precio
     # llegó despacio → rebote fuerte. Si llegó empinado y la línea es fina → 0.
-    strength_pct = _clamp(line_thickness * (1.0 - impact_vel), 0.0, 1.0)
+    strength_pct = clamp(line_thickness * (1.0 - impact_vel), 0.0, 1.0)
 
     sufficient = (
         line_thickness >= MIN_LINE_THICKNESS

@@ -17,7 +17,8 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PATH = _ROOT / "data" / "hub_bankroll.json"
+# Libro guardado en: data/config/hub_bankroll.json
+DEFAULT_PATH = _ROOT / "data" / "config" / "hub_bankroll.json"
 
 # Keys written by the Operación → Bankroll card
 BANKROLL_KEYS = (

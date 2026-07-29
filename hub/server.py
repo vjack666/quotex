@@ -31,7 +31,7 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in _sys.path:
     _sys.path.insert(0, str(_SRC_DIR))
 
-from src.stats import build_stats  # noqa: E402
+from src.stats import build_stats, get_rejections  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 STATIC_DIR = HERE / "static"
@@ -398,6 +398,46 @@ def _hub_edge_already_running() -> bool:
         return False
 
 
+def _position_hub_window(timeout: float = 6.0) -> None:
+    """Fija tamaño y posición de la ventana del hub (Edge app) de forma determinista.
+
+    Quotex HUB siempre abre en 781x892 px en (x=762, y=1) — Ruben 2026-07-26.
+    Edge app mode no acepta posición/tamaño por CLI, así que movemos la ventana
+    recién creada con MoveWindow. Best-effort: si no aparece a tiempo, no rompe
+    el arranque del hub.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        user32.SetProcessDPIAware()
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        target_title = "QUOTEX HUB"
+        found: dict = {"hwnd": None}
+
+        def enum_cb(hwnd, lparam):
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, buf, 256)
+            if target_title in buf.value and user32.IsWindowVisible(hwnd):
+                found["hwnd"] = hwnd
+                return False  # detener enumeración
+            return True
+
+        deadline = time.time() + timeout
+        while time.time() < deadline and found["hwnd"] is None:
+            found["hwnd"] = None
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            if found["hwnd"] is None:
+                time.sleep(0.3)
+        hwnd = found["hwnd"]
+        if hwnd:
+            # 781x892 en (762,1): tamaño/posición fijos del usuario.
+            user32.MoveWindow(hwnd, 762, 1, 781, 892, True)
+    except Exception as e:  # nunca tumbar el arranque del hub por esto
+        print(f"[HUB] No se pudo posicionar la ventana del hub: {e}", flush=True)
+
+
 def _open_browser(url: str) -> None:
     """Open exactly ONE Microsoft Edge app window for the dashboard.
 
@@ -445,6 +485,7 @@ def _open_browser(url: str) -> None:
                     **popen_kwargs,
                 )
                 print(f"[HUB] Opened Edge app window → {url}", flush=True)
+                _position_hub_window()  # fija 781x892 en (762,1) de forma determinista
                 return
             except Exception as e:
                 print(f"[HUB] Edge launch failed: {e}", flush=True)

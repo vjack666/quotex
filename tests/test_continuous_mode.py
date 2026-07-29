@@ -249,7 +249,12 @@ class TestNormalModeIsolation:
 
     def test_massaniello_not_affected_by_continuous_guard(self):
         """MassanielloRiskManager should work normally without continuous guard."""
+        import config as _cfg
         from massaniello_risk import MassanielloRiskManager
+
+        # Test de MODO NORMAL: fuerza el flag de límites de sesión ON
+        # (el repo puede estar en modo recolección 24/7 globalmente).
+        _cfg.MASSANIELLO_SESSION_LIMITS_ENABLED = True
 
         mgr = MassanielloRiskManager(operations=5, expected_wins=3, session_max_min=60)
         mgr.set_balance(30.0)

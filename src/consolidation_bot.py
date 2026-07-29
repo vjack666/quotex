@@ -59,6 +59,7 @@ from models import CandidateEntry, ConsolidationZone, PendingReversal, TradeStat
 from scanner import AssetScanner
 from hub.strat_f_panel import StratFPanel
 from maturing_watchlist import MaturingWatchlist
+from maturing_watcher import MaturingWatcher
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -200,6 +201,8 @@ class ConsolidationBot:
             max_age_bars=int(getattr(_config, "MATURING_WATCHLIST_MAX_AGE_BARS", 12)),
             ttl_sec=float(getattr(_config, "MATURING_WATCHLIST_TTL_SEC", 3600)),
         )
+        self.maturing_watcher = MaturingWatcher(self.maturing_watchlist)
+        self.maturing_watchlist._watcher = self.maturing_watcher
         self.greylist_assets = set(GREYLIST_ASSETS)
         if greylist_assets is not None:
             self.greylist_assets = {a.strip() for a in greylist_assets if a and a.strip()}
@@ -359,7 +362,7 @@ async def main(
         )
 
     if not EMAIL or not PASSWORD:
-        print("ERROR: Falta QUOTEX_EMAIL / QUOTEX_PASSWORD en el .env")
+        log.error("ERROR: Falta QUOTEX_EMAIL / QUOTEX_PASSWORD en el .env")
         sys.exit(1)
 
     if RISK_MANAGER == "massaniello" and real_account:

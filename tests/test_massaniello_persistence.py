@@ -76,6 +76,10 @@ class TestSave:
         assert row2 > row1
 
     def test_save_after_session_complete(self, persistence: MassanielloPersistence, manager: MassanielloRiskManager):
+        import config as _cfg
+        # Test de MODO NORMAL: fuerza límites de sesión ON (el repo puede estar
+        # en modo recolección 24/7 globalmente).
+        _cfg.MASSANIELLO_SESSION_LIMITS_ENABLED = True
         for _ in range(3):
             manager.register_win(1.0, 92)
         row_id = persistence.save(manager)

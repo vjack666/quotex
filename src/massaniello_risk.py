@@ -95,13 +95,19 @@ class MassanielloRiskManager:
         )
 
     def is_session_complete(self) -> bool:
+        if not getattr(_cfg, "MASSANIELLO_SESSION_LIMITS_ENABLED", True):
+            return False  # modo recolección 24/7: la sesión nunca "cumple" meta
         return self.wins >= self.expected_wins
 
     def is_session_failed(self) -> bool:
+        if not getattr(_cfg, "MASSANIELLO_SESSION_LIMITS_ENABLED", True):
+            return False  # modo recolección 24/7: la racha no frena
         max_losses = self.operations - self.expected_wins + 1
         return self.losses >= max_losses
 
     def is_session_timeout(self) -> bool:
+        if not getattr(_cfg, "MASSANIELLO_SESSION_LIMITS_ENABLED", True):
+            return False  # modo recolección 24/7: sin timeout
         # session_max_min <= 0 ⇒ sin límite temporal (modo recolección de data:
         # la gestión de riesgo por tiempo está desactivada a propósito).
         if self.session_start_time is None or self.session_max_min <= 0:
@@ -110,6 +116,8 @@ class MassanielloRiskManager:
         return elapsed_min >= float(self.session_max_min)
 
     def is_session_exhausted(self) -> bool:
+        if not getattr(_cfg, "MASSANIELLO_SESSION_LIMITS_ENABLED", True):
+            return False  # modo recolección 24/7: ops nunca se agotan
         return self._played() >= self.operations
 
     def can_enter(self) -> bool:

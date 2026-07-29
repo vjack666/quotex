@@ -241,7 +241,7 @@ class BlackBoxRecorder:
             con.commit()
             con.close()
         except Exception as e:
-            print(f"❌ Error inicializando DB: {e}")
+            log.error("❌ Error inicializando DB: %s", e)
 
     def _cleanup_old_files(self) -> None:
         """Elimina archivos DB y JSONL de caja negra con más de RETENTION_DAYS."""
@@ -328,15 +328,17 @@ class BlackBoxRecorder:
         # Detalles específicos por estrategia (JSON)
         strategy_details = json.dumps(data.get("strategy_details", {}), ensure_ascii=False)
         
-        # Velas (JSON)
-        candles_1m = json.dumps(data.get("candles_1m", []), ensure_ascii=False) if data.get("candles_1m") else None
-        candles_5m = json.dumps(data.get("candles_5m", []), ensure_ascii=False) if data.get("candles_5m") else None
-        candles_15m = json.dumps(data.get("candles_15m", []), ensure_ascii=False) if data.get("candles_15m") else None
+        # Velas (JSON). Cero NULL: si no hay velas se guarda "[]", no NULL.
+        candles_1m = json.dumps(data.get("candles_1m", []) or [], ensure_ascii=False)
+        candles_5m = json.dumps(data.get("candles_5m", []) or [], ensure_ascii=False)
+        candles_15m = json.dumps(data.get("candles_15m", []) or [], ensure_ascii=False)
         session_id = data.get("session_id", None)
-        stoch_m15 = json.dumps(data.get("stoch_m15", {}), ensure_ascii=False) if data.get("stoch_m15") else None
-        stoch_m5 = json.dumps(data.get("stoch_m5", {}), ensure_ascii=False) if data.get("stoch_m5") else None
-        stoch_m1 = json.dumps(data.get("stoch_m1", {}), ensure_ascii=False) if data.get("stoch_m1") else None
-        filter_funnel = json.dumps(data.get("filter_funnel", []), ensure_ascii=False) if data.get("filter_funnel") else None
+        # Stoch (JSON). Cero NULL: compute_stoch siempre devuelve dict (neutro si
+        # faltan velas); si no llega nada, se guarda "{}" en vez de NULL.
+        stoch_m15 = json.dumps(data.get("stoch_m15", {}) or {}, ensure_ascii=False)
+        stoch_m5 = json.dumps(data.get("stoch_m5", {}) or {}, ensure_ascii=False)
+        stoch_m1 = json.dumps(data.get("stoch_m1", {}) or {}, ensure_ascii=False)
+        filter_funnel = json.dumps(data.get("filter_funnel", []) or [], ensure_ascii=False)
         duration_sec = data.get("duration_sec", None)
         if duration_sec is not None:
             duration_sec = int(duration_sec)
@@ -346,24 +348,41 @@ class BlackBoxRecorder:
         # extreme_read viene del feature extreme_read_gate (Ruben 2026-07-22)
         # y stoch_m1 de la captura de las 3 TFs. Si la DB es vieja y no las
         # tiene, el INSERT fallaria. Las creamos si faltan.
-        for _col in ("stoch_m1", "extreme_read"):
+        for _col in ("stoch_m1", "extreme_read", "agent_tag"):
             try:
                 cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} TEXT")
             except sqlite3.OperationalError:
                 pass  # ya existe
+
+        # 'band' = nivel/precio de la zona fractal evaluada (REAL). Permite unir
+        # EXACTO rechazo -> promocion via maturing_watchlist (make_key usa band).
+        # ALTER idempotente: DBs viejos se migran solos en la proxima escritura.
+        try:
+            cur.execute("ALTER TABLE scan_candidates ADD COLUMN band REAL")
+        except sqlite3.OperationalError:
+            pass  # ya existe
+
+        agent_tag = data.get("agent_tag", None)  # BOT | WATCHDOG | HUMAN
+        # band: nivel de la zona fractal. Si no hay, NULL.
+        band = data.get("band", None)
+        if band is not None:
+            try:
+                band = float(band)
+            except (TypeError, ValueError):
+                band = None
 
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
              candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-             extreme_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             extreme_read, agent_tag, band)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
             candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-            extreme_read
+            extreme_read, agent_tag, band
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
@@ -890,7 +909,7 @@ class BlackBoxRecorder:
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as e:
-            print(f"⚠️ Error escribiendo JSONL: {e}")
+            log.warning("⚠️ Error escribiendo JSONL: %s", e)
     
     def get_trades(self, limit: int = 100, date_from: Optional[str] = None) -> list[dict]:
         """Retrieve closed trades from the black box DB.

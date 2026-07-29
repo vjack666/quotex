@@ -124,6 +124,7 @@ def build_entry_experience(
             "event_pattern": sd.get("event"),
             "pattern": sd.get("pattern"),
             "score_static": score,
+            "geometry": getattr(candidate, "geometry", None),  # Feature 29: swings S/R del día
             **_hour_dow(ts),
         }
 

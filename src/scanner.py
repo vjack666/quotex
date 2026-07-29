@@ -61,7 +61,7 @@ from config import (
     ZONE_MIN_AGE_MIN,
 )
 from connection import fetch_candles_with_retry, get_open_assets
-from loop_utils import get_scan_pool, shutdown_scan_pool, init_scan_pool
+from loop_utils import get_scan_pool, shutdown_scan_pool, init_scan_pool, diagnose_scan_pool_broken
 from concurrent.futures.process import BrokenProcessPool
 from black_box_recorder import get_black_box
 from stochastic_m15 import compute_stoch
@@ -1436,6 +1436,9 @@ class AssetScanner:
                     _d.drop_reason,
                     _d.bars_age,
                 )
+            # Notify watcher (cierre de ciclo de métricas)
+            if getattr(_mw_end, "_watcher", None) is not None:
+                _mw_end._watcher.on_cycle_end()
             # Mirror counters into bot.stats for operator visibility (R11).
             snap = _mw_end.snapshot()
             self.bot.stats["maturing_watchlist"] = snap.get("counters", {})
@@ -2349,7 +2352,8 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
         # Pre-calcular stoch M15 y M5 ANTES de evaluar STRAT-F, para
         # alimentar el SPIKE mejorado (R3 zona M5 alineada, R7 banda
         # zone_strength). Candles M5 ya estan en `candles`.
-        stoch_m15 = compute_stoch(candles_15m) if candles_15m else None
+        # Cero NULL: compute_stoch devuelve dict neutro si faltan velas; nunca None.
+        stoch_m15 = compute_stoch(candles_15m) if candles_15m else compute_stoch([])
         _stoch_m5 = None
         _efficacy_val = None
         try:
@@ -2415,6 +2419,8 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             k_prev=_stoch_k_prev, d=_stoch_d,
             stoch_full=stoch_m15 if isinstance(stoch_m15, dict) else None,
             candles_15m=candles_15m,
+            candles_1m=candles_1m,   # unificado con evaluate_strat_f (R10 intravela M1)
+            lookback=15,             # 15 velas M1 = vida de la M15 abierta (coincide con el corazon)
             zone_lo=_zone_lo,
             zone_hi=_zone_hi,
             stoch_m5=_stoch_m5,
@@ -2455,6 +2461,18 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
             f"stoch_m15_hard:{_stoch_help.action if _stoch_help else 'n/a'}",
             f"m1_reject:{'ok' if f_eval.m5_event else 'fail'}",
         ]
+        # ── MODO OBSERVACIÓN SPIKE (Ruben 2026-07-26) ──────────────────────
+        # Si el motor SPIKE devolvió decision="OBSERVE" (bandera
+        # STRAT_F_SPIKE_OBSERVE ON), registramos el desglose de las 6
+        # condiciones en la caja negra PERO NO OPERAMOS (has_signal=False).
+        # El black_box_record se arma porque _rec["decision"] se setea aquí;
+        # el `if f_eval.has_signal` de abajo NO se cumple -> sin orden.
+        if getattr(f_eval, "decision", None) == "OBSERVE":
+            _rec["decision"] = "OBSERVE"
+            res.logs.append(
+                f"[STRAT-F] {sym} OBSERVE spike candidato (no opera): "
+                f"{getattr(f_eval, 'spike_observe', None)}"
+            )
         if f_eval.has_signal and f_eval.direction and f_eval.zone:
             # ── Extreme-read gate (bandera OFF por defecto) ───────────────
             # El extremo del rango local es el mejor sitio (spike), pero solo
@@ -2512,6 +2530,25 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     f"[STRAT-F] {sym} skip: {_stoch_reject_reason} (zone={_stoch_help.zone} mode={_stoch_mode})"
                 )
             else:
+                # Condición #3 del setup perfecto (Ruben 2026-07-26): el stoch M5
+                # debe estar AGOTADO en el instante de la decisión (CALL: k<20 /
+                # PUT: k>80). Si el M5 ya rebotó, rechazar -> el bot NO entra en
+                # la mecha del rebote, sino en el fondo del agotamiento. Esto evita
+                # el "se adelanta": disparar en BOOST M15 mientras el M5 ya no confirma.
+                if _runtime_config.REQUIRE_M5_EXHAUSTED and f_eval.direction:
+                    _m5_k = (_stoch_m5 or {}).get("k")
+                    if not stoch_m5_exhausted(_m5_k, f_eval.direction):
+                        _rec["decision"] = "REJECTED_M5_NOT_EXHAUSTED"
+                        _rec["reject_reason"] = f"M5 no agotado (k={_m5_k})"
+                        _rec["skip_reason"] = "M5 no agotado"
+                        _filter_funnel.append("m5_exhaustion:fail")
+                        _batch[1].append(_rec)
+                        key = "F:M5 no agotado"
+                        res.reject_counts_delta[key] = res.reject_counts_delta.get(key, 0) + 1
+                        res.logs.append(
+                            f"[STRAT-F] {sym} {f_eval.direction} skip: M5 no agotado (k={_m5_k})"
+                        )
+                        return res
                 f_candidate = CandidateEntry(
                     asset=sym,
                     payout=payout,
@@ -2585,6 +2622,14 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                         )
                 if _do_promote:
                     score_candidate(f_candidate)
+                    # ── Propagar el score propio de STRAT-F (strength 0-1 → 0-100) ──
+                    # BUG (2026-07-27): el worker grababa strength=69 en la caja
+                    # negra pero NO lo copiaba a f_candidate.score; select_best
+                    # veía el score genérico de STRAT-A (~53) y rechazaba la
+                    # señal (score<umbral) -> 0 disparos. Usamos strength como
+                    # base; los boosts abajo (stoch/ML/confluence) se suman encima.
+                    if f_eval.strength is not None:
+                        f_candidate.score = round(float(f_eval.strength) * 100.0, 1)
                     if _stoch_help.score_delta:
                         f_candidate.score = round(f_candidate.score + _stoch_help.score_delta, 1)
                         if isinstance(f_candidate.score_breakdown, dict):
@@ -2671,6 +2716,51 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     f"[MATURING] drop {sym} reason=invalidated ({f_eval.skip_reason})"
                 )
         # Caja negra: se graba en el LOOP (no aquí). Devolvemos el record.
+        # band = nivel de la zona fractal evaluada. Permite unir EXACTO el
+        # rechazo 'zona muy joven' con su posterior promocion (SHADOW_PROMOTED
+        # / ACCEPTED) via maturing_watchlist (make_key usa el band). Si no hay
+        # zona fractal disponible, queda None -> NULL en la DB.
+        _band_for_bb = None
+        try:
+            _bb_band, _bb_age, _bb_ev = fractal_band_and_age(candles, f_eval.m5_event)
+            if _bb_band is not None:
+                _band_for_bb = float(_bb_band)
+        except Exception:
+            _band_for_bb = None
+        # ── Cero NULL en stoch M5/M1 ────────────────────────────────────────────
+        # Antes solo se empaquetaban en la ruta de promocion (maturing). Para los
+        # rechazados (la inmensa mayoria) quedaban None -> NULL en la DB. Ahora se
+        # arman SIEMPRE desde el compute_stoch real (no se inventa nada). El bloque
+        # de promocion mas abajo los reemplaza con la variante enriquecida (exhausted).
+        # Best-effort: si un activo trae datos raros que hagan fallar compute_stoch
+        # DENTRO del worker paralelo, NO debe tumbar el proceso (eso dispara
+        # BrokenProcessPool y degrada todo el scan). Se deja {} neutro y el worker vive.
+        try:
+            if _stoch_m5_json is None:
+                _k5 = (_stoch_m5 or {}).get("k")
+                _stoch_m5_json = {
+                    "k": _k5,
+                    "d": (_stoch_m5 or {}).get("d"),
+                    "k_prev": (_stoch_m5 or {}).get("k_prev"),
+                    "exhausted": (
+                        bool(stoch_m5_exhausted(_k5, f_eval.direction))
+                        if (_stoch_m5 and f_eval.direction)
+                        else None
+                    ),
+                }
+            if _stoch_m1_json is None:
+                _s1 = compute_stoch(candles_1m, k_period=14, d_period=3) if candles_1m else compute_stoch([])
+                _stoch_m1_json = {
+                    "k": (_s1 or {}).get("k"),
+                    "d": (_s1 or {}).get("d"),
+                    "k_prev": (_s1 or {}).get("k_prev"),
+                    "estado": (_s1 or {}).get("estado"),
+                    "cruce": (_s1 or {}).get("cruce"),
+                }
+        except Exception as _stoch_err:  # nunca matar el worker paralelo
+            log.error("[STRAT-F] stoch M5/M1 no calculable (best-effort): %s", _stoch_err)
+            _stoch_m5_json = _stoch_m5_json or {}
+            _stoch_m1_json = _stoch_m1_json or {}
         if _rec.get("decision"):
             res.black_box_record = {
                 "strategy": "STRAT-F",
@@ -2678,6 +2768,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 "direction": f_eval.direction or "",
                 "score": round(f_eval.strength * 100.0, 1),
                 "payout": payout,
+                "band": _band_for_bb,
                 "decision": _rec["decision"],
                 "decision_reason": f_eval.m5_event or "",
                 "reject_reason": (
@@ -2699,6 +2790,8 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     "exhaustion_candle": getattr(f_eval, "exhaustion_candle", None),
                     "separation_ok": getattr(f_eval, "separation_ok", None),
                     "separation_rel": getattr(f_eval, "separation_rel", None),
+                    "spike_observe": getattr(f_eval, "spike_observe", None),
+                    "early_alert": getattr(f_eval, "early_alert", None),  # R-EA7: marca de atencion en la caja negra
                 },
                 "candles_1m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
@@ -2706,7 +2799,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 ],
                 "candles_5m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
-                    for c in (candles or [])[-3:]
+                    for c in (candles or [])[-30:]
                 ],
                 "candles_15m": [
                     {"ts": c.ts, "o": c.open, "h": c.high, "l": c.low, "c": c.close}
@@ -2723,6 +2816,31 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
     return res
 
 
+def _evaluate_strat_f_safe(ctx):
+    """Wrapper que NUNCA deja morir al worker paralelo.
+
+    Si `_evaluate_strat_f_serial` lanza CUALQUIER excepción (el origen del
+    exitcode=1 que rompía el ProcessPool), la capturamos aquí, logueamos el
+    asset + traceback completo, y devolvemos un resultado neutro. Así el worker
+    vive, `asyncio.gather(return_exceptions=True)` captura el error por activo
+    (legible en el loop) y el pool NO se rompe (fin del BrokenProcessPool).
+    """
+    try:
+        return _evaluate_strat_f_serial(ctx)
+    except Exception as _err:
+        import traceback as _tb
+        try:
+            _sym = ctx.sym
+        except Exception:
+            _sym = "?"
+        log.error(
+            "[STRAT-F] worker crasheo evaluando %s (se aisló, el pool sigue vivo):\n%s",
+            _sym,
+            "".join(_tb.format_exception(type(_err), _err, _err.__traceback__)),
+        )
+        return StratFEvalResult()
+
+
 async def _run_strat_f_parallel(ctxs, bb, maturing_wl, log, candidates, reject_counts, batch):
     """Evalúa STRAT-F en paralelo (ProcessPool) y aplica los deltas al loop.
 
@@ -2734,21 +2852,25 @@ async def _run_strat_f_parallel(ctxs, bb, maturing_wl, log, candidates, reject_c
         return 0
     pool = get_scan_pool()
     if pool is None:
-        results = [_evaluate_strat_f_serial(c) for c in ctxs]
+        results = [_evaluate_strat_f_safe(c) for c in ctxs]
     else:
         loop = asyncio.get_event_loop()
         try:
-            futures = [loop.run_in_executor(pool, _evaluate_strat_f_serial, c) for c in ctxs]
+            futures = [loop.run_in_executor(pool, _evaluate_strat_f_safe, c) for c in ctxs]
             results = await asyncio.gather(*futures, return_exceptions=True)
         except BrokenProcessPool:
             # Un worker hijo murio de repente (sin memoria, senal del SO, etc.).
             # El grupo queda inutilizable: lo cerramos, recreamos para el
             # proximo ciclo y degradamos ESTE ciclo a evaluacion serial para
             # que el bot no se caiga. (Ver consolidation_bot.main scan_all.)
+            # Diagnóstico: capturamos el exit code de los workers muertos
+            # ANTES de shutdown (que nulls la referencia) para saber la causa.
+            _diag = diagnose_scan_pool_broken(pool)
             log.error(
                 "[STRAT-F] El grupo de procesos se rompio (un worker murio "
-                "abruptamente). Degradando a evaluacion serial este ciclo y "
-                "recreando el pool para el siguiente."
+                "abruptamente). Diagnostico: %s. Degradando a evaluacion "
+                "serial este ciclo y recreando el pool para el siguiente.",
+                _diag,
             )
             try:
                 shutdown_scan_pool()

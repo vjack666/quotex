@@ -181,7 +181,9 @@ async def _run(args: argparse.Namespace) -> None:
         try:
             from hub import HubScanner, init_server, start_server
             hub_scanner = HubScanner()
-            init_server(hub_scanner)
+            # Pasar el bot al HUB para que el panel STRAT-F se alimente en vivo
+            # (balance, trades, panel) — main es el unico ejecutor (bot+HUB unificados).
+            init_server(hub_scanner, bot=cb)
             hub_task = start_server(port=hub_port)
         except Exception as exc:
             print(f"[main] HUB dashboard no disponible: {exc}")

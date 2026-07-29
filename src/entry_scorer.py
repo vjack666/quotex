@@ -265,27 +265,10 @@ HIST_LEVEL_PENALTY     = 12.0    # penalización si operamos contra el nivel his
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  HELPERS
+#  HELPERS (unificados en math_utils)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _ema(values: List[float], period: int) -> List[float]:
-    if len(values) < period:
-        return []
-    k = 2 / (period + 1)
-    result = [mean(values[:period])]
-    for v in values[period:]:
-        result.append(v * k + result[-1] * (1 - k))
-    return result
-
-
-def _clamp(val: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, val))
-
-
-def _normalize(val: float, lo: float, hi: float) -> float:
-    if hi <= lo:
-        return 0.0
-    return _clamp((val - lo) / (hi - lo), 0.0, 1.0)
+from math_utils import clamp, ema, normalize
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,14 +289,14 @@ def _score_compression(zone: ConsolidationZone, weight: int) -> float:
     else:
         ratio = 0.0
 
-    bars_bonus = _normalize(zone.bars_inside, 15, 30) * 0.15
-    ratio = _clamp(ratio + bars_bonus, 0.0, 1.0)
+    bars_bonus = normalize(zone.bars_inside, 15, 30) * 0.15
+    ratio = clamp(ratio + bars_bonus, 0.0, 1.0)
 
     return round(ratio * weight, 2)
 
 
 def _score_payout(payout: int, weight: int) -> float:
-    ratio = _normalize(payout, PAYOUT_MIN, PAYOUT_MAX)
+    ratio = normalize(payout, PAYOUT_MIN, PAYOUT_MAX)
     return round(ratio * weight, 2)
 
 
@@ -323,8 +306,8 @@ def _score_trend(candles: List[Candle], direction: str, weight: int) -> float:
         return weight * 0.5
 
     closes = [c.close for c in candles[-40:]]
-    ema_fast = _ema(closes, TREND_EMA_FAST)
-    ema_slow = _ema(closes, TREND_EMA_SLOW)
+    ema_fast = ema(closes, TREND_EMA_FAST)
+    ema_slow = ema(closes, TREND_EMA_SLOW)
 
     if not ema_fast or not ema_slow:
         return weight * 0.5
@@ -345,7 +328,7 @@ def _score_trend(candles: List[Candle], direction: str, weight: int) -> float:
         slope_support = slope > 0
 
     if aligned and slope_support:
-        ratio = 0.85 + 0.15 * _normalize(abs(slope) * 100, 0, 0.5)
+        ratio = 0.85 + 0.15 * normalize(abs(slope) * 100, 0, 0.5)
     elif aligned and not slope_support:
         ratio = 0.55
     elif not aligned and slope_support:
@@ -355,9 +338,9 @@ def _score_trend(candles: List[Candle], direction: str, weight: int) -> float:
 
     price = closes[-1]
     if direction == "put" and price < ef_last:
-        ratio = _clamp(ratio + 0.10, 0.0, 1.0)
+        ratio = clamp(ratio + 0.10, 0.0, 1.0)
     elif direction == "call" and price > ef_last:
-        ratio = _clamp(ratio + 0.10, 0.0, 1.0)
+        ratio = clamp(ratio + 0.10, 0.0, 1.0)
 
     return round(ratio * weight, 2)
 
@@ -377,10 +360,10 @@ def _score_bounce(candles: List[Candle], zone: ConsolidationZone, direction: str
         wick_score = 0.0
     elif direction == "put":
         upper_wick = last.high - max(last.open, last.close)
-        wick_score = _normalize(upper_wick / total_range, WICK_RATIO_MIN, 0.8)
+        wick_score = normalize(upper_wick / total_range, WICK_RATIO_MIN, 0.8)
     else:
         lower_wick = min(last.open, last.close) - last.low
-        wick_score = _normalize(lower_wick / total_range, WICK_RATIO_MIN, 0.8)
+        wick_score = normalize(lower_wick / total_range, WICK_RATIO_MIN, 0.8)
 
     recent = candles[-(BOUNCE_CANDLES + 1):]
     if direction == "put":
@@ -412,7 +395,7 @@ def _score_momentum(candles: List[Candle], weight: int) -> float:
         return round(weight * 0.5, 2)
 
     ratio = breakout_candle.body / avg  # 1.0x a 2.5x
-    normalized = _normalize(ratio, 1.0, 2.5)
+    normalized = normalize(ratio, 1.0, 2.5)
     return round(normalized * weight, 2)
 
 

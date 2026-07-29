@@ -130,7 +130,7 @@ def print_calibration(days: int = 90) -> None:
     print(f"{'═'*70}")
     if c["total"] == 0:
         print("  (sin datos STRAT-F en el diario todavia)")
-        print("  Corre run_strat_f_panel.bat para alimentarlo.")
+        print("  Corre run.bat y desde el hub alimenta el diario (escaneo en vivo).")
         print()
         return
     print(f"  Evaluados : {c['total']}")

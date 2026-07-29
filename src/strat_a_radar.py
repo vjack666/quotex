@@ -17,8 +17,7 @@ from models import ConsolidationZone
 from strat_a import price_at_ceiling, price_at_floor
 
 
-def _clamp(val: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, val))
+from math_utils import clamp
 
 
 @dataclass
@@ -114,7 +113,7 @@ def compute_readiness(
         return 0.0
 
     tol = max(dynamic_touch_tolerance, 1e-12)
-    proximity = 30.0 * _clamp(1.0 - dist / tol, 0.0, 1.0)
+    proximity = 30.0 * clamp(1.0 - dist / tol, 0.0, 1.0)
 
     min_age = ZONE_AGE_BREAKOUT_MIN if stage == "breakout" else ZONE_AGE_REBOUND_MIN
     age_ratio = zone.age_minutes / min_age if min_age > 0 else 0.0
@@ -125,7 +124,7 @@ def compute_readiness(
     pending_bonus = 10.0 if in_pending else 0.0
     ev_bonus = min(10.0, max(0.0, ev_score * 0.1))
 
-    return _clamp(proximity + maturity + compression + payout_pts + pending_bonus + ev_bonus, 0.0, 100.0)
+    return clamp(proximity + maturity + compression + payout_pts + pending_bonus + ev_bonus, 0.0, 100.0)
 
 
 def rank_and_trim(

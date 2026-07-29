@@ -4,9 +4,8 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
+ROOT = Path(__file__).resolve().parent  # este archivo vive en src/
+sys.path.insert(0, str(ROOT))  # black_box_recorder está en el mismo directorio
 
 from black_box_recorder import DB_DIR
 

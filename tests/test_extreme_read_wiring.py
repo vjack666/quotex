@@ -19,16 +19,17 @@ def test_scanner_imports_gate():
     )
 
 
-def test_flag_defaults_off():
-    # Bandera OFF por defecto: el bot opera igual hasta que el usuario la encienda.
-    assert _cfg.EXTREME_READ_ENABLED is False
+def test_flag_defaults_on():
+    # Bandera ON por defecto (Ruben): el extremo del rango opera solo con
+    # cuerpo a favor, filtrando el rebote de absorcion. El bot respeta el gate.
+    assert _cfg.EXTREME_READ_ENABLED is True
     assert 0.0 < _cfg.EXTREME_READ_POS <= 0.5
     assert 0.0 < _cfg.EXTREME_READ_BODY_MIN_RATIO <= 1.0
 
 
 def test_flag_read_dynamically(monkeypatch):
     # El scanner lee la bandera en runtime (no en import), así respeta override.
-    monkeypatch.setattr(_cfg, "EXTREME_READ_ENABLED", True)
-    assert _cfg.EXTREME_READ_ENABLED is True
-    # revierto para no contaminar otros tests
     monkeypatch.setattr(_cfg, "EXTREME_READ_ENABLED", False)
+    assert _cfg.EXTREME_READ_ENABLED is False
+    # revierto para no contaminar otros tests
+    monkeypatch.setattr(_cfg, "EXTREME_READ_ENABLED", True)

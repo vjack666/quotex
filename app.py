@@ -132,7 +132,23 @@ async def lifespan(application):
     poller = asyncio.create_task(_state_poller())
     relay = asyncio.create_task(_event_relay())
 
-    log.info("Hub dashboard ready. Bot is STOPPED — use /api/bot/start to begin.")
+    # Battery monitor — shuts down everything if battery ≤ 2%
+    battery_mon = asyncio.create_task(_battery_watchdog())
+
+    log.info("Hub dashboard ready.")
+
+    # Auto-arranque del bot al abrir el hub (un solo clic = bot operando).
+    # Desactivable con HUB_NO_AUTOSTART=1 para arranque manual desde el botón.
+    if os.environ.get("HUB_NO_AUTOSTART", "").strip().lower() not in ("1", "true", "yes"):
+        if _runner.state in ("stopped", "error"):
+            log.info("Auto-start del bot (HUB_NO_AUTOSTART no set)…")
+            asyncio.create_task(_connect_hub_after_start())
+            try:
+                await _runner.start()
+            except Exception as _as_err:
+                log.error("Auto-start falló: %s", _as_err)
+        else:
+            log.info("Bot ya en estado '%s' — no auto-start.", _runner.state)
 
     # Auto-open hub as soon as API is up (also scheduled from main(); this is backup).
     if os.environ.get("HUB_NO_OPEN", "").strip().lower() not in ("1", "true", "yes"):
@@ -155,12 +171,17 @@ async def lifespan(application):
         pass
     poller.cancel()
     relay.cancel()
+    battery_mon.cancel()
     try:
         await asyncio.wait_for(poller, timeout=0.5)
     except (asyncio.CancelledError, Exception):
         pass
     try:
         await asyncio.wait_for(relay, timeout=0.5)
+    except (asyncio.CancelledError, Exception):
+        pass
+    try:
+        await asyncio.wait_for(battery_mon, timeout=0.5)
     except (asyncio.CancelledError, Exception):
         pass
     log.info("App stopped.")
@@ -237,6 +258,33 @@ async def _event_relay():
         event_bus.unsubscribe(queue)
 
 
+# ── Battery monitor (lifespan-scoped) ──────────────────────────────────────
+
+async def _battery_watchdog():
+    """Shut down everything when battery ≤ 2% on battery power."""
+    from system_monitor import battery_monitor
+
+    async def _on_critical():
+        log.error("BATTERY CRITICAL — initiating emergency shutdown")
+        try:
+            from hub.server import kill_hub_browser_tree
+            kill_hub_browser_tree()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(_runner.shutdown(), timeout=5.0)
+        except Exception:
+            pass
+        import signal
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    await battery_monitor(
+        threshold_pct=2.0,
+        poll_interval_sec=30.0,
+        on_critical=_on_critical,
+    )
+
+
 # ── REST API Endpoints ────────────────────────────────────────────────────────
 
 @_hub_app.get("/api/bot/status")
@@ -250,9 +298,15 @@ async def bot_start():
     """Start the trading bot."""
     if _runner.state in ("running", "starting"):
         return {"status": "already_running", "state": _runner.state}
+    # If zombie detected, refuse — user must force_kill first
+    if _runner._orphan_warned:
+        return {"status": "zombie_detected", "state": _runner.state, "zombie": True}
     # Connect hub scanner to bot after it starts
     asyncio.create_task(_connect_hub_after_start())
     await _runner.start()
+    # Check if start was refused (zombie task still alive)
+    if _runner._orphan_warned:
+        return {"status": "zombie_detected", "state": _runner.state, "zombie": True}
     return {"status": "started", "state": _runner.state}
 
 
@@ -278,17 +332,30 @@ async def bot_reconnect():
     return result
 
 
+@_hub_app.post("/api/bot/force_kill")
+async def bot_force_kill():
+    """Force-kill a zombie bot task. Nuclear option."""
+    log = logging.getLogger("app")
+    log.warning("FORCE_KILL requested from hub")
+    result = await _runner.force_kill()
+    return result
+
+
 @_hub_app.post("/api/bot/stop")
 async def bot_stop():
-    """Stop the trading bot gracefully (user action → disarm schedule)."""
+    """Pause the trading bot — keeps hub server running for reconfiguration."""
+    log = logging.getLogger("app")
     if _runner.state not in ("running", "starting"):
         # Still disarm schedule if user hits Detener while already stopped
         await _runner.stop(user=True)
         return {"status": "already_stopped", "state": _runner.state}
     await _runner.stop(user=True)
-    # Cierra también el server/app para que no quede en "reconectando…"
-    # ni procesos huérfanos (equivalente a FINALIZAR pero desde STOP).
-    _force_exit_cleanup(timeout_sec=2.0)
+    # If stop left a zombie, force-kill it
+    if _runner._task is not None and not _runner._task.done():
+        log.warning("Bot stop left zombie — force-killing")
+        await _runner.force_kill()
+    # NO _force_exit_cleanup — hub stays alive so user can reconfigure and restart.
+    log.info("Bot PAUSED (hub still alive — use Detener to restart or Finalizar to quit)")
     return {"status": "stopped", "state": _runner.state}
 
 
@@ -296,9 +363,18 @@ async def bot_stop():
 async def shutdown_server():
     """Stop bot + close browser + kill server."""
     import signal, threading
-    # Stop bot if running
+    # Stop bot if running (with force-kill fallback)
     if _runner.state in ("running", "starting"):
-        await _runner.stop()
+        try:
+            await asyncio.wait_for(_runner.stop(), timeout=12.0)
+        except asyncio.TimeoutError:
+            log.warning("shutdown: stop() timed out — force-killing bot")
+            await _runner.force_kill()
+        except Exception:
+            pass
+    # If zombie detected, force-kill
+    if _runner._task is not None and not _runner._task.done():
+        await _runner.force_kill()
     # Close browser window
     from hub.server import _close_browser
     _close_browser()

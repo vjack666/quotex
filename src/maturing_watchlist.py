@@ -69,31 +69,15 @@ def fractal_band_and_age(candles_5m: list[Any], m5_event: str | None = None) -> 
     last_idx = len(candles_5m) - 3
     want = (m5_event or "").lower()
 
-    def _is_down(i: int) -> bool:
-        lo = candles_5m[i].low
-        return (
-            lo < candles_5m[i - 1].low
-            and lo < candles_5m[i - 2].low
-            and lo < candles_5m[i + 1].low
-            and lo < candles_5m[i + 2].low
-        )
-
-    def _is_up(i: int) -> bool:
-        hi = candles_5m[i].high
-        return (
-            hi > candles_5m[i - 1].high
-            and hi > candles_5m[i - 2].high
-            and hi > candles_5m[i + 1].high
-            and hi > candles_5m[i + 2].high
-        )
+    from math_utils import fractal_down as _is_down, fractal_up as _is_up
 
     for i in range(last_idx, 1, -1):
-        if want in ("", "none", "fractal_down") and _is_down(i):
+        if want in ("", "none", "fractal_down") and _is_down(candles_5m, i):
             if want == "fractal_up":
                 continue
             bars_age = (len(candles_5m) - 1) - i
             return float(candles_5m[i].low), bars_age, "fractal_down"
-        if want in ("", "none", "fractal_up") and _is_up(i):
+        if want in ("", "none", "fractal_up") and _is_up(candles_5m, i):
             if want == "fractal_down":
                 continue
             bars_age = (len(candles_5m) - 1) - i
@@ -133,6 +117,7 @@ class MaturingWatchlist:
     max_age_bars: int = 12
     ttl_sec: float = 3600.0
     _entries: dict[str, MaturingEntry] = field(default_factory=dict)
+    _watcher: Any | None = None  # set externally by MaturingWatcher
     counters: dict[str, int] = field(
         default_factory=lambda: {
             "captured": 0,
@@ -201,6 +186,8 @@ class MaturingWatchlist:
         self._entries[key] = entry
         self.counters["captured"] = self.counters.get("captured", 0) + 1
         self._enforce_cap()
+        if self._watcher is not None:
+            self._watcher.on_capture(entry)
         return entry
 
     def mark_promoted(self, key: str, *, mode: str = "live") -> None:
@@ -214,6 +201,8 @@ class MaturingWatchlist:
         else:
             self.counters["promoted_live"] = self.counters.get("promoted_live", 0) + 1
         del self._entries[key]
+        if self._watcher is not None:
+            self._watcher.on_promote(entry, mode)
 
     def drop(self, key: str, reason: str) -> None:
         entry = self._entries.get(key)
@@ -226,6 +215,8 @@ class MaturingWatchlist:
         else:
             self.counters["dropped_invalid"] = self.counters.get("dropped_invalid", 0) + 1
         del self._entries[key]
+        if self._watcher is not None:
+            self._watcher.on_drop(entry, reason)
 
     def expire_stale(
         self,
