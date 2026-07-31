@@ -388,6 +388,12 @@ async def _execute_pending_contract(bot: Any, payload: dict) -> dict:
         return {"ok": False, "reason": "sin_contratados"}
 
     event = events[0]
+    card = getattr(event, "card", None)
+    if card is None:
+        card = bot.edificio.get_card(event.asset)
+    if card is None or card.piso != 4:
+        return {"ok": False, "reason": "not_contratado"}
+
     amount = float(payload.get("amount") or CONTRACT_DEFAULT_AMOUNT)
     duration = int(payload.get("duration") or CONTRACT_DEFAULT_DURATION)
     account_type = str(payload.get("account_type") or "PRACTICE")
