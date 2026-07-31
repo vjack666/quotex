@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 750" font-family="Consolas, monospace">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="piso1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f3460"/>
+      <stop offset="100%" stop-color="#1a1a5e"/>
+    </linearGradient>
+    <linearGradient id="piso2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16213e"/>
+      <stop offset="100%" stop-color="#0f3460"/>
+    </linearGradient>
+    <linearGradient id="piso3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a4e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="750" fill="url(#bg)" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="38" text-anchor="middle" fill="#e94560" font-size="22" font-weight="bold" filter="url(#glow)">🏢 EDIFICIO DE CONTRATACIÓN</text>
+  <text x="450" y="56" text-anchor="middle" fill="#8899aa" font-size="11">GBPNZD_otc — Sistema de 3 Pisos + Simulación Track A vs Track B</text>
+
+  <!-- ==================== PISO 3 ==================== -->
+  <rect x="30" y="75" width="840" height="120" rx="6" fill="url(#piso3)" stroke="#e94560" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="50" y="98" fill="#e94560" font-size="15" font-weight="bold">PISO 3 — SALA DE ESPERA DEL CRUCE 🎯</text>
+  <text x="50" y="118" fill="#ffd700" font-size="11">Llega aquí si: Pasó Prueba A + Prueba B del Piso 2</text>
+  
+  <text x="50" y="140" fill="#66ccff" font-size="11">⏳ Espera activa:</text>
+  <text x="70" y="157" fill="#aabbcc" font-size="10">1. ¿Sigue pagando bien? → NO → 🚪 Fuera del edificio</text>
+  <text x="70" y="172" fill="#aabbcc" font-size="10">2. ¿Sigue frenado? → NO → ⬇️ Vuelve al Piso 2</text>
+  <text x="70" y="187" fill="#aabbcc" font-size="10">3. ¿Sigue en extremo? → NO → ⬇️ Vuelve al Piso 2</text>
+
+  <!-- Piso 3 right side - cross criteria -->
+  <rect x="480" y="88" width="370" height="95" rx="5" fill="#1a1a3e" stroke="#e94560" stroke-width="0.5"/>
+  <text x="495" y="108" fill="#e94560" font-size="11" font-weight="bold">CRITERIO DE CRUCE LIMPIO</text>
+  <text x="495" y="126" fill="#aabbcc" font-size="10">☐ K y D SEPARADAS (no sticky) → cruce confiable ✅</text>
+  <text x="495" y="142" fill="#aabbcc" font-size="10">☐ K y D muy pegadas → esperar que se separen</text>
+  <text x="495" y="162" fill="#ffd700" font-size="10" font-weight="bold">☐ Cruce K/D limpio → CONTRATADO 🎯</text>
+
+  <!-- Arrow P3 → Output -->
+  <line x1="450" y1="195" x2="450" y2="215" stroke="#e94560" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ==================== PISO 2 ==================== -->
+  <rect x="30" y="215" width="840" height="190" rx="6" fill="url(#piso2)" stroke="#0f3460" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="50" y="240" fill="#0f3460" font-size="15" font-weight="bold">PISO 2 — EL CEREBRO 🧠 (Pruebas)</text>
+  <text x="50" y="260" fill="#8899aa" font-size="11">El activo se queda aquí el tiempo que necesite hasta pasar AMBAS pruebas</text>
+
+  <!-- Prueba A -->
+  <rect x="40" y="272" width="395" height="60" rx="5" fill="#1a2a4e" stroke="#4a9eff" stroke-width="1"/>
+  <text x="55" y="290" fill="#4a9eff" font-size="12" font-weight="bold">PRUEBA A — ¿El impulso está muerto?</text>
+  <text x="55" y="307" fill="#aabbcc" font-size="10">☐ M15: brake_eval detecta frenado post-extensión</text>
+  <text x="55" y="322" fill="#aabbcc" font-size="10">☐ Si el impulso sigue vivo → NO PASA. Espera.</text>
+
+  <!-- Prueba B -->
+  <rect x="455" y="272" width="395" height="60" rx="5" fill="#1a2a4e" stroke="#4a9eff" stroke-width="1"/>
+  <text x="470" y="290" fill="#4a9eff" font-size="12" font-weight="bold">PRUEBA B — ¿Está en extremo?</text>
+  <text x="470" y="307" fill="#aabbcc" font-size="10">☐ M15: K ≤ 20 (SOBREVENTA → CALL)</text>
+  <text x="470" y="322" fill="#aabbcc" font-size="10">☐ M15: K ≥ 80 (SOBRECOMPRA → PUT)</text>
+
+  <!-- Contexto adicional -->
+  <rect x="40" y="340" width="810" height="30" rx="4" fill="#1a2a4e" stroke="#4a9eff" stroke-width="0.5" stroke-dasharray="4"/>
+  <text x="55" y="359" fill="#667788" font-size="10">📌 Contexto adicional (opcional, suma puntos): Zona HTF (soporte/resistencia) cerca del precio actual</text>
+
+  <!-- Context note -->
+  <text x="40" y="395" fill="#ffd700" font-size="10">→ Pasa Prueba A + Prueba B → SUBE al Piso 3</text>
+
+  <!-- Arrow P2 → P3 up -->
+  <line x1="450" y1="215" x2="450" y2="200" stroke="#4a9eff" stroke-width="1" stroke-dasharray="4"/>
+
+  <!-- Arrow P2 → P1 down -->
+  <line x1="450" y1="405" x2="450" y2="425" stroke="#4a9eff" stroke-width="1" stroke-dasharray="4"/>
+
+  <!-- ==================== PISO 1 ==================== -->
+  <rect x="30" y="425" width="840" height="60" rx="6" fill="url(#piso1)" stroke="#533483" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="50" y="452" fill="#533483" font-size="15" font-weight="bold">PISO 1 — RECEPCIÓN 🚪</text>
+  <text x="50" y="472" fill="#aabbcc" font-size="11">☐ Solo entran OTC que pagan ≥ lo que el usuario pide</text>
+  <text x="50" y="487" fill="#cc4444" font-size="10" font-weight="bold">⚠ Si el pago baja → 🚪 Fuera del edificio (Regla N°1)</text>
+
+  <!-- ==================== REGLAS IMPORTANTES ==================== -->
+  <rect x="30" y="500" width="840" height="70" rx="5" fill="#1a1a2e" stroke="#533483" stroke-width="0.5"/>
+  <text x="50" y="520" fill="#ffd700" font-size="12" font-weight="bold">📜 REGLAS DEL EDIFICIO</text>
+  <text x="50" y="538" fill="#aabbcc" font-size="10">Regla N°1: Si el activo deja de pagar → se va. Pierde todo. No importa el piso.</text>
+  <text x="50" y="554" fill="#aabbcc" font-size="10">Regla N°2: Nadie arranca de cero. Si ya está en P2/P3, solo se revisa su piso actual.</text>
+  <text x="50" y="570" fill="#aabbcc" font-size="10">Regla N°3: Se puede bajar de piso, pero no salir (salvo Regla N°1).</text>
+
+  <!-- ==================== HALLAZGO SIMULACIÓN ==================== -->
+  <rect x="30" y="585" width="840" height="150" rx="5" fill="#2a1a1a" stroke="#e94560" stroke-width="1"/>
+  <text x="50" y="608" fill="#e94560" font-size="13" font-weight="bold">🔬 HALLAZGO DE LA SIMULACIÓN — GBPNZD_otc</text>
+  
+  <text x="50" y="630" fill="#ffd700" font-size="11">Track A (5 min post M15 cross):</text>
+  <text x="70" y="648" fill="#aabbcc" font-size="10">✅ M15 cruza K>D en sobreventa → espera 5 min → entra con M1 en K=65</text>
+  <text x="70" y="663" fill="#aabbcc" font-size="10">⏱ Trade 15 min: M15 K sigue subiendo (8→13→15→22) → PROBABLE WIN</text>
+
+  <text x="460" y="630" fill="#ffd700" font-size="11">Track B (esperar M1 sobreventa):</text>
+  <text x="480" y="648" fill="#aabbcc" font-size="10">❌ M1 NUNCA volvió a K<20 después del cruce M15</text>
+  <text x="480" y="663" fill="#aabbcc" font-size="10">⚠ M1 subió de K=8 → K=91 sin parar. No hubo entrada.</text>
+
+  <text x="50" y="690" fill="#66ff66" font-size="11" font-weight="bold">🎯 CONCLUSIÓN: M1 es VOLÁTIL. Después del cruce M15, M1 sube rápido.</text>
+  <text x="50" y="708" fill="#66ccff" font-size="10">¿Track B inviable? O esperar que M1 CICLE COMPLETO (OB→OS puede llevar horas).</text>
+  <text x="50" y="725" fill="#66ccff" font-size="10">M1 está ahora en K=86 bajando desde OB. Si sigue cayendo → podría llegar a OS en ~30-60 min.</text>
+
+</svg>

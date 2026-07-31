@@ -103,7 +103,7 @@ $featScript = [System.IO.Path]::GetTempFileName() + ".py"
 try {
     Set-Content -Path $featScript -Encoding UTF8 -Value @'
 import json, os, sys
-data = json.load(open("feature_list.json"))
+data = json.load(open("feature_list.json", encoding="utf-8"))
 valid = {"pending", "spec_ready", "in_progress", "done", "blocked"}
 in_progress = [f for f in data["features"] if f["status"] == "in_progress"]
 if len(in_progress) > 1:

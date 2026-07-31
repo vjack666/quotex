@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>QUOTEX — Mapa de Arquitectura</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0f1115; color: #e6e6e6; }
+    header { padding: 14px 18px; background: #141820; border-bottom: 1px solid #243044; }
+    h1 { margin: 0; font-size: 18px; color: #7dd3fc; }
+    .wrap { padding: 18px; }
+    .card { background: #141820; border: 1px solid #243044; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 14px; color: #a5b4fc; }
+    .mermaid { background: #0b0f14; border-radius: 8px; padding: 10px; }
+    code { background: #0b0f14; padding: 2px 6px; border-radius: 6px; color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>QUOTEX — Grafo de arquitectura (estado actual)</h1>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <h2>Flujo de datos principal</h2>
+      <div class="mermaid">
+      graph LR
+        subgraph Brokers [Broker / Fuente]
+          Q[Quotex WS]
+        end
+        subgraph Conexion [Capa 1 — Conexión]
+          conn[connection.py<br/>WS + reconexión + locks]
+          caf[caffeine.py<br/>keepalive + ConnectionWatchdog]
+        end
+        subgraph Analisis [Capa 2 — Análisis]
+          sc[scanner.py<br/>escaneo paralelo/serial]
+          pref[scan_prefetch.py<br/>1m / 5m / 15m]
+          mf[math_filters.py<br/>Hurst / R² / squeeze]
+          stoch[stochastic_*.py<br/>ayuda M15 / M5 / M1]
+          mat[maturing_watcher.py<br/>watchlist zonas jóvenes]
+          htf[htf_scanner.py]
+          mkt[marketfeed/ src/<br/>Replay + Parquet + BlackBox]
+        end
+        subgraph Estrategias [Capa 3 — Estrategias]
+          sf[strat_fractal.py<br/>evaluate_strat_f]
+          sa[strat_a.py]
+          sl[strategy_lab/**<br/>brake_eval + pnl_sim + poi_filter]
+        end
+        subgraph Ejecucion [Capa 4 — Ejecución]
+          ex[executor.py<br/>buy/sell + scoring final]
+          ms[massaniello_engine.py]
+          mr[massaniello_risk.py]
+          es[entry_scorer.py]
+          ent[entry_sync.py]
+          bb[black_box_recorder.py<br/>DB + JSONL + agent + memory]
+        end
+        subgraph Facade [Facade / UI]
+          cb[consolidation_bot.py<br/>orquestador loop + watchers]
+          hub[hub/server.py<br/>FastAPI + WS]
+          ui[hub/static/index.html]
+        end
+        subgraph Datos [Datos]
+          tj[(trade_journal-*.db)]
+          bbs[(black_box_strat_*.db)]
+          ag[data/agent/live_memory.json]
+          mm[data/market_memory/]
+          mdl[data/models/lightgbm_v1.pkl]
+        end
+        Q --> conn
+        conn --> caf
+        conn --> sc
+        sc --> pref
+        sc --> mf
+        sc --> stoch
+        sc --> mat
+        sc --> htf
+        sc -.usa replay offline.- mkt
+        sc --> sf
+        sc --> sa
+        sf --> sl
+        sa --> es
+        sf --> es
+        es --> ex
+        ex --> ms
+        ex --> mr
+        ex --> ent
+        ex --> bb
+        bb --> tj
+        bb --> bbs
+        bb --> ag
+        bb --> mm
+        mr --> bb
+        cb --> conn
+        cb --> sc
+        cb --> ex
+        cb --> hub
+        hub --> ui
+        mdl -.predicción.- es
+        ent -.sincroniza open.- Q
+        mkt -.grabador.- bb
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Features vivas</h2>
+      <div class="mermaid">
+      graph LR
+        core[STRAT-F v1 + SPIKE + Spike Wyckoff + EarlyAlert]
+        stoch[Stoch M15 help hard]
+        mat[Maturing watchlist]
+        ext[Extreme read gate]
+        ml[Entry Intelligence Agent LightGBM]
+        feat[marketfeed / Observador / ExperienceEngine / ZoneIA]
+        ops[Caffeine + ConnectionWatchdog + CleanPool + Forzar reconexión hub]
+        sched[schedule_auto <b>pausado</b>]
+        core --> stoch
+        core --> mat
+        core --> ext
+        ml -.predicción opcional.- core
+        feat -.capa offline / 0.5.- core
+        ops -.sostén.- core
+        sched -.fuera de cola.- core
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Caminos calientes (lectura antes de tocar)</h2>
+      <div class="mermaid">
+      graph LR
+        buy[buy()/sell() en hub] -->|POST /api/bot/start| app[app.py]
+        scan[loop WS scan 60s] --> sc[scanner.py]
+        stratf[strat_f] --> |10 workers spawn| pool[ProcessPoolExecutor]
+        stoch_fix[stoch fix] --> |Full 14,3,3| sf[strat_fractal.py]
+        recon[Hub reconectar] -->|fuerza relogin| conn[connection.py]
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pegajosos / traps frecuentes</h2>
+      <ul>
+        <li><code>off_hours</code> UTC 21–24: escanea pero NO entra. Config: <code>SESSION_OFF_HOURS_ENABLED</code> + <code>SESSION_AWARENESS_ENABLED</code>.</li>
+        <li>Frenos 24/7: 4 triggers independientes (Massaniello / drawdown / daily guard / off_hours). Para tomar数据 desactivalos.</li>
+        <li>ML “cableada pero muerta” hasta ≥500 trades. <code>scripts/ml_progress.py</code> + <code>ML_COLLECTION_START</code> marcan la campana.</li>
+        <li>Cualquier columna nueva en <code>scan_candidates</code> requiere DDL + <code>_NEW_COLS</code> en <code>black_box_recorder.py</code>.</li>
+        <li>pyquotex WS comparte mailbox; candado en <code>connection.py</code>; timeframes enforce guard.</li>
+      </ul>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+  </script>
+</body>
+</html>

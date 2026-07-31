@@ -668,15 +668,6 @@
     </div>
   </div>
 
-  <!-- MADURANDO (R3 young watchlist) -->
-  <div class="card col-12">
-    <h2>⏳ Madurando <span class="sub2" id="mat-count">0</span></h2>
-    <table>
-      <thead><tr><th>Activo</th><th>Dir</th><th>Edad M5</th><th>Banda</th><th>Estado</th></tr></thead>
-      <tbody id="mat-body"><tr><td class="empty" colspan="5">ninguna zona madurando</td></tr></tbody>
-    </table>
-  </div>
-
   <!-- EDIFICIO DE CONTRATACIÓN -->
   <div class="card col-12" id="edificio-card">
     <h2>🏢 Edificio de Contratación <span class="sub2" id="ed-summary"></span></h2>
@@ -978,10 +969,8 @@ function resolveStratF(s){
   const nested = (s.strat_f && typeof s.strat_f === "object") ? s.strat_f : {};
   const rA = Array.isArray(s.accepted) ? s.accepted : [];
   const rR = Array.isArray(s.rejected) ? s.rejected : [];
-  const rM = Array.isArray(s.maturing) ? s.maturing : [];
   const nA = Array.isArray(nested.accepted) ? nested.accepted : [];
   const nR = Array.isArray(nested.rejected) ? nested.rejected : [];
-  const nM = Array.isArray(nested.maturing) ? nested.maturing : [];
   const rootN = rA.length + rR.length;
   const nestN = nA.length + nR.length;
   // Prefer nested (bot panel) when it has at least as many rows as root.
@@ -989,7 +978,6 @@ function resolveStratF(s){
     return {
       accepted: nA,
       rejected: nR,
-      maturing: nM.length ? nM : rM,
       total_assets: nested.total_assets != null ? nested.total_assets : (s.total_assets || nestN),
       filtered_count: nested.filtered_count != null ? nested.filtered_count : nA.length,
       cycle: nested.cycle != null ? nested.cycle : s.cycle,
@@ -999,7 +987,6 @@ function resolveStratF(s){
     return {
       accepted: rA,
       rejected: rR,
-      maturing: rM.length ? rM : nM,
       total_assets: s.total_assets != null ? s.total_assets : rootN,
       filtered_count: s.filtered_count != null ? s.filtered_count : rA.length,
       cycle: s.cycle,
@@ -1008,7 +995,6 @@ function resolveStratF(s){
   return {
     accepted: [],
     rejected: [],
-    maturing: nM.length ? nM : rM,
     total_assets: 0,
     filtered_count: 0,
     cycle: 0,
@@ -1101,32 +1087,6 @@ function render(s){
   setText("a-wins", s.live_wins);
   setText("a-losses", s.live_losses);
   setText("a-assets", s.total_assets_scanned || sf.total_assets);
-
-  // ---- STRAT-F madurando (R3 young watchlist) ----
-  const mat = sf.maturing || [];
-  const matB = document.getElementById("mat-body");
-  const matCount = document.getElementById("mat-count");
-  if(matB && matCount){
-    matB.innerHTML="";
-    matCount.textContent = mat.length;
-    if(mat.length===0){
-      matB.innerHTML='<tr><td class="empty" colspan="5">ninguna zona madurando</td></tr>';
-    } else {
-      mat.forEach(c=>{
-        const tr=document.createElement("tr");
-        const dir = String(c.direction||"").toLowerCase();
-        const band = (c.band!=null && c.band!=="")
-          ? (typeof c.band==="number" ? c.band.toFixed(5) : c.band)
-          : "–";
-        tr.innerHTML = `<td class="asset">${c.asset||""}</td>`+
-          `<td class="${dir==="call"?"d-call":"d-put"}">${dir.toUpperCase()||"–"}</td>`+
-          `<td>${c.bars_age!=null?c.bars_age:"–"}</td>`+
-          `<td>${band}</td>`+
-          `<td>${c.status||"maturing"}</td>`;
-        matB.appendChild(tr);
-      });
-    }
-  }
 
   // ---- Edificio de Contratación ----
   renderEdificio(s.edificio);
@@ -1310,7 +1270,6 @@ fetch('/api/strat_f').then(r=>r.json()).then(d=>{
   render(Object.assign({}, d, {
     accepted: Array.isArray(d.accepted) ? d.accepted : [],
     rejected: Array.isArray(d.rejected) ? d.rejected : [],
-    maturing: Array.isArray(d.maturing) ? d.maturing : [],
     strat_f: d,
   }));
 }).catch(()=>{});

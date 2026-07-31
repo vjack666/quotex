@@ -252,8 +252,11 @@ STRAT_A_RADAR_FULL_SCAN_MIN_SEC = 180
 STRAT_MOMENTUM_ENABLED = False
 
 # STRAT-F (Fractal / Wyckoff) — marco M15/M5/M1
-STRAT_F_ENABLED = True
-STRAT_F_ONLY = True  # opera SOLO STRAT-F (ignora STRAT-A/MOMENTUM/SWING/OB)
+# DESACTIVADA 2026-07-31: solo opera el Edificio de Contratación. Todas las
+# estrategias anteriores fueron etapas previas; STRAT-F queda dormida (los
+# módulos se conservan inertes; se purgan físicamente cuando se decida).
+STRAT_F_ENABLED = False
+STRAT_F_ONLY = False  # opera SOLO el Edificio (STRAT-F apagada)
 STRAT_F_MIN_PAYOUT = 80  # overridden by web min_payout on Guardar bankroll
 STRAT_F_MIN_SCORE = 60
 STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona antes de operar

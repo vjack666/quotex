@@ -123,7 +123,6 @@ def _build_snapshot() -> dict:
         base["strat_f"] = panel_state
         base["accepted"] = list(base.get("accepted") or [])
         base["rejected"] = list(base.get("rejected") or [])
-        base["maturing"] = list(base.get("maturing") or [])
     elif _scanner:
         state = _scanner.get_state()
         raw = _serialize(state)
@@ -132,20 +131,17 @@ def _build_snapshot() -> dict:
         base["strat_f"] = {
             "accepted": list(raw.get("accepted") or []),
             "rejected": list(raw.get("rejected") or []),
-            "maturing": list(raw.get("maturing") or []),
             "total_assets": raw.get("total_assets", 0),
             "filtered_count": raw.get("filtered_count", 0),
             "cycle": raw.get("cycle", 0),
             "timestamp": raw.get("timestamp", 0),
         }
-        base["maturing"] = list(raw.get("maturing") or [])
     else:
         base = {
             "status": "waiting",
             "accepted": [],
             "rejected": [],
-            "maturing": [],
-            "strat_f": {"accepted": [], "rejected": [], "maturing": []},
+            "strat_f": {"accepted": [], "rejected": []},
         }
 
     # Enriquecer con datos vivos del bot (balance, operación, Massaniello,

@@ -1,14 +1,14 @@
 {
   "project": "quotex-hft-bot",
-  "description": "Bot de opciones binarias en Quotex. Estrategias vivas: consolidación (STRAT-A), momentum 1m, reversal swing, order block. NUEVA: STRAT-F (Fractal/Wyckoff, marco M15/M5/M1) con math filters (Hurst/R²/angle/squeeze) y scoring contextual. Gestión Massaniello.",
-  "note": "Strategy B (Wyckoff Spring/Sweep) fue ELIMINADA físicamente el 2026-07-11. Este roadmap reemplaza al anterior (feature_list.json viejo + docs/ROADMAP*.md borrados).",
+  "description": "Bot de opciones binarias en Quotex. ESTRATEGIA UNICA: Edificio de Contratación (P1 Recepción -> P2 Cerebro -> P3 Sala Espera -> CONTRATADO -> orden al broker). Todas las estrategias previas (STRAT-A, STRAT-F, momentum, swing, order block, martingala, massaniello, observador, discovery, strategy lab, experience engine, ML) fueron etapas de aprendizaje y quedaron DESACTIVADAS/ARCHIVADAS el 2026-07-31 en C:\\Users\\v_jac\\Desktop\\respaldo quotex.",
+  "note": "Purga 2026-07-31: solo queda operando el Edificio. Modulos de estrategias muertas siguen en src/ inertes (importados en top-level por scanner/bot); specs y docs archivados en Desktop\\respaldo quotex.",
   "roadmap": {
-    "version": "2026-07-20",
-    "strategy_focus": "strat_f",
-    "strat_f_status": "live_and_stable_with_math_filters",
-    "next_recommended": "Evolución ML: LightGBM scorer → Multi-TF confluence → Enhanced Kelly → Session awareness.",
-    "note_strat_f": "STRAT-F pipeline #1–#7 done. #9 stoch_entry_help done (V2 with k_prev/d). #10 smart_order_place done. Math filters + contextual scoring done (2026-07-20).",
-    "evolution_plan": "docs/EVOLUTION_PLAN.md"
+    "version": "2026-07-31",
+    "strategy_focus": "edificio_contratacion",
+    "strat_f_status": "disabled_archived",
+    "next_recommended": "Endurecer el Edificio: trazabilidad por ticket (done), secuencia W/L cronologica (done), tuning de pisos.",
+    "note_strat_f": "STRAT_F_ENABLED=False y STRAT_F_ONLY=False desde 2026-07-31. El scanner alimenta el edificio con flags propios (brake/extreme/cross/stoch M15) — independiente de STRAT-F.",
+    "evolution_plan": "docs/EDIFICIO_CONTRATACION.md"
   },
   "rules": {
     "one_feature_at_a_time": true,
@@ -21,7 +21,7 @@
       "title": "Prefetch de 15m en el ciclo del scanner",
       "phase": "scanner_accommodation",
       "priority": 1,
-      "description": "Hacer que scan_prefetch traiga velas de 15m además de 5m/1m y exponerlas en ScanCycleData.candles_15m, para que STRAT-F tenga contexto M15 sin I/O en el hot path.",
+      "description": "Hacer que scan_prefetch traiga velas de 15m además de 5m/1m y exponerlas en ScanCycleData.candles_15m, para que el Edificio tenga contexto M15 sin I/O en el hot path.",
       "acceptance": [
         "ScanCycleData expone candles_15m: dict[str, list[Candle]]",
         "prefetch_primary_candles baja TF_15M junto a TF_5M/TF_1M",
@@ -30,117 +30,6 @@
         "pytest tests/ en verde"
       ],
       "status": "done"
-    },
-    {
-      "id": 2,
-      "name": "strat_f_baseline",
-      "title": "STRAT-F: evaluador puro (fractal M5 + contexto M15 + rechazo M1)",
-      "phase": "strat_f",
-      "priority": 2,
-      "description": "Crear src/strat_fractal.py con evaluate_strat_f(candles_15m, candles_5m, candles_1m, payout) -> StratFEvaluation (sin I/O). Detecta fractal Bill Williams de 5 velas en M5 dentro de una banda/zona, valida que M15 esté en rango (no roto) y que M1 rechace la banda. Devuelve direction CALL/PUT, zona, strength, confirms.",
-      "acceptance": [
-        "Existe src/strat_fractal.py con evaluate_strat_f()",
-        "Detecta fractal arriba/abajo de 5 velas en M5",
-        "Usa M15 para contexto (rango vs tendencia rota) y lo aplica como filtro",
-        "Usa M1 para confirmar rechazo (vela toca banda y no cierra fuera)",
-        "Devuelve StratFEvaluation con has_signal/direction/zone/strength/confirms",
-        "tests/test_strat_fractal.py >= 8 casos (fractal up/down, M15 roto, sin rechazo M1, etc.)",
-        "pytest en verde"
-      ],
-      "status": "done",
-      "depends_on": [
-        1
-      ]
-    },
-    {
-      "id": 3,
-      "name": "strat_f_scanner_wiring",
-      "title": "Cablear STRAT-F en el scanner",
-      "phase": "strat_f",
-      "priority": 3,
-      "description": "En _scan_phase_evaluate_assets, añadir bloque STRAT-F que llame evaluate_strat_f con candles_15m/5m/1m y cree CandidateEntry con _strategy_origin='STRAT-F', _signal_ts_1m y stats strat_f_signals. Respetar STRAT_A_ONLY y STRAT_F_ENABLED.",
-      "acceptance": [
-        "scanner.py importa evaluate_strat_f y lo invoca en el ciclo",
-        "CandidateEntry de STRAT-F lleva _strategy_origin='STRAT-F'",
-        "stats['strat_f_signals'] se incrementa y se loguea [STRAT-F]",
-        "Bajo STRAT_A_ONLY no se evalua STRAT-F",
-        "tests/test_scanner_strat_f.py cubre el cableado (mock candles)",
-        "pytest en verde"
-      ],
-      "status": "done",
-      "depends_on": [
-        2
-      ]
-    },
-    {
-      "id": 4,
-      "name": "strat_f_filters",
-      "title": "STRAT-F: filtros de calidad (alineación + payout + edad)",
-      "phase": "strat_f",
-      "priority": 4,
-      "description": "Endurecer STRAT-F: payout >= STRAT_F_MIN_PAYOUT, alineacion M15/M5 obligatoria, edad minima de la zona/banda, y reject-first con log explicito cuando falta alineacion.",
-      "acceptance": [
-        "Config: STRAT_F_MIN_PAYOUT, STRAT_F_MIN_SCORE, STRAT_F_ZONE_MIN_AGE",
-        "Sin alineacion M15/M5 -> rechazo con razon logueada",
-        "Payout < minimo -> activo excluido del scan STRAT-F",
-        "tests verifican cada veto por separado",
-        "pytest en verde"
-      ],
-      "status": "done",
-      "depends_on": [
-        3
-      ]
-    },
-    {
-      "id": 5,
-      "name": "strat_f_backtest",
-      "title": "STRAT-F: reconocimiento en backtester",
-      "phase": "validation",
-      "priority": 5,
-      "description": "Hacer que src/backtester.py reconozca origen 'STRAT-F' y simule sus señales sobre datos historicos.",
-      "acceptance": [
-        "Backtester admite 'STRAT-F' en STRATEGY_MAP / rama de origen",
-        "Reporte diferencia win rate y profit de STRAT-F vs otras",
-        "pytest en verde"
-      ],
-      "status": "done",
-      "depends_on": [
-        3
-      ]
-    },
-    {
-      "id": 6,
-      "name": "strat_f_live_validation",
-      "title": "STRAT-F: validación demo en vivo",
-      "phase": "validation",
-      "priority": 6,
-      "description": "Validar STRAT-F en PRACTICE con Massaniello: sesion 60min, meta 5 entradas / 3 ITM o evidencia de reject-first correcto.",
-      "acceptance": [
-        "Bot ejecutado solo STRAT-F (otras off) >=60 min en PRACTICE",
-        "Log documenta señales, rechazos y entradas STRAT-F",
-        "Resumen en progress/history.md"
-      ],
-      "status": "done",
-      "depends_on": [
-        4,
-        5
-      ]
-    },
-    {
-      "id": 7,
-      "title": "Reemplazo del dashboard por panel STRAT-F (aceptadas vs rechazadas con razón)",
-      "spec": "hub_strat_f_replacement",
-      "status": "done",
-      "sdd": true,
-      "depends_on": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "name": "hub_strat_f_replacement"
     },
     {
       "id": 8,
@@ -156,37 +45,25 @@
         "auto_full: work block stop + rest + auto resume",
         "tests verdes"
       ],
-      "status": "in_progress",
+      "status": "pending",
       "sdd": true,
       "spec_path": "specs/schedule_auto/",
-      "note": "Paused: human prioritized stoch_entry_help (id 9). Resume after #9."
+      "note": "Paused. Resume solo si el Edificio lo requiere."
     },
     {
       "id": 9,
       "name": "stoch_entry_help",
-      "title": "Capa de ayuda del estocástico M15 sobre STRAT-F (zonas + flag)",
-      "phase": "strat_f",
+      "title": "Capa de ayuda del estocástico M15 (zonas + flag) — el Edificio la usa para direction",
+      "phase": "edificio",
       "priority": 9,
-      "description": "Prender el estocástico M15 como ayuda de dirección/timing sobre señales STRAT-F ya formadas, sin tocar evaluate_strat_f. Cinco zonas por %K; veto solo en extremo contrario; boost en extremo a favor; medio pasa. Flag STOCH_HELP_MODE=off|soft|hard.",
+      "description": "El Edificio deriva direction desde el estocástico M15 (compute_stoch) en scanner._feed_edificio. La capa de ayuda de zonas queda disponible como referencia; la logica viva del edificio usa stoch M15 propio.",
       "acceptance": [
-        "src/stochastic_zones.py puro: zone from k (Z1 0-20, Z2 20-40, Z3 40-60, Z4 60-80, Z5 80-100) + action for CALL/PUT",
-        "strat_fractal.evaluate_strat_f no se modifica",
-        "scanner: tras evaluate_strat_f + compute_stoch, aplica apply_stoch_help si mode != off",
-        "hard: CALL+Z5 o PUT+Z1 no generan candidato (reject reason stoch_extreme_against); soft: solo score adjust",
-        "boost: CALL Z1 +10, CALL Z2 +5, PUT Z5 +10, PUT Z4 +5; resto 0; no cruces ni divergencias en decision v1",
-        "config STOCH_HELP_MODE default hard (off = medicion actual); apagable sin redeploy de logica STRAT-F",
-        "black box: zona + action + score_delta grabados junto a stoch_m15",
-        "tests unitarios zonas + integracion scanner mock; pytest verde en tests nuevos"
+        "src/stochastic_m15.py puro: compute_stoch para el Edificio",
+        "scanner deriva direction/brake/extreme/cross para el edificio (flags_by_asset)",
+        "pytest en verde"
       ],
       "status": "done",
-      "sdd": true,
-      "spec_path": "specs/stoch_entry_help/",
-      "depends_on": [
-        2,
-        3
-      ],
-      "approved_at": "2026-07-16",
-      "note": "Done 2026-07-16. Default STOCH_HELP_MODE=hard — stoch ACTIVE help layer on STRAT-F."
+      "note": "Spec de la capa STRAT-F archivada en Desktop\\respaldo quotex\\specs\\."
     },
     {
       "id": 10,
@@ -194,7 +71,7 @@
       "title": "Colocacion de orden mas inteligente (prewarm, reintentos, feedback hub)",
       "phase": "reliability",
       "priority": 10,
-      "description": "Silent place-order: buy_timeout, unexpected, no hub feedback. Prewarm trade_client, smarter alt retries, real reasons, last_order_attempt on hub.",
+      "description": "Silent place-order: buy_timeout, unexpected, no hub feedback. Prewarm trade_client, smarter alt retries, real reasons, last_order_attempt on hub. El Edificio usa place_order (connection.py) + reintentos EDIFICIO_MAX_ORDER_TRIES.",
       "acceptance": [
         "Prewarm trade_client before/during 1m open wait",
         "Alt retries skip open wait when lag still OK",
@@ -205,36 +82,7 @@
         "tests green for new behavior"
       ],
       "status": "done",
-      "sdd": true,
-      "spec_path": "specs/smart_order_place/",
-      "approved_at": "2026-07-16",
-      "note": "Done 2026-07-16. Prewarm trade_client, skip_open_wait alt, last_order_attempt hub feedback, hard-fail quarantine."
-    },
-    {
-      "id": 11,
-      "name": "maturing_zone_watchlist",
-      "title": "Watchlist de zonas STRAT-F muy jóvenes (madurar → entrada)",
-      "phase": "strat_f",
-      "priority": 11,
-      "description": "Capturar rechazos R3 'zona muy joven', mantener watchlist in-memory, re-evaluar cada scan y promover a candidato STRAT-F (live) o solo métricas (shadow). No altera la fórmula de edad en strat_fractal.py.",
-      "acceptance": [
-        "src/maturing_watchlist.py puro con upsert/promote/drop/TTL/cap",
-        "MATURING_WATCHLIST_MODE off|shadow|live (default live)",
-        "Scanner captura solo R3 young y re-evalúa activos en watchlist",
-        "live produce CandidateEntry al madurar; shadow no opera",
-        "Hub expone entradas madurando",
-        "tests unit + scanner mocks verdes",
-        "specs/maturing_zone_watchlist/ completo"
-      ],
-      "status": "done",
-      "sdd": true,
-      "spec_path": "specs/maturing_zone_watchlist/",
-      "approved_at": "2026-07-17",
-      "depends_on": [
-        4,
-        9
-      ],
-      "note": "Done 2026-07-17. Reviewer APPROVE. Watchlist R3 young → re-eval → live/shadow. See progress/impl_maturing_zone_watchlist.md + review_maturing_zone_watchlist.md."
+      "note": "Spec original archivada en Desktop\\respaldo quotex\\specs\\."
     },
     {
       "id": 15,
@@ -242,45 +90,16 @@
       "title": "Parallelizar FASE 3 del scanner (ProcessPool, 50% CPU)",
       "phase": "scanner_hardening",
       "priority": 15,
-      "description": "Mover _scan_phase_evaluate_assets (for serial sobre 40 activos) a ProcessPoolExecutor global de max(1, cpu_count()//2) workers para liberar el loop WS durante la evaluación. FASE 2 (fetch) ya concurrente; no se toca. EJE B (event-driven) fuera de alcance.",
+      "description": "Mover _scan_phase_evaluate_assets (for serial sobre 40 activos) a ProcessPoolExecutor global. El Edificio conserva su evaluacion en el loop principal (flags por activo) y el envio/resolucion en el socket unico del bot.",
       "acceptance": [
         "Loop WS no bloqueado durante evaluación (R4)",
         "Mismos candidatos que la evaluación serial (R3)",
         "Worker error no aborta ciclo (R5)",
         "Degrada a serial si no hay pool (R6)",
-        "tests/test_parallel_scan_fase3.py verde",
-        "benchmark local muestra mejora vs serial (R7)"
+        "tests/test_parallel_scan_fase3.py verde"
       ],
       "status": "done",
-      "sdd": true,
-      "spec_path": "specs/parallel_scan_fase3/",
-      "approved_at": "2026-07-17",
-      "done_at": "2026-07-17",
-      "implementation_note": "OPTION 1: solo el bloque STRAT-F se extrae a funcion pura (_evaluate_strat_f_serial) y se evalua en ProcessPool; STRAT-A intacto. 4 tests verdes; benchmark 2.19x speedup (N=40, 10 workers)."
-    },
-    {
-      "id": 16,
-      "name": "strat_f_maturing_m15_recheck",
-      "title": "Re-chequeo M15 al promover desde maturing_watchlist (evitar entradas contra-tendencia)",
-      "phase": "strat_f",
-      "priority": 16,
-      "description": "La sala de espera (maturing_watchlist) promueve zonas STRAT-F usando el m15_context de CUANDO se detectaron, no el actual. Esto deja pasar entradas contra la tendencia M15 visible (audit 2026-07-18: 13/43 operaciones aceptadas eran contra-tendencia). Al promover (mark_promoted, live/shadow) el sistema DEBE re-evaluar el contexto M15 actual y, si la direccion queda contra-tendencia, exigir confirmacion de agotamiento (stoch M5 en extremo) para promover; si no hay confirmacion, DEBE descartar (drop) en vez de operar. Aplica la teoria de 'esperar al agotamiento del contra-movimiento' en el punto real donde filtra.",
-      "acceptance": [
-        "Al promover desde maturing_watchlist se re-evalua m15_context actual (no el de deteccion)",
-        "SI direccion queda contra-tendencia M15 ENTONCES el sistema NO promueve sin confirmacion de agotamiento",
-        "Confirmacion de agotamiento = stoch M5 en extremo a favor de la direccion propuesta (CALL contra-M15-bajista -> stoch M5 <20; PUT contra-M15-alcista -> stoch M5 >80)",
-        "SI no hay confirmacion de agotamiento ENTONCES el sistema DEBE drop (no operar)",
-        "El conteo Massaniello NO se incrementa hasta el buy() real (no en la promocion)",
-        "El bot sigue escaneando otras operaciones normales mientras hay entradas en espera",
-        "tests cubren: promocion ok en tendencia alineada, drop contra-tendencia sin stoch, promocion contra-tendencia CON stoch en extremo",
-        "pytest tests/ en verde"
-      ],
-      "status": "done",
-      "sdd": true,
-      "spec_path": "specs/strat_f_maturing_m15_recheck/",
-      "approved_at": "2026-07-19",
-      "done_at": "2026-07-19",
-      "implementation_note": "Re-chequeo M15 actual + stoch M5 al promover desde maturing_watchlist. R1-R5 cubiertos por tests/test_strat_f_maturing_recheck.py (13 passed). Reparado bug preexistente: stoch_m15 indefinido con _eval_override."
+      "note": "Spec archivada en Desktop\\respaldo quotex\\specs\\."
     },
     {
       "id": 17,
@@ -288,17 +107,14 @@
       "title": "Watchdog autónomo 24/7 (reinicio ante caída de conexión / estado no-sano)",
       "phase": "ops",
       "priority": 17,
-      "description": "scripts/watchdog_bot.py ejecutado como cron cada 5 min. Chequea API (127.0.0.1:8080) + proceso + marker 'Connection to remote host was lost' en consolidation_bot.log; si el bot cae o /api/bot/status no es running/starting (meta diaria, ciclo, error) → cleanup + reinicio + loop 24/7. Mantiene el bot vivo sin intervención humana. Log en scripts/watchdog.log.",
+      "description": "scripts/watchdog_bot.py ejecutado como cron cada 5 min. Chequea API (127.0.0.1:8080) + proceso + marker; si el bot cae → cleanup + reinicio + loop 24/7. Mantiene el Edificio vivo sin intervención humana.",
       "acceptance": [
-        "scripts/watchdog_bot.py corre como cron cada 5 min (proceso efímero)",
+        "scripts/watchdog_bot.py corre como cron cada 5 min",
         "Detecta caída de API/proceso y marker de conexión perdida",
-        "Detecta estado no-sano vía /api/bot/status (≠ running/starting)",
-        "Reinicia con cleanup + arranque del loop 24/7 sin matar bot sano",
-        "tests/test_watchdog_bot.py verde (api_alive, bot_state, reinicio ante stopped/error)"
+        "Reinicia con cleanup + arranque del loop 24/7 sin matar bot sano"
       ],
       "status": "done",
       "done_at": "2026-07-19",
-      "implementation_note": "2 commits (cb4b6b2 watchdog conexión, a95705b estado no-sano). 14 tests totales (5 + 9). Cron 'quotex-bot-watchdog' cada 5 min.",
       "depends_on": []
     },
     {
@@ -307,380 +123,66 @@
       "title": "Fix keep-alive real (café) + ConnectionWatchdog + botón del hub no-adorno",
       "phase": "ops",
       "priority": 22,
-      "description": "src/caffeine.py: el keep-alive apuntaba a client.websocket (=None → AttributeError tragado → nunca enviaba ping engine.io '2' de TEXTO; Cloudflare cortaba a ~60-75s idle). Ahora resuelve el WebSocketApp vivo client.api.websocket_client.wss fresco por ciclo y manda '2' como TEXTO. ConnectionWatchdog NUEVO: cada WATCHDOG_INTERVAL_SEC=10 hace client.check_connect(); si el socket cae por causa ≠ idle llama bot.ensure_connection() (canónico, ya cableado al ConnectionManager) sin esperar al ciclo de trading de ~60s. Comparte lock RT-02 con el café. Fix botón hub (/api/bot/reconnect → force_reconnect_from_hub): pyquotex SOLO re-autentica cuando session_data['token'] está vacío; si el socket cae por token rechazado/sesión muerta el token viejo seguía en session_data y connect() reusaba token muerto → fallaba SIEMPRE (adorño). Ahora _force_reconnect_locked limpia session_data+SSID tras el 1er fallo y reintenta → re-login real. Cableado en main() + shutdown_background_tasks. WATCHDOG_* en config.",
+      "description": "Keep-alive sobre WebSocketApp vivo + ConnectionWatchdog que llama bot.ensure_connection() + fix botón hub (/api/bot/reconnect). Infraestructura critica para que el Edificio mantenga el socket unico.",
       "acceptance": [
-        "caffeine manda '2' como TEXTO por el WebSocketApp vivo (no ping-frame binario)",
+        "caffeine manda '2' como TEXTO por el WebSocketApp vivo",
         "ConnectionWatchdog detecta socket caído y llama bot.ensure_connection()",
         "botón hub recupera conexión aunque el token esté muerto/rechazado",
-        "tests/test_caffeine.py (12) + tests/test_connection.py (+test_force_reconnect_recovers_dead_token) verdes"
+        "tests/test_caffeine.py + tests/test_connection.py verdes"
       ],
       "status": "done",
       "done_at": "2026-07-23",
-      "implementation_note": "src/caffeine.py (ConnectionWatchdog NUEVO + _resolve_app_ws), src/config.py (WATCHDOG_*), src/consolidation_bot.py (cablear watchdog en main + shutdown), src/connection.py (fix botón limpiando session_data). 26 tests verdes en módulos tocados.",
-      "depends_on": []
-    },
-    {
-      "id": 23,
-      "name": "extreme_read_gate",
-      "title": "Lectura de extremo en STRAT-F (entrar en spike, no en rebote)",
-      "phase": "ops",
-      "priority": 23,
-      "description": "El extremo del rango local es el MEJOR sitio para entrar (como un spike), pero solo si la vela de ENTRADA tiene cuerpo a FAVOR de la dirección. Empírico en black-box: PUT ganadoras en mínimo 100% cuerpo a favor; PUT perdedoras solo 67%. NUEVO gate extreme_read_gate(candles, entry_price, direction) en strat_fractal.py: si el entry cae en el extremo (top/bottom 15% del rango local 5m) exige cuerpo a favor + cuerpo dominante (>=50% del rango de la vela); si el cuerpo va contra (rebote) -> RECHAZA. Cableado en scanner.py (_evaluate_strat_f_single) detrás de bandera EXTREME_READ_ENABLED=False (OFF por defecto). Marca en black-box (columna extreme_read) cuáles señales pasaron por la mejora para análisis en cuenta demo. EXTREME_READ_POS=0.15, EXTREME_READ_BODY_MIN_RATIO=0.5 en config.",
-      "acceptance": [
-        "extreme_read_gate pasa en extremo con cuerpo a favor, rechaza el rebote (tests/test_extreme_read_gate.py 6)",
-        "black-box graba la bandera extreme_read y el schema tiene la columna (tests/test_blackbox_extreme_read.py 3)",
-        "scanner importa el gate y la bandera arranca OFF (tests/test_extreme_read_wiring.py 3)",
-        "cuando EXTREME_READ_ENABLED=True, señal en extremo con cuerpo contra -> REJECTED_EXTREME_READ"
-      ],
-      "status": "done",
-      "done_at": "2026-07-23",
-      "implementation_note": "src/strat_fractal.py (extreme_read_gate NUEVO), src/config.py (EXTREME_READ_*), src/scanner.py (cableado en _evaluate_strat_f_single + marca extreme_read en _rec), src/black_box_recorder.py (columna extreme_read + INSERT). 12 tests verdes. Bandera OFF: el bot opera igual hasta que el usuario la encienda en demo.",
       "depends_on": []
     },
     {
       "id": 24,
       "name": "scan_pool_clean_shutdown",
-      "title": "Cierre limpio del ProcessPool STRAT-F (sin workers zombies)",
+      "title": "Cierre limpio del ProcessPool (sin workers zombies)",
       "phase": "ops",
       "priority": 24,
-      "description": "Al dar Ctrl+C o 'finalizar' en el hub, shutdown_scan_pool() solo hacia shutdown(wait=False) (marca 'no acepta más trabajo' pero NO mata procesos). En Windows (spawn) los 10 workers de STRAT-F quedaban vivos en call_queue.get(block=True) y se tragaban el KeyboardInterrupt del padre (traceback sucio + procesos huérfanos). Ahora shutdown_scan_pool() captura la referencia a los workers ANTES de shutdown() y los terminate()+join(timeout=2)+kill() si siguen vivos.",
+      "description": "shutdown_scan_pool() captura los workers ANTES de shutdown() y los terminate()+join()+kill() si siguen vivos. Evita procesos huerfanos que traban el cierre del bot.",
       "acceptance": [
-        "los workers del ProcessPool mueren tras shutdown (no quedan colgados)",
-        "shutdown idempotente (llamar con pool None no rompe)",
-        "tests/test_scan_pool_shutdown.py (2) verdes"
+        "los workers del ProcessPool mueren tras shutdown",
+        "shutdown idempotente",
+        "tests/test_scan_pool_shutdown.py verdes"
       ],
       "status": "done",
       "done_at": "2026-07-23",
-      "implementation_note": "src/loop_utils.py (shutdown_scan_pool reescrito). 2 tests verdes.",
       "depends_on": []
     },
     {
-      "id": 25,
-      "name": "ml_collection_start_flag",
-      "title": "Bandera ML_COLLECTION_START (recolectar nueva tanda de data para ML)",
-      "phase": "ops",
-      "priority": 25,
-      "description": "Bandera ML_COLLECTION_START en config.py = timestamp 'YYYY-MM-DD HH:MM:SS' que marca 'a partir de este fecha/hora/minuto se recolecta una tanda nueva de data para entrenar el ML'. scripts/ml_progress.py la honra: el conteo del BATCH NUEVO solo cuenta trades resueltos con scan_candidates.created_at >= la bandera (la campana de recoleccion activa). Con bandera vacia ('') cuenta el historico completo (comportamiento anterior). El filtro usa scan_candidates.created_at (el bot escribe en vivo con timestamp); candidates de trade_journal no tiene timestamp, queda como referencia global. pytest.ini: pythonpath = . scripts src para resolver ml_progress en tests.",
+      "id": 36,
+      "name": "edificio_contratacion",
+      "title": "Edificio de Contratacion: unica estrategia viva (P1-P2-P3-CONTRATADO)",
+      "phase": "edificio",
+      "priority": 36,
+      "description": "Estrategia unica del bot. Cada activo que pasa los filtros basicos sube piso por piso: P1 Recepcion (payout>=MIN, POI), P2 Cerebro (brake+extreme+cross), P3 Sala Espera (espera de confirmacion), CONTRATADO -> orden al broker via edificio_executor. Estado completo expuesto en hub (edificio_panel).",
       "acceptance": [
-        "con bandera fijada, ml_progress cuenta solo created_at >= bandera (batch nuevo)",
-        "sin bandera (''), cuenta historico completo",
-        "tests/test_ml_progress.py (3) verdes"
+        "src/edificio_contratacion.py mantiene cards por activo con piso",
+        "scanner alimenta el edificio cada ciclo (_feed_edificio)",
+        "edificio_executor envia ordenes CONTRATADO al broker (socket unico)",
+        "hub muestra los 4 pisos",
+        "tests/test_edificio_contratacion.py + test_edificio_executor.py verdes"
       ],
       "status": "done",
-      "done_at": "2026-07-23",
-      "implementation_note": "src/config.py (ML_COLLECTION_START='2026-07-23 17:18:39'), scripts/ml_progress.py (count_resolved filtra por bandera + _norm_ts), tests/test_ml_progress.py (3), pytest.ini (pythonpath). 43 tests verdes en los modulos tocados.",
-      "depends_on": []
+      "done_at": "2026-07-31"
     },
     {
-      "id": 26,
-      "name": "strat_f_spike_mode",
-      "title": "Modo SPIKE STRAT-F (entrar en el extremo con agotamiento, condicion ADICIONAL al rebote)",
-      "sdd": false,
-      "phase": "ops",
-      "priority": 26,
-      "description": "Condicion NUEVA que se ANADE al lado del modo rebote existente de STRAT-F (NO lo reemplaza): cuando hay patron de agotamiento (stoch M5 exhaust: CALL %K<20, PUT %K>80) y la vela de entrada toca el extremo del fractal (band) con CUERPO a FAVOR de la direccion (cuerpo dominante >=50% del rango de la vela), evaluate_strat_f promueve la senal a entry_mode='SPIKE' / spike=True. O sea: entra EN el extremo (CALL en minimo, PUT en maximo) - el spike con conviccion - en vez de esperar el rebote en la banda. Si NO hay agotamiento, el bot opera igual (modo REBOTE). Marca en black-box (scan_candidates.extreme_read=1, entry_mode='SPIKE') para analisis en demo. Detras de bandera STRAT_F_SPIKE_MODE=True en config.py.",
+      "id": 37,
+      "name": "edificio_trazabilidad",
+      "title": "Trazabilidad del Edificio: black box por ticket + resolvedor WIN/LOSS + secuencia W/L",
+      "phase": "edificio",
+      "priority": 37,
+      "description": "F1: cada orden enviada se registra en black box (strategy=EDIFICIO) con order_ref (ticket). F2: resolve_contratados resuelve por ticket via check_win (reintentos, UNRESOLVED sin forzar LOSS). F3: secuencia cronologica W/L combinada en hub (outcome_history deque 200).",
       "acceptance": [
-        "con agotamiento + cuerpo a favor en extremo -> entry_mode=SPIKE, spike=True",
-        "sin agotamiento o cuerpo en contra -> modo REBOTE (comportamiento anterior intacto)",
-        "tests/test_strat_f_spike.py (4) verdes",
-        "scanner marca extreme_read=1 y entry_mode=SPIKE en black-box"
+        "place_order devuelve order_ref y se registra en black box",
+        "resolve_contratados resuelve WIN/LOSS por ticket sin bloquear el loop",
+        "UNRESOLVED no entra a la secuencia",
+        "hub muestra la secuencia W/L en orden cronologico",
+        "tests/test_edificio_trazabilidad.py (10) verdes"
       ],
       "status": "done",
-      "done_at": "2026-07-23",
-      "implementation_note": "src/strat_fractal.py (bloque SPIKE en evaluate_strat_f + import STRAT_F_SPIKE_MODE/EXTREME_READ_BODY_MIN_RATIO/compute_stoch; campo spike en StratFEvaluation), src/scanner.py (marca extreme_read/entry_mode SPIKE), src/config.py (STRAT_F_SPIKE_MODE=True), tests/test_strat_f_spike.py (4). 47 tests verdes en modulos tocados.",
-      "depends_on": []
-    },
-    {
-      "id": 18,
-      "name": "entry_intelligence_agent",
-      "title": "Entry Intelligence Agent - LightGBM que descubre patrones solo (estocastico + geometria)",
-      "phase": "evolution",
-      "priority": 18,
-      "sdd": true,
-      "spec_path": "specs/lightgbm_scorer/",
-      "description": "Agente de aprendizaje estadistico que descubre por si mismo que configuraciones do mercado tem maior probabilidade de exito e emite um Entry Quality Score (0-1) que o scanner consulta como CAMADA EXTRA (sem substituir STRAT-F). UNICO indicador tecnico = estocastico (M15/M5/M1, ja capturado); o resto sao matematicas/geometria das velas OHLC (corpo, mecha, intervalo, inclinacao, compressao, fractal, posicao no extremo) calculadas OFFLINE desde candles_1m/5m/15m ja guardadas em scan_candidates. NAO RSI/ADX/ATR/bandas. Auto-retrain continuo desde trades resolvidos.",
-      "acceptance": [
-        "Model trains on 500+ resolved trades from black box (walk-forward 80/20 temporal)",
-        "Features = estocastico M15/M5/M1 + geometria OFFLINE (body_dir, body_ratio, opp_wick_ratio, entry_extreme_pos, pre_trend_slope, compression, fractal_align) + contexto (direction, payout, duration_sec, hour_utc, dow, asset_onehot)",
-        "SIN RSI/ADX/ATR/bandas nem indicadores externos",
-        "Confidence 0-1 integrado como camada extra: final = base * (0.7 + 0.3 * confidence), detras de ML_ENABLED (arranca False)",
-        "Fallback a scoring estatico quando nao ha modelo",
-        "Auto-retrain quando >100 trades novos resolvidos; conserva o de melhor F1 e recarrega em memoria",
-        "feature_importance em lightgbm_meta.json explica que relacoes descobriu o modelo",
-        "Extracao OFFLINE: nao se adiciona I/O ao ciclo do scanner em vivo",
-        "All tests passing"
-      ],
-      "status": "done",
-      "spec_ready_at": "2026-07-24",
-      "note": "Implementado: Entry Intelligence Agent. Geometria OFFLINE (body_dir, body_ratio, opp_wick_ratio, entry_extreme_pos, pre_trend_slope, compression_geom, fractal_align) + stoch M15/M5/M1 + contexto, desde candles_1m/5m/15m ya guardadas. Capa extra en score_candidate detras ML_ENABLED: final=base*(0.7+0.3*confidence). Auto-retrain continuo (umbral >100 nuevos) en scripts/entry_intelligence_retrain.py. Tests: tests/test_entry_intelligence.py (14). Fase 5 (validacion en demo) pendiente de activar ML_ENABLED.",
-      "done_at": "2026-07-24"
-    },
-    {
-      "id": 19,
-      "name": "multi_tf_correlation",
-      "title": "Multi-TF Confluence Score - timeframe alignment detection",
-      "phase": "evolution",
-      "priority": 19,
-      "sdd": true,
-      "spec_path": "specs/multi_tf_correlation/",
-      "description": "Measure alignment between M1/M5/M15/H1 timeframes. 4/4 aligned = +0.15 bonus, 3/4 = +0.05, 2/4 or less = -0.05 penalty. Uses linear regression slope to detect trend per TF.",
-      "acceptance": [
-        "Trend detection via linear regression on closes",
-        "Confluence bonus calculated from 4 timeframes",
-        "Fallback to 3 TF when H1 unavailable",
-        "Logging shows per-TF trend and confluence result",
-        "All tests passing"
-      ],
-      "status": "spec_ready",
-      "depends_on": []
-    },
-    {
-      "id": 20,
-      "name": "kelly_criterion_enhanced",
-      "title": "Enhanced Kelly Criterion — dynamic stake sizing",
-      "phase": "evolution",
-      "priority": 20,
-      "sdd": true,
-      "spec_path": "specs/kelly_criterion_sizing/",
-      "description": "Upgrade KellySizer with rolling win rate (last 50 trades), dynamic fraction by edge strength, ML confidence weighting, and per-strategy filtering. Replaces fixed Massaniello initial_amount.",
-      "acceptance": [
-        "Rolling win rate from last 50 trades",
-        "Dynamic fraction: edge>0.2→0.5, 0.1-0.2→0.3, <0.1→0.1, ≤0→0",
-        "ML confidence weighting: >0.7→×1.2, 0.4-0.7→×1.0, <0.4→×0.5",
-        "Stake limits: min $1, max 5% balance",
-        "Fallback to basic Kelly when LightGBM unavailable",
-        "All tests passing"
-      ],
-      "status": "spec_ready",
-      "depends_on": [
-        18
-      ]
-    },
-    {
-      "id": 21,
-      "name": "session_awareness",
-      "title": "Session Awareness — time-of-day trading behavior",
-      "phase": "evolution",
-      "priority": 21,
-      "sdd": true,
-      "spec_path": "specs/session_awareness/",
-      "description": "Detect trading session (Asian/London/NY/off-hours) and adjust min_score thresholds. Off-hours blocked by default. Asian=65, London=60, NY=55, Off-hours=75 (or disabled).",
-      "acceptance": [
-        "Session detection from UTC hour",
-        "Per-session min_score thresholds",
-        "Off-hours blocking with logging",
-        "Session transition logging",
-        "Disabled fallback (global min_score)",
-        "All tests passing"
-      ],
-      "status": "spec_ready",
-      "depends_on": []
-    },
-    {
-      "id": 27,
-      "name": "experience_engine",
-      "title": "Experience Engine — Market Memory única (aprende experiencias, no reglas)",
-      "description": "Sustituye los detectores basados en reglas por una memoria única del mercado. El sistema adquiere un arco de experiencia (contexto previo -> evento -> evolucion -> resultado -> consecuencias) en cada cambio relevante y lo DISTRIBUYE a las IAs, que solo leen. CERO reglas hardcoded de deteccion (no '3 toques', no FVG, no Order Block). Feature 18 (Entry Intelligence Agent) se vuelve el primer lector de esta memoria. Concepto aprobado en docs/experience_engine_concept.md.",
-      "phase": "evolution",
-      "priority": 1,
-      "status": "done",
-      "spec_ready_at": "2026-07-24",
-      "sdd": true,
-      "spec_path": "specs/experience_engine/",
-      "depends_on": [
-        18
-      ],
-      "acceptance": [
-        "El sistema adquiere un arco de experiencia completo en cada cambio relevante del mercado.",
-        "Todas las experiencias viven en UNA memoria unica (sin tablas por detector).",
-        "Las IAs solo leen la memoria; ninguna escribe ni modifica la captura.",
-        "El engine distribuye experiencias similares a las IAs en modo activo.",
-        "F18 se re-entrena desde la memoria unica sin cambiar su contrato de Confidence Score.",
-        "No existe logica que decida por regla si un nivel es soporte/resistencia/FVG/OB."
-      ],
-      "started_at": "2026-07-24",
-      "done_at": "2026-07-24",
-      "verification": "73 passed (engine+observacion+ML+distribucion); seed OFFLINE 211 experiencias; IA de Zonas prototipo valida tesis"
-    },
-    {
-      "id": 28,
-      "name": "zone_ia",
-      "title": "IA de Zonas (Experience Engine) — reemplaza zone_memory.py",
-      "sdd": true,
-      "status": "done",
-      "depends_on": [
-        27
-      ],
-      "replaces": [
-        "src/zone_memory.py"
-      ],
-      "description": "Segunda IA lectora de la memoria única. Descubre zonas de reacción por clustering de proximidad (sin reglas) y emite zone_confidence, reemplazando el detector por reglas zone_memory.py en STRAT-A/F.",
-      "started_at": "2026-07-24",
-      "done_at": "2026-07-24",
-      "verification": "86 passed (zone_ia + htf_zone_wiring + experience_engine + observation + distrib + ML). zone_memory.py borrado; ZONE_IA_ENABLED=True; tesis 'una memoria, multiples IAs' demostrada."
-    },
-    {
-      "id": 29,
-      "name": "market_geometry_ctx",
-      "title": "Contexto Geométrico M15 (OTC) — soportes/resistencias del día para consenso de dirección",
-      "sdd": true,
-      "status": "in_progress",
-      "depends_on": [
-        27,
-        28
-      ],
-      "description": "Usa ~96 velas M15 de pares OTC (ya traídas) con smc_analysis.detect_structure para trazar swings/soportes/resistencias reales del día. Cruza con IA de Zonas (memoria) + confirmación por cuerpo como consenso de dirección en el extremo. Sin reglas, sin Bollinger, sin majors. Aprende de EURJPY_otc (loss direccion_equivocada).",
-      "started_at": "2026-07-24",
-      "done_at": "2026-07-24",
-      "verification": "101 passed (market_geometry_ctx 6 + extreme_direction 9 + zone_ia 5 + htf_zone_wiring 8 + experience_engine 4 + observation 5 + distrib 3 + ML...). Wiring end-to-end: scorer puebla entry.geometry desde candles_15m y _score_extreme_direction penaliza PUT en soporte con cuerpo alcista (caso EURJPY). MARKET_GEOMETRY_ENABLED=True."
-    },
-    {
-      "id": 30,
-      "name": "strat_f_spike_wyckoff_phase_a",
-      "title": "Mejora del SPIKE: agotamiento verdadero (cruce M15 confirmado + M5 alineado + vela de rechazo) anclado a ZONA S/R fractal, mapeado a Fase A Wyckoff",
-      "sdd": true,
-      "status": "done",
-      "spec_path": "specs/strat_f_spike_wyckoff_phase_a/",
-      "depends_on": [
-        29
-      ],
-      "description": "Eleva el modo SPIKE de evaluate_strat_f de 'M5 en extremo + cuerpo a favor' a 'agotamiento verdadero en la ZONA S/R del fractal con cruce M15 confirmado (cross_ago>=1) + M5 alineado + vela de rechazo (martillo/doji/estrellafugaz)'. Reusa stoch_exhaustion.evaluate_exhaustion como motor (NO duplica lógica). Mapea el evento a Fase A de Wyckoff (spring/upthrust). Conserva el rebote base (R6). NO olvida las zonas S/R fractal (suelo/techo Wyckoff) como ancla (R1). M5 como árbitro de la entrada (alineado con M15), coherente con '5 min es mas que suficiente'.",
-      "acceptance": [
-        "SPIKE con cruce M15 confirmado + M5 alineado + vela de rechazo en zona fractal → entry_mode=SPIKE, spike=True",
-        "SPIKE sin cruce M15 confirmado → REBOUND (no SPIKE)",
-        "SPIKE con M5 en contra → REBOUND",
-        "pattern_name/auditoria incluye wyckoff_phase_a (spring para CALL, upthrust para PUT)",
-        "Rebote base intacto: tests test_strat_f_spike.py y test_strat_f_maturing_recheck.py siguen verdes",
-        "tests nuevos R9 cubren los 4 casos",
-        "pytest tests/ en verde (modulos tocados)"
-      ],
-      "created_at": "2026-07-25",
-      "note": "Spec redactado por auditoria del sistema + logica validada en watchdog (stoch_exhaustion). Puerta SDD: espera aprobacion humana."
-    },
-    {
-      "name": "strat_f_spike_early_alert",
-      "title": "Capa de ALERTA TEMPRANA del SPIKE: anticipa el giro del estocástico M15 (cinemática %K/%D) antes del cruce confirmado, usada en el chequeo intravela (R10), nunca como disparador",
-      "sdd": true,
-      "status": "done",
-      "spec_path": "specs/strat_f_spike_early_alert/",
-      "depends_on": [
-        539
-      ],
-      "description": "Capa ADICIONAL y COMPLEMENTARIA a strat_f_spike_wyckoff_phase_a. No reemplaza R2 (cruce confirmado) ni R2-bis (separación adaptativa): es una marca de ATENCIÓN que anticipa el giro del estocástico M15 usando la cinemática de %K/%D (pendiente, aceleración 2ª derivada, ángulo arctan, proyección de velas a la línea 20/80, velocidad de convergencia). Se evalúa INTRAVELA (R10) sobre la M15 abierta + M1 lookback=15. Nunca promueve SPIKE ni relaja R2/R2-bis/R3/R3-bis (prohibido por R-EA1/R-EA2). Activación por puntaje combinado con umbral percentil 90 del historial propio del par (adaptativo, sin números fijos). Pesos 1/5 fijos por versión; ajuste por aciertos POSTPUESTO. Persistencia: ALT B (JSON por símbolo en data/early_alert/<SYM>.json, escritura atómica).",
-      "acceptance": [
-        "Alerta presente PERO sin cruce M15 confirmado → SPIKE NO se promueve (has_signal False / REBOUND)",
-        "Las 5 cantidades de R-EA4 se calculan y proyección es SIEMPRE positiva (bug de CALL sin abs corregido: |24-20|/|-2|=2.0)",
-        "Puntaje combinado: señales débiles vs historial del par → NO activa; decil alto (percentil 90) → SÍ activa",
-        "Ventana de proyección adaptativa del par; sin historial → lookback=15 + es_default=True",
-        "Alerta registrada en caja negra (early_alert) y NO altera has_signal (R-EA7)",
-        "INTRAVELA (R10): detectada sobre M15 abierta + M1 lookback=15, no solo al cierre",
-        "Persistencia ALT B: JSON por símbolo con escritura atómica (write-temp + os.replace); sobrevive reinicios; carga con fallback a vacío",
-        "pytest de módulos tocados en verde (sin romper spec vigente)"
-      ],
-      "created_at": "2026-07-26",
-      "spec_ready_at": "2026-07-26",
-      "note": "Aprobado por el usuario tras corrección de bug de cuentas en proyección CALL y elección ALT B de persistencia. Puerta SDD: espera OK para implementar (in_progress)."
-    },
-    {
-      "name": "market_replay_engine",
-      "title": "Market Replay Engine (Capa 0.5): reproduce mercado histórico como feed en vivo via interfaz MarketFeed; el consumidor no distingue vivo de replay. Acelera Observador/Atlas. NO es backtester.",
-      "sdd": true,
-      "status": "done",
-      "spec_path": "specs/market_replay_engine/",
-      "depends_on": [],
-      "description": "Interfaz unica MarketFeed (next_event/now) + ReplayFeed (caja negra propia y CSV, velocidad 1x-1000x/MAX, pause/step/seek/bookmark, Regla Sagrada: nunca ve el futuro) + LiveFeed placeholder. Paquete nuevo src/marketfeed/, cero contacto con el bot vivo. Documentos rectores: docs/FILOSOFIA.md, docs/PTM_V3.md, docs/REPLAY_ENGINE.md."
-    },
-    {
-      "name": "observador_nucleo",
-      "title": "Observador Fase A: nucleo de episodios PTM v3",
-      "sdd": true,
-      "status": "done",
-      "depends_on": [
-        "market_replay_engine"
-      ],
-      "spec": "specs/observador_nucleo/"
-    },
-    {
-      "name": "observador_fase_b",
-      "title": "Observador Fase B: calidad del rebote + pelicula completa (evolution/summary/capturemonitor)",
-      "status": "done",
-      "sdd": true,
-      "spec_path": "specs/observador_fase_b/"
-    },
-    {
-      "name": "discovery_engine",
-      "title": "Discovery Engine: mineria de conocimiento del Atlas (propone leyes nuevas, no borra)",
-      "status": "done",
-      "sdd": true,
-      "spec_path": "specs/discovery_engine/"
-    },
-    {
-      "name": "strategy_lab",
-      "title": "Strategy Lab (Laboratorio de estrategias) — perfecciona la estrategia propuesta",
-      "status": "done",
-      "sdd": true,
-      "depends_on": [
-        "discovery_engine",
-        "observador_fase_b"
-      ],
-      "layer": "2.6"
-    },
-    {
-      "id": 31,
-      "name": "freno_poi_filter",
-      "title": "Freno (A): módulo POI (M3) como filtro de contexto del freno",
-      "phase": "strategy_lab",
-      "priority": 31,
-      "status": "done",
-      "description": "Añadir POI (M3, zona de atención) como filtro de contexto al freno aislado (brake_eval). Objetivo: ver si operar solo donde hay estructura sube el WR de 91% o reduce señales subiendo calidad. Dueño: src/strategy_lab/poi_filter.py + tests/test_strategy_lab_poi_filter.py. Disjunto de B/C.",
-      "acceptance": [
-        "poi_filter.py puro (numpy/pandas) que marca zonas POI desde OHLC M15",
-        "freno aplicado SOLO dentro de zonas POI (filtro de contexto)",
-        "mide WR del freno filtrado vs sin filtro en 8 pares prestados",
-        "tests/test_strategy_lab_poi_filter.py verdes",
-        "cero import bot, cero time.now en lógica"
-      ],
-      "depends_on": []
-    },
-    {
-      "id": 32,
-      "name": "observador_feed_live",
-      "title": "Observador (B): grabar mercado en vivo (recorder sobre MarketFeed)",
-      "phase": "observador",
-      "priority": 32,
-      "status": "done",
-      "sdd": true,
-      "spec_path": "specs/observador/",
-      "description": "Espec SDD del Observador + recorder.py que graba eventos CANDLE_CLOSED de un MarketFeed a parquet (caja negra local), para que la señal del freno nazca de datos frescos/OTC y se valide en entorno real. Dueño: specs/observador/{requirements,design,tasks}.md + src/marketfeed/recorder.py + tests/test_marketfeed_recorder.py. Disjunto de A/C.",
-      "verification": "recorder 6 tests verdes + E2E mío (50 velas->50 filas, schema OK, solo CANDLE_CLOSED). Spec SDD lista con puerta humana.",
-      "acceptance": [
-        "specs/observador/ con SDD (requirements/design/tasks) puerta humana",
-        "recorder.py implementa MarketFeed (graba CANDLE_CLOSED a parquet)",
-        "Regla Sagrada: un test adversarial que la grabación nunca lea el futuro",
-        "tests/test_marketfeed_recorder.py verdes",
-        "cero import bot"
-      ],
-      "depends_on": [
-        "market_replay_engine"
-      ]
-    },
-    {
-      "id": 33,
-      "name": "freno_rentabilidad",
-      "title": "Rentabilidad (C): simular edge 91% contra payout/spread real de Quotex",
-      "phase": "strategy_lab",
-      "priority": 33,
-      "status": "done",
-      "description": "Simular el edge del freno (91% WR) contra payout real de Quotex (p.ej. 80-95%) y spread/contratick para saber si es rentable tras costos. Dueño: src/strategy_lab/pnl_sim.py + scripts/simular_rentabilidad_freno.py + tests/test_strategy_lab_pnl_sim.py. Disjunto de A/B.",
-      "verification": "pnl_sim 4 tests verdes + script mío (payout 0.85): expectancy +0.6845/señal, break-even WR 0.5405, margen sobre BE +0.37. EDGE AGUANTA tras costos.",
-      "acceptance": [
-        "pnl_sim.py puro: dado WR y payout, calcula expectancy/ROI por señal",
-        "script corre sobre señales reales del freno (8 pares) con payout configurable",
-        "reporta expectancy, ROI anualizado, break-even WR",
-        "tests/test_strategy_lab_pnl_sim.py verdes",
-        "cero import bot"
-      ],
-      "depends_on": []
+      "done_at": "2026-07-31"
     }
   ]
 }
