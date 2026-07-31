@@ -760,3 +760,23 @@ APPROVED. Cierre formal de status.
 **PrÃ³ximo paso recomendado:**
 VisualizaciÃ³n de estocÃ¡stico en vivo en dashboard del hub.
 
+
+
+---
+
+## 2026-07-31 — Purga de estrategias muertas: solo Edificio operativo
+
+**Qué se hizo:**
+- STRAT-F apagada por config (STRAT_F_ENABLED=False, STRAT_F_ONLY=False). Única estrategia viva: Edificio (flags propios brake/extreme/cross/stoch M15 en scanner).
+- Respaldo completo en C:\Users\v_jac\Desktop\respaldo quotex (snapshot sin .git/runtime + specs/ archivadas).
+- Limpieza del repo: 19 docs muertos fuera, specs/ completa fuera, 86 tests de estrategias fuera (quedan 54).
+- Hub: eliminado el cuadro ? Madurando (index.html + JS + server.py).
+- feature_list.json reconstruido: 10 features (cadena edificio + infra), validado por init.ps1.
+- init.ps1: fix encoding utf-8 al leer feature_list.json.
+
+**Verificación:**
+- 58 tests de la cadena del edificio en verde (test_edificio_*, connection, stochastic_m15).
+- Imports OK de la cadena completa + hub.
+- 41 fallos de tests restantes: PRE-EXISTENTES (verificado con git stash: idénticos con y sin la purga; deuda de cambios ajenos sin commitear en scanner/executor).
+
+**Estado final:** solo el Edificio operativo, respaldo a salvo en Desktop, repo limpio.
