@@ -78,7 +78,7 @@ from scan_prefetch import (
 )
 from loop_utils import sleep_with_inline_countdown
 from diversification_enforcer import DiversificationEnforcer
-from edificio_executor import execute_contratados, is_sticky_cross
+from edificio_executor import execute_contratados, is_sticky_cross, resolve_contratados
 from entry_scorer import CandidateEntry, explain_score, score_candidate, select_best
 from models import Candle, ConsolidationZone, PendingReversal, SignalMode
 from strat_a import (
@@ -1535,6 +1535,11 @@ class AssetScanner:
             await execute_contratados(self.bot)
         except Exception as exc:
             log.error("[EDIFICIO] Error ejecutando contratados: %s", exc)
+        # Resolver resultados de órdenes vencidas del edificio (WIN/LOSS por ticket).
+        try:
+            await resolve_contratados(self.bot)
+        except Exception as exc:
+            log.error("[EDIFICIO] Error resolviendo resultados: %s", exc)
         # One compact line instead of dozens of per-asset skip rows
         n_assets = len(assets)
         n_rej = sum(reject_counts.values())

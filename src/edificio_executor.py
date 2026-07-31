@@ -12,6 +12,7 @@ Flujo:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Optional
@@ -22,9 +23,13 @@ from config import (
     EDIFICIO_MAX_ORDER_TRIES,
     EDIFICIO_ORDER_AMOUNT,
     EDIFICIO_ORDER_DURATION_SEC,
+    MARTIN_RESOLVE_MAX_ATTEMPTS,
+    MARTIN_RESOLVE_RETRY_SEC,
+    MARTIN_RESOLVE_TIMEOUT_SEC,
 )
-from connection import place_order
+from connection import interpret_broker_result, place_order
 from edificio_contratacion import CONTRATADO, PISO_3, ContratadoEvent
+from black_box_recorder import get_black_box
 
 log = logging.getLogger("edificio_contratacion")
 
@@ -174,16 +179,31 @@ async def _send_one(
     error = order_result[4] if len(order_result) > 4 else ""
     if ok:
         order_id = order_result[1] if len(order_result) > 1 else ""
+        order_ref = int(order_result[3] or 0) if len(order_result) > 3 else 0
         card.order_id = order_id
+        card.order_ref = order_ref
         card.order_status = "sent"
         card.reason = f"CONTRATADO — orden enviada ({direction}, id={order_id})"
         ev.order_id = order_id
+        ev.order_ref = order_ref
         ev.order_status = "sent"
         log.info(
-            "[EDIFICIO] %s: ORDEN ENVIADA %s $%.2f %ds → id=%s",
-            ev.asset, direction, amount, duration, order_id,
+            "[EDIFICIO] %s: ORDEN ENVIADA %s $%.2f %ds → id=%s (ticket=%s)",
+            ev.asset, direction, amount, duration, order_id, order_ref,
         )
-        return True, {"order_id": order_id}
+        _record_sent_to_black_box(edificio, ev, card, direction, amount, duration)
+        edificio.register_sent(order_id, {
+            "asset": ev.asset,
+            "direction": direction,
+            "amount": float(amount),
+            "payout": int(card.payout or 0),
+            "order_ref": order_ref,
+            "sent_at": time.time(),
+            "duration_sec": int(duration),
+            "resolved": False,
+            "attempts": 0,
+        })
+        return True, {"order_id": order_id, "order_ref": order_ref}
 
     log.warning(
         "[EDIFICIO] %s: broker rechazó %s — %r",
@@ -213,3 +233,186 @@ def _retry_or_drop(
     edificio.requeue(ev)
     log.info("[EDIFICIO] %s: re-encolado (intento %d/%d) — %s", ev.asset, ev.tries, max_tries + 1, reason)
     return False, {"reason": "retry", "tries": ev.tries}
+
+
+# ── Trazabilidad: caja negra (F1) ────────────────────────────────────────
+# Contador de scans EDIFICIO en la caja negra (por proceso).
+_EDIFICIO_SCAN_SEQ = 0
+
+
+def _record_sent_to_black_box(
+    edificio: Any,
+    ev: ContratadoEvent,
+    card: Any,
+    direction: str,
+    amount: float,
+    duration: int,
+) -> None:
+    """Registra el envío confirmado en la caja negra (strategy="EDIFICIO").
+
+    La fila queda en scan_candidates con order_id → el resolvedor la actualiza
+    con WIN/LOSS vía record_order_result(order_id, ...). Nunca debe romper el
+    envío: todo error es solo un warning de log.
+    """
+    global _EDIFICIO_SCAN_SEQ
+    if not ev.order_id:
+        return
+    try:
+        _EDIFICIO_SCAN_SEQ += 1
+        bb = get_black_box()
+        scan_id = bb.record_scan_start("EDIFICIO", _EDIFICIO_SCAN_SEQ)
+        bb.record_candidate(scan_id, "EDIFICIO", {
+            "asset": ev.asset,
+            "direction": direction,
+            "score": float(card.score or 0.0),
+            "confidence": 0.0,
+            "payout": int(card.payout or 0),
+            "decision": "BUY",
+            "decision_reason": "edificio_contratado",
+            "order_id": ev.order_id,
+            "duration_sec": int(duration),
+            "agent_tag": "BOT",
+            "strategy_details": {
+                "amount": float(amount),
+                "order_ref": ev.order_ref,
+            },
+        })
+        log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)
+    except Exception as exc:
+        log.warning("[EDIFICIO] %s: no se pudo registrar en caja negra (no bloquea): %s", ev.asset, exc)
+
+
+# ── Trazabilidad: resolvedor por ticket (F2) ─────────────────────────────
+
+async def resolve_contratados(
+    bot: Any,
+    *,
+    max_attempts: Optional[int] = None,
+) -> int:
+    """Resuelve el resultado (WIN/LOSS) de las órdenes del edificio ya vencidas.
+
+    Corre en el loop del BOT (socket único, regla de oro), llamado desde el
+    scanner junto a execute_contratados. Consulta el resultado con el TICKET
+    numérico (check_win) usando la misma mecánica que el pipeline STRAT-F:
+    profit == 0 NO es LOSS (lag del broker) → se reintenta en el próximo ciclo.
+
+    Decisión: se resuelve UNA orden vencida por llamada para no bloquear el
+    loop (check_win bloquea hasta que el broker liquida); el resto se resuelve
+    en el siguiente scan.
+
+    Returns:
+        Cantidad de órdenes resueltas en esta llamada.
+    """
+    edificio = getattr(bot, "edificio", None)
+    client = getattr(bot, "client", None)
+    if edificio is None or client is None:
+        return 0
+
+    max_attempts = int(max_attempts if max_attempts is not None else MARTIN_RESOLVE_MAX_ATTEMPTS)
+    sent_orders = edificio.sent_pending()
+    now = time.time()
+
+    # Primera orden vencida sin resolver (una por llamada — ver docstring).
+    target_id: Optional[str] = None
+    target_info: Optional[dict] = None
+    for order_id, info in sent_orders.items():
+        if info.get("resolved"):
+            continue
+        if now < float(info.get("sent_at", 0) or 0) + int(info.get("duration_sec", 0) or 0) + 1:
+            continue
+        target_id, target_info = order_id, info
+        break
+
+    if target_id is None or target_info is None:
+        return 0
+
+    outcome, profit = await _resolve_one(bot, client, edificio, target_id, target_info, max_attempts)
+    if outcome not in {"WIN", "LOSS"}:
+        return 0
+
+    # Actualizar card (si sigue en el edificio) para el hub.
+    card = edificio.get_card(str(target_info.get("asset", "")))
+    if card is not None:
+        card.order_status = "won" if outcome == "WIN" else "lost"
+        card.reason = f"Resultado: {outcome} ({profit:+.2f})"
+
+    # Secuencia combinada cronológica (hub "Secuencia (W/L)").
+    history = getattr(bot, "outcome_history", None)
+    if history is not None:
+        history.append("W" if outcome == "WIN" else "L")
+
+    log.info(
+        "[EDIFICIO] %s: resultado %s %+.2f (ticket=%s)",
+        target_info.get("asset"), outcome, profit, target_info.get("order_ref"),
+    )
+    return 1
+
+
+async def _resolve_one(
+    bot: Any,
+    client: Any,
+    edificio: Any,
+    order_id: str,
+    info: dict,
+    max_attempts: int,
+) -> tuple[Optional[str], float]:
+    """Reintenta check_win por ticket hasta liquidar o agotar intentos.
+
+    Returns:
+        (outcome, profit) — outcome "UNRESOLVED" si se agotaron los intentos;
+        (None, 0.0) si aún no hay que resolver (el caller reintenta otro ciclo).
+    """
+    order_ref = int(info.get("order_ref") or 0)
+    amount = float(info.get("amount") or 0.0)
+    payout_pct = int(info.get("payout") or 80)
+    attempts = int(info.get("attempts") or 0)
+
+    for attempt in range(1, max_attempts + 1):
+        info["attempts"] = attempts + attempt
+        interpreted = None
+        try:
+            if order_ref > 0:
+                # check_win blocks until game_state==1; give it real time.
+                win_val = await asyncio.wait_for(
+                    client.check_win(order_ref),
+                    timeout=MARTIN_RESOLVE_TIMEOUT_SEC,
+                )
+                interpreted = interpret_broker_result(
+                    win_val,
+                    trade_amount=amount,
+                    payout_pct=payout_pct,
+                )
+                if interpreted is None:
+                    log.info(
+                        "⏳ [EDIFICIO] %s: aún no liquidado (check_win=%r) intento %d/%d",
+                        info.get("asset"), win_val, attempt, max_attempts,
+                    )
+        except asyncio.TimeoutError:
+            log.info(
+                "⏳ [EDIFICIO] %s: timeout esperando liquidación intento %d/%d",
+                info.get("asset"), attempt, max_attempts,
+            )
+        except Exception as exc:
+            log.warning(
+                "No se pudo obtener resultado de %s / ref=%s intento %d/%d: %s",
+                order_id, order_ref, attempt, max_attempts, exc,
+            )
+
+        if interpreted is not None:
+            outcome, profit = interpreted
+            try:
+                get_black_box().record_order_result(order_id, outcome, float(profit))
+            except Exception as exc:
+                log.warning("[EDIFICIO] %s: no se pudo actualizar caja negra (no bloquea): %s", order_id, exc)
+            info["resolved"] = True
+            return outcome, float(profit)
+
+        if attempt < max_attempts:
+            await asyncio.sleep(MARTIN_RESOLVE_RETRY_SEC)
+
+    log.warning(
+        "⚠ [EDIFICIO] %s: quedó UNRESOLVED (no se forzó LOSS). Se reintentará en otro ciclo.",
+        info.get("asset"),
+    )
+    info["resolved"] = True
+    return "UNRESOLVED", 0.0

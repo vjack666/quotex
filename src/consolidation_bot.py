@@ -185,6 +185,10 @@ class ConsolidationBot:
         self.cycle_losses = 0
         self.cycle_profit = 0.0
         self.cycle_start_balance: Optional[float] = None
+        # Secuencia combinada W/L (STRAT-F + edificio) en orden de llegada.
+        # El hub la usa para "Secuencia (W/L)" — hilo cronológico continuo,
+        # NO se resetea con el ciclo (decisión aprobada 2026-07-31).
+        self.outcome_history: deque = deque(maxlen=200)
         self.watched_candidates: dict = {}
         self.capture_dir = BROKEN_CAPTURE_DIR
         self.capture_dir.mkdir(parents=True, exist_ok=True)

@@ -85,7 +85,8 @@ class BuildingCard:
 
     # Estado de la orden enviada al broker (solo cuando piso == CONTRATADO)
     order_id: str = ""        # id devuelto por el broker
-    order_status: str = ""    # pending | sent | failed
+    order_ref: int = 0        # ticket numérico del broker (para resolver resultado)
+    order_status: str = ""    # pending | sent | won | lost | failed
 
     @property
     def has_poi_p1(self) -> bool:
@@ -126,7 +127,8 @@ class ContratadoEvent:
     timestamp: float = field(default_factory=time.time)
     tries: int = 0         # intentos de envío de la orden
     order_id: str = ""     # id devuelto por el broker
-    order_status: str = ""  # pending | sent | failed
+    order_ref: int = 0     # ticket numérico del broker (para resolver resultado)
+    order_status: str = ""  # pending | sent | won | lost | failed
 
 
 class EdificioContratacion:
@@ -145,6 +147,10 @@ class EdificioContratacion:
         self._cards: Dict[str, BuildingCard] = {}
         self._contratados: List[ContratadoEvent] = []
         self._cycle_count: int = 0
+        # Órdenes confirmadas por el broker, pendientes de resolución WIN/LOSS.
+        # key = order_id; value = {asset, direction, amount, payout, order_ref,
+        # sent_at, duration_sec, resolved, attempts}
+        self._sent_orders: Dict[str, Dict[str, Any]] = {}
 
     # ── API pública ────────────────────────────────────────────────
 
@@ -301,6 +307,18 @@ class EdificioContratacion:
     def get_card(self, asset: str) -> Optional[BuildingCard]:
         """Obtiene el carnet de un activo."""
         return self._cards.get(asset)
+
+    def register_sent(self, order_id: str, info: Dict[str, Any]) -> None:
+        """Registra una orden confirmada por el broker, pendiente de resolución."""
+        if not order_id:
+            return
+        info.setdefault("resolved", False)
+        info.setdefault("attempts", 0)
+        self._sent_orders[order_id] = info
+
+    def sent_pending(self) -> Dict[str, Dict[str, Any]]:
+        """Órdenes enviadas que aún no se resolvieron (por order_id)."""
+        return self._sent_orders
 
     def get_state(self) -> dict:
         """Devuelve el estado completo del edificio para el hub."""

@@ -85,7 +85,13 @@ def _live_duration_sec() -> int:
     stay at the old value (often 300).
     """
     return int(getattr(_cfg, "DURATION_SEC", 300))
-from connection import create_trading_client, fetch_candles_with_retry, get_open_assets, place_order
+from connection import (
+    create_trading_client,
+    fetch_candles_with_retry,
+    get_open_assets,
+    interpret_broker_result,
+    place_order,
+)
 from entry_sync import EntrySynchronizer
 from entry_scorer import CandidateEntry
 from models import (
@@ -761,45 +767,17 @@ class TradeExecutor:
 
         Critical: profitAmount == 0 / missing history must NOT be treated as LOSS.
         Quotex often exposes the ticket before profit is final (lag after expiry).
+
+        Delegates to the shared helper in connection.py (also used by the
+        Edificio de Contratación resolver).
         """
-        # Path A: check_win() → bool or numeric PnL
-        if win_val is not None:
-            if isinstance(win_val, bool):
-                if win_val:
-                    payout_rate = max(0.01, float(payout_pct) / 100.0)
-                    return "WIN", float(trade_amount) * payout_rate
-                return "LOSS", -abs(float(trade_amount))
-            if isinstance(win_val, (int, float)):
-                profit = float(win_val)
-                if profit > 0:
-                    return "WIN", profit
-                if profit < 0:
-                    return "LOSS", profit
-                # profit == 0 → still open / not settled
-                return None
-            return None
-
-        # Path B: get_result() → ("win"|"loss"|None, payload)
-        if status is None:
-            return None
-        status_l = str(status).strip().lower()
-        profit = 0.0
-        if isinstance(payload, dict):
-            try:
-                profit = float(payload.get("profitAmount", 0) or 0)
-            except (TypeError, ValueError):
-                profit = 0.0
-
-        if profit > 0:
-            return "WIN", profit
-        if profit < 0:
-            return "LOSS", profit
-
-        # Ambiguous: library may label profit==0 as "loss" before settlement.
-        # Only trust explicit status when profit is non-zero (handled above).
-        if status_l in {"win", "loss"} and profit == 0:
-            return None
-        return None
+        return interpret_broker_result(
+            win_val,
+            status=status,
+            payload=payload,
+            trade_amount=trade_amount,
+            payout_pct=payout_pct,
+        )
     async def _process_pending_martin(
         self,
         candidates: list[CandidateEntry],
@@ -876,6 +854,12 @@ class TradeExecutor:
             self.bot.cycle_wins += 1
         else:
             self.bot.cycle_losses += 1
+
+        # Secuencia combinada cronológica (STRAT-F + edificio): el hub arma
+        # "Secuencia (W/L)" con bot.outcome_history en orden de llegada.
+        history = getattr(self.bot, "outcome_history", None)
+        if history is not None:
+            history.append("W" if outcome == "WIN" else "L")
 
         # 1) Regla: reiniciar al alcanzar +10% del balance base del ciclo.
         if (

@@ -152,7 +152,7 @@ class MasanielloState:
     trades_in_cycle:     int   = 0           # operaciones completadas en ciclo
     wins_in_cycle:       int   = 0           # aciertos en ciclo actual
     losses_in_cycle:     int   = 0           # fallos en ciclo actual
-    sequence:            str   = ""          # secuencia W/L del ciclo en curso
+    sequence:            str   = ""          # secuencia W/L combinada (STRAT-F + edificio) en orden de llegada
     
     # Operación actual
     asset:               str   = ""

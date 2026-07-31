@@ -1,5 +1,92 @@
 # Estado de sesión
 
+## FASE TRAZABILIDAD EDIFICIO (F1+F2+secuencia W/L) — 2026-07-31 (APROBADA por Ruben)
+
+### Objetivo
+Que las órdenes del edificio queden trazables: (F1) registrarlas en la caja negra
+al enviarse, (F2) resolver su resultado WIN/LOSS por TICKET ~1s después del
+vencimiento (900s), y llenar la **Secuencia (W/L)** del hub en orden de llegada
+(un solo hilo cronológico combinado: STRAT-F + edificio, SIN agrupar W y L).
+
+### Diseño aprobado (investigación completa)
+
+**F1 — Registro en black box al enviar** (`src/edificio_executor.py`, `_send_one`):
+- Al confirmar el broker, guardar en la card/evento `order_ref` (índice 3 de
+  `place_order` = ticket numérico) además de `order_id` (índice 1).
+- Registrar: `record_scan_start("EDIFICIO", scan_number)` → `record_candidate(
+  scan_id, "EDIFICIO", {asset, direction, payout: card.payout, score, decision,
+  order_id, duration_sec, agent_tag="BOT"})`. La fila queda en scan_candidates
+  con order_id → el UPDATE de resultado funcionará por order_id.
+- Registrar también la orden en un registro de pendientes (p.ej.
+  `EdificioContratacion.sent_orders[order_id] = {asset, direction, amount, payout,
+  order_ref, sent_at, duration_sec, resolved=False}`).
+
+**F2 — Resolvedor por ticket** (nuevo `resolve_contratados(bot)` en
+`edificio_executor.py`, llamado en `scanner.py` justo después de
+`execute_contratados`):
+- Por cada orden con `not resolved` y `now >= sent_at + duration_sec + 1`:
+  `check_win(order_ref)` con `asyncio.wait_for` (timeout MARTIN_RESOLVE_TIMEOUT_SEC)
+  + `_interpret_broker_result` — CRÍTICO: profit==0 NO es LOSS (lag del broker),
+  se reintenta en el próximo ciclo.
+- Resuelto → `record_order_result(order_id, outcome, profit)` (UPDATE por
+  order_id en scan_candidates) + card: `order_status="won"/"lost"`, `reason`
+  + append a la secuencia combinada.
+- Máximo de intentos y retry: reusar MARTIN_RESOLVE_MAX_ATTEMPTS / RETRY_SEC.
+- Preferir EXTRAER `_interpret_broker_result` a función compartida (o importarla
+  de executor si no hay import circular) en vez de duplicarla.
+
+**F3 — Secuencia combinada cronológica** (bug confirmado en `hub/server.py:231`):
+- `"W"*wins + "L"*losses` agrupa W y L — Massaniello solo guarda contadores.
+- Solución: `bot.outcome_history = deque(maxlen=200)` en `consolidation_bot.__init__`.
+  - STRAT-F: append "W"/"L" en `_update_cycle_after_result` (executor.py:869).
+  - Edificio: append en el resolvedor F2.
+- `hub/server.py`: `"sequence": "".join(bot.outcome_history)` (hilo continuo, no
+  se resetea con el ciclo — el usuario pidió un solo hilo cronológico).
+- `hub/hub_models.py:155`: actualizar comentario del campo `sequence`
+  (ya no es solo "del ciclo en curso").
+
+### Archivos a tocar
+`src/edificio_executor.py` (F1+F2), `src/edificio_contratacion.py` (sent_orders),
+`src/scanner.py` (call a resolve_contratados), `src/consolidation_bot.py`
+(outcome_history), `src/executor.py` (append STRAT-F; posible extracción de
+_interpret_broker_result), `hub/server.py` (sequence), `hub/hub_models.py`
+(comentario), `hub/static/index.html` (card muestra won/lost), tests
+(test_edificio_executor, nuevo test resolvedor + secuencia).
+
+### Tests
+- F1: orden confirmada → fila en scan_candidates con strategy="EDIFICIO" y order_id.
+- F2: WIN por check_win; LOSS; profit==0 → reintento (no LOSS); record_order_result
+  actualiza la fila; card queda won/lost.
+- F3: secuencia combinada en orden de llegada (STRAT-F + edificio intercalados).
+
+### Implementación (hecha 2026-07-31)
+- ✅ `src/edificio_contratacion.py`: `BuildingCard.order_ref`/`ContratadoEvent.order_ref`
+  (ticket numérico); `EdificioContratacion._sent_orders` + `register_sent()`/`sent_pending()`.
+- ✅ `src/edificio_executor.py`: F1 en `_send_one` (guardar order_ref + `_record_sent_to_black_box`
+  con strategy="EDIFICIO" + registrar pendiente); F2 `resolve_contratados(bot)` +
+  `_resolve_one` (check_win por ticket con wait_for, reintentos MARTIN_RESOLVE_*,
+  UNRESOLVED sin forzar LOSS, UNA orden por llamada para no bloquear el loop).
+- ✅ `src/connection.py`: `interpret_broker_result()` EXTRAÍDA (función compartida) —
+  `executor.py::_interpret_broker_result` ahora delega (evita duplicación).
+- ✅ `src/scanner.py`: `await resolve_contratados(self.bot)` tras execute_contratados.
+- ✅ `src/consolidation_bot.py`: `self.outcome_history = deque(maxlen=200)` (hilo
+  cronológico continuo, NO se resetea con el ciclo).
+- ✅ `src/executor.py`: `_update_cycle_after_result` appendea W/L al historial.
+- ✅ `hub/server.py`: `"sequence"` = `"".join(bot.outcome_history)` (reemplaza el
+  bug `"W"*wins + "L"*losses` que agrupaba).
+- ✅ `hub/hub_models.py` + `hub/static/index.html`: comentario actualizado; card
+  muestra badge WIN ✓ / LOSS ✗.
+- ✅ Tests nuevos `tests/test_edificio_trazabilidad.py` (10): 27 passed en los 3
+  archivos de edificio; test_executor 3 fallos = baseline (verificado con stash).
+- BUG propio detectado por tests y corregido: UNRESOLVED NO debe entrar a la
+  secuencia ni marcar card (solo WIN/LOSS).
+
+### Pendiente
+- Commit (cuidado: NO incluir cambios ajenos del working tree: maturing_watcher.py,
+  strat_fractal.py, start_webapp.bat, .atl/*, feature_list.json, runtime/main.lock).
+
+---
+
 ## FIX: CONTRATADO → orden real al broker — 2026-07-31
 
 ### Síntoma (Ruben)

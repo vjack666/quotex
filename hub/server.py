@@ -228,7 +228,9 @@ def _enrich_with_bot(base: dict) -> None:
             next_stake_amt = None
         base["masaniello"] = {
             "cycle_num": getattr(bot, "cycle_id", None),
-            "sequence": "W" * wins + "L" * losses,
+            # Secuencia combinada (STRAT-F + edificio) en orden de llegada —
+            # NO agrupar W*W + L*L (perdía el orden cronológico real).
+            "sequence": "".join(getattr(bot, "outcome_history", ())),
             "total_pnl": (st["balance"] - st["initial_capital"])
             if (st.get("balance") is not None and st.get("initial_capital") is not None)
             else None,

@@ -1194,7 +1194,11 @@ function renderEdificio(ed){
         if(c.has_poi_p2) html += `<span style="font-size:9px;color:var(--emerald);">✓P2</span>`;
         if(c.has_poi_p3) html += `<span style="font-size:9px;color:var(--emerald);">✓P3</span>`;
         // Estado de la orden (solo CONTRATADO)
-        if(c.order_status === "sent"){
+        if(c.order_status === "won"){
+          html += `<span style="font-size:9px;color:var(--emerald);background:rgba(16,185,129,.18);border-radius:999px;padding:1px 6px;font-weight:510;">WIN ✓</span>`;
+        } else if(c.order_status === "lost"){
+          html += `<span style="font-size:9px;color:var(--red);background:rgba(239,68,68,.18);border-radius:999px;padding:1px 6px;font-weight:510;">LOSS ✗</span>`;
+        } else if(c.order_status === "sent"){
           html += `<span style="font-size:9px;color:var(--emerald);background:rgba(16,185,129,.12);border-radius:999px;padding:1px 6px;">orden enviada${c.order_id ? ' · ' + c.order_id : ''}</span>`;
         } else if(c.order_status === "failed"){
           html += `<span style="font-size:9px;color:var(--red);background:rgba(239,68,68,.12);border-radius:999px;padding:1px 6px;">orden falló</span>`;

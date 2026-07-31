@@ -481,6 +481,62 @@ async def place_order(
     return _handle_order_result(ok, info, client)
 
 
+def interpret_broker_result(
+    win_val: Any = None,
+    *,
+    status: Any = None,
+    payload: Any = None,
+    trade_amount: float = 0.0,
+    payout_pct: int = 80,
+) -> Optional[Tuple[str, float]]:
+    """Map broker payload to (WIN|LOSS, profit) or None if not settled yet.
+
+    Critical: profitAmount == 0 / missing history must NOT be treated as LOSS.
+    Quotex often exposes the ticket before profit is final (lag after expiry).
+
+    Compartida por el pipeline STRAT-F (Executor._interpret_broker_result) y el
+    resolvedor del Edificio de Contratación (edificio_executor.resolve_contratados).
+    """
+    # Path A: check_win() → bool or numeric PnL
+    if win_val is not None:
+        if isinstance(win_val, bool):
+            if win_val:
+                payout_rate = max(0.01, float(payout_pct) / 100.0)
+                return "WIN", float(trade_amount) * payout_rate
+            return "LOSS", -abs(float(trade_amount))
+        if isinstance(win_val, (int, float)):
+            profit = float(win_val)
+            if profit > 0:
+                return "WIN", profit
+            if profit < 0:
+                return "LOSS", profit
+            # profit == 0 → still open / not settled
+            return None
+        return None
+
+    # Path B: get_result() → ("win"|"loss"|None, payload)
+    if status is None:
+        return None
+    status_l = str(status).strip().lower()
+    profit = 0.0
+    if isinstance(payload, dict):
+        try:
+            profit = float(payload.get("profitAmount", 0) or 0)
+        except (TypeError, ValueError):
+            profit = 0.0
+
+    if profit > 0:
+        return "WIN", profit
+    if profit < 0:
+        return "LOSS", profit
+
+    # Ambiguous: library may label profit==0 as "loss" before settlement.
+    # Only trust explicit status when profit is non-zero (handled above).
+    if status_l in {"win", "loss"} and profit == 0:
+        return None
+    return None
+
+
 async def connect_with_retry(client: Quotex) -> Tuple[bool, str]:
     reason = ""
     for attempt in range(1, CONNECT_RETRIES + 1):
