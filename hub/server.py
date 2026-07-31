@@ -441,8 +441,10 @@ async def _auto_contract_loop() -> None:
                 result = await _execute_pending_contract(bot, {})
                 if result.get("ok"):
                     log.info("[HUB] auto-executed contract: %s", result.get("asset"))
-        except Exception:
-            pass
+                else:
+                    log.warning("[HUB] auto-contract skipped: %s — %s", result.get("asset"), result.get("reason"))
+        except Exception as exc:
+            log.error("[HUB] auto-contract loop error: %s", exc, exc_info=True)
         await asyncio.sleep(1.0)
 
 
