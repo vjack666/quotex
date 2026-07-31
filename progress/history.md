@@ -722,3 +722,41 @@ APPROVED. Cierre formal de status.
 
 **Next:** operar 24/7; opcional gate M1 micro-tendencia; cerrar #8 schedule_auto.
 
+---
+
+## 2026-07-31 — Edificio de Contratación: dispatcher automático + limpieza + auditoría caja negra
+
+**Qué se hizo:**
+- Endpoint manual `/api/contract/execute` y probe `/api/contract/probe` en `hub/server.py` para cerrar traza edificio → broker.
+- Dispatcher automático `_auto_contract_loop()` en `hub/server.py`: cada 1 segundo consume `ContratadoEvent` y ejecuta `place_order()` sin intervención manual.
+- Limpieza de `contratados_recientes` del edificio y snapshot inicial en `data\logs\edificio_snapshot_1785510689.json` para registrar desde este momento.
+- Auditoría de caja negra: confirmada activa con DB y log en disco (`black_box_strat_2026-07-31.db`, `black_box_2026-07-31.jsonl`).
+
+**Errores documentados del día:**
+1. **Hub con lock antiguo**: `stop_webapp.bat` no terminaba instancias previas; lock `runtime/main.lock` impedía arrancar. Causa raíz: proceso Edge residual. Solución: usar lockfile y no matar PIDs directamente.
+2. **Bot no inyectado en hub al inicio**: `_bot_ref` quedaba `None` hasta un segundo request. Causa raíz: carrera entre startup y primer request. Solución: lazy fallback en endpoints hacia `app._runner.bot` y `set_bot()`.
+3. **Endpoint `/api/contract/probe` cargaba pero daba 500**: `CONTRACT_DEFAULT_AMOUNT` no definido en `hub/server.py`. Causa raíz: patch anterior no persistió constantes. Solución: definir constantes en módulo y reintentar.
+4. **Proceso combinado `stop + start` moría con exit 127**: fallaba al encadenar `cmd.exe /c stop_webapp.bat && sleep 2 && python app.py`. Causa raíz: shell sin job control + lockfile. Solución: separar stop y start en comandos distintos.
+5. **`bot_no_edificio` repetido en vivo**: no era fallo de endpoint, sino que el hub cargaba código cacheado sin el parche de lazy-injection. Solución: reinicio explícito con limpieza de `__pycache__`.
+
+**Archivos modificados:**
+- `src/edificio_contratacion.py`: `reset_contratados_recientes()`, limpieza de historial.
+- `hub/server.py`: endpoint `/api/contract/execute`, `/api/contract/probe`, `_execute_pending_contract()`, `_auto_contract_loop()`, lazy fallback `_bot_ref`, constantes de contrato, logger del módulo.
+- `data\logs\edificio_snapshot_1785510689.json`: snapshot inicial post-limpieza.
+- `progress/history.md`: esta entrada.
+
+**Verificación:**
+- `py_compile hub/server.py` → PASS
+- `py_compile src/edificio_contratacion.py` → PASS
+- `pytest tests/test_scanner.py -q` → 8 passed
+- `/health` → HTTP 200
+- `/api/contract/probe` → `ok=true` con respuesta real del broker en demo
+
+**Estado final:**
+- Dispatcher automático operativo; edificio → broker sin intervención manual.
+- Caja negra conectada y guardando registros detallados.
+- Historial de contratados recientes limpio desde este momento.
+
+**Próximo paso recomendado:**
+Visualización de estocástico en vivo en dashboard del hub.
+

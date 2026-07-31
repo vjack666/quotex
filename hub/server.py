@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -22,6 +23,7 @@ from .events import event_bus
 from .hub_models import HubState
 from .strat_f_panel import StratFPanel
 from .hub_scanner import HubScanner
+from .edificio_panel import EdificioPanel
 
 # El módulo src.stats usa imports pelados (p.ej. `from black_box_recorder import ...`).
 # Al correr `python -m hub.server` desde la raíz, src/ no está en sys.path, así que
@@ -33,6 +35,8 @@ if str(_SRC_DIR) not in _sys.path:
 
 from src.stats import build_stats, get_rejections  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 HERE = Path(__file__).resolve().parent
 STATIC_DIR = HERE / "static"
 INDEX_PATH = STATIC_DIR / "index.html"
@@ -40,11 +44,14 @@ INDEX_PATH = STATIC_DIR / "index.html"
 DEFAULT_HOST = os.environ.get("HUB_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.environ.get("HUB_PORT", "8080"))
 POLL_INTERVAL = float(os.environ.get("HUB_POLL_SEC", "0.8"))
+CONTRACT_DEFAULT_AMOUNT = 1.0
+CONTRACT_DEFAULT_DURATION = 900
 
 _PORT_RESOLVED: Optional[int] = None
 
 _scanner: Optional[HubScanner] = None
 _panel: Optional[StratFPanel] = None
+_edificio_panel: Optional[EdificioPanel] = None
 _bot_ref: Any = None
 _clients: set[WebSocket] = set()
 _server_task: Optional[asyncio.Task] = None
@@ -54,7 +61,7 @@ app = FastAPI(title="Quotex HUB", version="1.0.0", docs_url=None, redoc_url=None
 
 
 def init(scanner: HubScanner, bot: Any = None) -> None:
-    global _scanner, _bot_ref, _panel
+    global _scanner, _bot_ref, _panel, _edificio_panel
     _scanner = scanner
     _bot_ref = bot
     # El bot real llena su propio StratFPanel; el server lo usa para el WS.
@@ -62,6 +69,18 @@ def init(scanner: HubScanner, bot: Any = None) -> None:
         _panel = bot.strat_f_panel
     elif _panel is None:
         _panel = StratFPanel()
+    # Panel del edificio
+    if _edificio_panel is None:
+        _edificio_panel = EdificioPanel()
+
+
+def set_bot(bot: Any) -> None:
+    """Inyecta/actualiza la referencia al bot en caliente."""
+    global _bot_ref
+    _bot_ref = bot
+    if bot is not None and getattr(bot, "strat_f_panel", None) is not None:
+        global _panel
+        _panel = bot.strat_f_panel
 
 
 def _serialize(obj: Any) -> Any:
@@ -134,6 +153,20 @@ def _build_snapshot() -> dict:
     # campos, así que se leen aquí directamente en vez de inyectarlos en el
     # dataclass (donde _serialize los descartaría).
     _enrich_with_bot(base)
+
+    # ── Estado del Edificio de Contratación ───────────────────────
+    edificio_state = None
+    bot = _bot_ref
+    if bot is not None and hasattr(bot, "edificio") and bot.edificio is not None:
+        try:
+            edificio_state = _serialize(bot.edificio.get_state())
+        except Exception:
+            pass
+    if edificio_state is None and _edificio_panel is not None:
+        edificio_state = _edificio_panel.get_state()
+    if edificio_state:
+        base["edificio"] = edificio_state
+
     return base
 
 
@@ -316,6 +349,176 @@ async def api_blackbox():
         return build_stats()
     except Exception as exc:  # DB aún no creada (Fase 6 pendiente) o sin datos
         return {"status": "empty", "error": str(exc), "total_resolved": 0}
+
+
+@app.post("/api/contract/execute")
+async def api_contract_execute(payload: dict):
+    """Toma el primer `contratado` pendiente del edificio y ejecuta la orden real.
+
+    Espera JSON opcional:
+      - amount: float (default 1.0)
+      - duration: int (default 900)
+      - account_type: str (default PRACTICE)
+
+    Devuelve el estado del broker o motivo de rechazo.
+    """
+    bot = _bot_ref
+    if bot is None:
+        try:
+            import app as _app
+            _runner = getattr(_app, "_runner", None)
+            if _runner is not None and getattr(_runner, "bot", None) is not None:
+                bot = _runner.bot
+                set_bot(bot)
+        except Exception:
+            pass
+    if bot is None or not hasattr(bot, "edificio") or bot.edificio is None:
+        return {"ok": False, "reason": "bot_no_edificio"}
+
+    return await _execute_pending_contract(bot, payload)
+
+
+async def _execute_pending_contract(bot: Any, payload: dict) -> dict:
+    try:
+        events = bot.edificio.pop_contratados()
+    except Exception as exc:
+        return {"ok": False, "reason": f"pop_contratados_failed:{exc}"}
+
+    if not events:
+        return {"ok": False, "reason": "sin_contratados"}
+
+    event = events[0]
+    amount = float(payload.get("amount") or CONTRACT_DEFAULT_AMOUNT)
+    duration = int(payload.get("duration") or CONTRACT_DEFAULT_DURATION)
+    account_type = str(payload.get("account_type") or "PRACTICE")
+
+    client = getattr(bot, "client", None)
+    if client is None:
+        return {"ok": False, "reason": "bot_sin_client"}
+
+    try:
+        from src.connection import place_order
+        order_result = await place_order(
+            client=client,
+            asset=event.asset,
+            direction=event.direction,
+            amount=max(amount, 0.01),
+            duration=max(duration, 60),
+            dry_run=False,
+            account_type=account_type,
+        )
+        ok = bool(order_result[0]) if order_result else False
+        broker = {
+            "order_id": order_result[1] if len(order_result) > 1 else "",
+            "open_price": order_result[2] if len(order_result) > 2 else 0.0,
+            "order_ref": order_result[3] if len(order_result) > 3 else 0,
+            "error": order_result[4] if len(order_result) > 4 else "",
+        }
+    except Exception as exc:
+        return {"ok": False, "reason": f"order_exception:{exc}"}
+
+    return {
+        "ok": ok,
+        "asset": event.asset,
+        "direction": event.direction,
+        "payout": event.payout,
+        "score": event.score,
+        "broker": broker,
+    }
+
+
+async def _auto_contract_loop() -> None:
+    while True:
+        try:
+            bot = _bot_ref
+            if bot is not None and hasattr(bot, "edificio") and bot.edificio is not None:
+                result = await _execute_pending_contract(bot, {})
+                if result.get("ok"):
+                    log.info("[HUB] auto-executed contract: %s", result.get("asset"))
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+
+@app.post("/api/contract/probe")
+async def api_contract_probe(payload: dict | None = None):
+    """Crea un ContratadoEvent fake en el edificio del bot y ejecuta
+    la orden real contra el broker para verificar trazabilidad.
+
+    Espera JSON opcional:
+      - asset: str (default "GBPNZD_otc")
+      - direction: str (default "put")
+      - payout: float (default 92.0)
+      - score: float (default 0.85)
+      - amount: float (default 1.0)
+      - duration: int (default 900)
+      - account_type: str (default PRACTICE)
+    """
+    bot = _bot_ref
+    if bot is None:
+        try:
+            import app as _app
+            _runner = getattr(_app, "_runner", None)
+            if _runner is not None and getattr(_runner, "bot", None) is not None:
+                bot = _runner.bot
+                set_bot(bot)
+        except Exception:
+            pass
+    if bot is None or not hasattr(bot, "edificio") or bot.edificio is None:
+        return {"ok": False, "reason": "bot_no_edificio"}
+
+    payload = payload or {}
+    asset = str(payload.get("asset") or "GBPNZD_otc")
+    direction = str(payload.get("direction") or "put").lower()
+    payout = float(payload.get("payout") or 92.0)
+    score = float(payload.get("score") or 0.85)
+    amount = float(payload.get("amount") or CONTRACT_DEFAULT_AMOUNT)
+    duration = int(payload.get("duration") or CONTRACT_DEFAULT_DURATION)
+    account_type = str(payload.get("account_type") or "PRACTICE")
+
+    from edificio_contratacion import ContratadoEvent
+    event = ContratadoEvent(
+        asset=asset,
+        direction=direction,
+        payout=payout,
+        score=score,
+        timestamp=time.time(),
+    )
+    bot.edificio._contratados.append(event)
+
+    client = getattr(bot, "client", None)
+    if client is None:
+        return {"ok": False, "reason": "bot_sin_client"}
+
+    try:
+        from src.connection import place_order
+        order_result = await place_order(
+            client=client,
+            asset=asset,
+            direction=direction,
+            amount=max(amount, 0.01),
+            duration=max(duration, 60),
+            dry_run=False,
+            account_type=account_type,
+        )
+        ok = bool(order_result[0]) if order_result else False
+        broker = {
+            "order_id": order_result[1] if len(order_result) > 1 else "",
+            "open_price": order_result[2] if len(order_result) > 2 else 0.0,
+            "order_ref": order_result[3] if len(order_result) > 3 else 0,
+            "error": order_result[4] if len(order_result) > 4 else "",
+        }
+    except Exception as exc:
+        return {"ok": False, "reason": f"order_exception:{exc}"}
+
+    return {
+        "ok": ok,
+        "asset": asset,
+        "direction": direction,
+        "payout": payout,
+        "score": score,
+        "broker": broker,
+    }
 
 
 @app.websocket("/ws")
@@ -616,6 +819,7 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
     actual_port = _resolve_port(port, host)
     poller = asyncio.create_task(_state_poller())
     relay = asyncio.create_task(_event_relay())
+    auto_contract = asyncio.create_task(_auto_contract_loop())
 
     config = uvicorn.Config(
         app,
@@ -636,12 +840,17 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
         kill_hub_browser_tree()
         poller.cancel()
         relay.cancel()
+        auto_contract.cancel()
         try:
             await poller
         except asyncio.CancelledError:
             pass
         try:
             await relay
+        except asyncio.CancelledError:
+            pass
+        try:
+            await auto_contract
         except asyncio.CancelledError:
             pass
 

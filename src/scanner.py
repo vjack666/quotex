@@ -1458,6 +1458,9 @@ class AssetScanner:
             self.bot.stats.setdefault("strat_f_signals", 0)
             self.bot.stats["strat_f_signals"] += _accepts
 
+        # ── Alimentar el Edificio de Contratación ───────────────────
+        _feed_edificio(self.bot, assets)
+
         # One compact line instead of dozens of per-asset skip rows
         n_assets = len(assets)
         n_rej = sum(reject_counts.values())
@@ -2917,4 +2920,29 @@ def _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, 
     if res.f_candidate is not None:
         candidates.append(res.f_candidate)
     return res.strat_f_accepts
+
+
+def _feed_edificio(bot: Any, assets: list) -> None:
+    """Alimenta el Edificio de Contratación con los activos del ciclo de escaneo.
+
+    Solo P1 (Recepción): entra si payout >= MIN_PAYOUT.
+    """
+    edificio = getattr(bot, "edificio", None)
+    if edificio is None:
+        return
+    for asset, payout in assets:
+        try:
+            edificio.evaluate(
+                asset=asset,
+                direction="",
+                payout=int(payout or 0),
+                payout_ok=int(payout or 0) >= MIN_PAYOUT,
+                brake_ok=False,
+                extreme_ok=False,
+                cross_ok=False,
+                cross_sticky=False,
+                score=0.0,
+            )
+        except Exception as exc:
+            log.error("[EDIFICIO] Error evaluando %s: %s", asset, exc)
 
