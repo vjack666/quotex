@@ -490,7 +490,8 @@ async def api_contract_probe(payload: dict | None = None):
         score=score,
         timestamp=time.time(),
     )
-    bot.edificio._contratados.append(event)
+    # Nota: no se encola en bot.edificio._contratados para que
+    # el dispatcher automático no lo levante; este endpoint es solo de prueba.
 
     client = getattr(bot, "client", None)
     if client is None:
