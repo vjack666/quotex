@@ -437,12 +437,23 @@ async def _auto_contract_loop() -> None:
     while True:
         try:
             bot = _bot_ref
+            if bot is None:
+                try:
+                    import app as _app
+                    _runner = getattr(_app, "_runner", None)
+                    if _runner is not None and getattr(_runner, "bot", None) is not None:
+                        bot = _runner.bot
+                        set_bot(bot)
+                except Exception:
+                    pass
             if bot is not None and hasattr(bot, "edificio") and bot.edificio is not None:
                 result = await _execute_pending_contract(bot, {})
                 if result.get("ok"):
                     log.info("[HUB] auto-executed contract: %s", result.get("asset"))
                 else:
                     log.warning("[HUB] auto-contract skipped: %s — %s", result.get("asset"), result.get("reason"))
+            else:
+                log.debug("[HUB] auto-contract loop: bot not ready yet")
         except Exception as exc:
             log.error("[HUB] auto-contract loop error: %s", exc, exc_info=True)
         await asyncio.sleep(1.0)
