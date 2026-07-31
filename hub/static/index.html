@@ -571,12 +571,20 @@
 <div class="view active" id="op-view">
 <div class="grid">
 
-  <!-- BALANCE -->
-  <div class="card col-3 kpi">
-    <h2>Balance</h2>
+  <!-- BALANCE + GESTIÓN MASANIELLO -->
+  <div class="card col-5 kpi">
+    <h2>Balance <span class="safety OK" id="m-safety">OK</span></h2>
     <div class="val accent" id="balance">–</div>
     <div class="lbl">USD · cuenta (informativo)</div>
     <div class="delta" id="balance-delta"></div>
+    <div class="rows" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-2);">
+      <div class="row"><span class="k">Ciclo #</span><span class="v" id="m-cycle">–</span></div>
+      <div class="row"><span class="k">Secuencia (W/L)</span><span class="v"><span class="seq" id="m-seq"></span></span></div>
+      <div class="row"><span class="k">P&L acumulado</span><span class="v" id="m-pnl">–</span></div>
+      <div class="row"><span class="k">Win rate</span><span class="v" id="m-wr">–</span></div>
+      <div class="row"><span class="k">Ops ciclo (aciertos/fallos)</span><span class="v" id="m-ops">–</span></div>
+      <div class="row"><span class="k">Próximo monto</span><span class="v" id="m-next">–</span></div>
+    </div>
   </div>
 
   <!-- BANKROLL BINARIAS (Massaniello) -->
@@ -633,7 +641,7 @@
   </div>
 
   <!-- OPERACIÓN ACTUAL -->
-  <div class="card col-5 trade-card" id="trade-card">
+  <div class="card col-3 trade-card" id="trade-card">
     <h2>Operación en curso <span class="sub2" id="trade-sub">sin posición</span></h2>
     <div class="trade-pair">
       <span class="asset" id="t-asset">–</span>
@@ -649,29 +657,8 @@
     </div>
   </div>
 
-  <!-- ÚLTIMO RESULTADO -->
-  <div class="card col-4 kpi">
-    <h2>Última operación</h2>
-    <div class="val" id="last-outcome">–</div>
-    <div class="lbl" id="last-asset">sin datos</div>
-    <div class="delta" id="last-profit"></div>
-  </div>
-
-  <!-- MASSANIELLO -->
-  <div class="card col-7">
-    <h2>Gestión Masaniello <span class="safety OK" id="m-safety">OK</span></h2>
-    <div class="rows">
-      <div class="row"><span class="k">Ciclo #</span><span class="v" id="m-cycle">–</span></div>
-      <div class="row"><span class="k">Secuencia (W/L)</span><span class="v"><span class="seq" id="m-seq"></span></span></div>
-      <div class="row"><span class="k">P&L acumulado</span><span class="v" id="m-pnl">–</span></div>
-      <div class="row"><span class="k">Win rate</span><span class="v" id="m-wr">–</span></div>
-      <div class="row"><span class="k">Ops ciclo (aciertos/fallos)</span><span class="v" id="m-ops">–</span></div>
-      <div class="row"><span class="k">Próximo monto</span><span class="v" id="m-next">–</span></div>
-    </div>
-  </div>
-
   <!-- ACTIVIDAD -->
-  <div class="card col-5">
+  <div class="card col-6">
     <h2>Actividad del bot</h2>
     <div class="rows">
       <div class="row"><span class="k">Scans completados</span><span class="v" id="a-scans">–</span></div>
@@ -681,30 +668,6 @@
     </div>
   </div>
 
-  <!-- EVALUACIÓN DEL ESCANEO (reject reasons) -->
-  <div class="card col-6">
-    <h2>🔍 Evaluación del escaneo <span class="sub2" id="eval-cycle"></span></h2>
-    <div class="rows">
-      <div class="row"><span class="k">Activos evaluados</span><span class="v" id="eval-assets">–</span></div>
-      <div class="row"><span class="k">Candidatos (STRAT-A)</span><span class="v" id="eval-candidates">–</span></div>
-      <div class="row"><span class="k">Señales STRAT-F</span><span class="v" id="eval-sf">–</span></div>
-      <div class="row" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:6px;">
-        <span class="k" style="border-bottom:1px solid var(--border-2);padding-bottom:4px;">Razones de rechazo</span>
-        <div id="eval-rejects" style="font-size:12px;color:var(--silver);">—</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ACEPTADAS -->
-  <div class="card col-6">
-    <h2>✅ Señales aceptadas <span class="sub2" id="acc-count">0</span></h2>
-    <table>
-      <thead><tr><th>Activo</th><th>Dir</th><th>Score</th><th>Payout</th><th>Contexto</th><th>Estoc. M15</th></tr></thead>
-      <tbody id="acc-body"><tr><td class="empty" colspan="6">esperando señales…</td></tr></tbody>
-    </table>
-    <div class="barwrap"><i id="bar-acc" style="width:0%"></i></div>
-  </div>
-
   <!-- MADURANDO (R3 young watchlist) -->
   <div class="card col-12">
     <h2>⏳ Madurando <span class="sub2" id="mat-count">0</span></h2>
@@ -712,6 +675,34 @@
       <thead><tr><th>Activo</th><th>Dir</th><th>Edad M5</th><th>Banda</th><th>Estado</th></tr></thead>
       <tbody id="mat-body"><tr><td class="empty" colspan="5">ninguna zona madurando</td></tr></tbody>
     </table>
+  </div>
+
+  <!-- EDIFICIO DE CONTRATACIÓN -->
+  <div class="card col-12" id="edificio-card">
+    <h2>🏢 Edificio de Contratación <span class="sub2" id="ed-summary"></span></h2>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;font-size:11px;">
+      <div style="background:var(--surface-3);border-radius:6px;padding:8px 10px;border-left:3px solid #5e6ad2;">
+        <div style="color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:10px;">P1 Recepción</div>
+        <div style="font-size:22px;font-weight:590;color:var(--accent-2);" id="ed-p1-count">0</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:6px;padding:8px 10px;border-left:3px solid var(--orange);">
+        <div style="color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:10px;">P2 Cerebro</div>
+        <div style="font-size:22px;font-weight:590;color:var(--orange);" id="ed-p2-count">0</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:6px;padding:8px 10px;border-left:3px solid var(--emerald);">
+        <div style="color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:10px;">P3 Sala Espera</div>
+        <div style="font-size:22px;font-weight:590;color:var(--emerald);" id="ed-p3-count">0</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:6px;padding:8px 10px;border-left:3px solid var(--green);">
+        <div style="color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:10px;">CONTRATADOS</div>
+        <div style="font-size:22px;font-weight:590;color:var(--green);" id="ed-contratados-count">0</div>
+      </div>
+    </div>
+
+    <div id="edificio-pisos">
+      <div style="color:var(--faint);font-size:12px;font-style:italic;">sin activos en el edificio</div>
+    </div>
   </div>
 
 </div><!-- /grid op -->
@@ -969,6 +960,15 @@ function dirPill(d){
   return '<span class="pill">–</span>';
 }
 function setText(id, v){ const e=document.getElementById(id); if(e) e.textContent = (v===null||v===undefined||v==="")?"–":v; }
+function p2Lights(c){
+  if(c.piso !== 2) return '';
+  const ok = (typeof c.brake_ok === 'boolean' && typeof c.extreme_ok === 'boolean') ? (c.brake_ok && c.extreme_ok) : false;
+  const stick = (typeof c.cross_sticky !== 'undefined') ? (!!c.cross_sticky) : false;
+  const color = (ok) ? ((stick) ? 'var(--orange)' : 'var(--emerald)') : 'var(--faint)';
+  const title = (stick) ? 'P2 · cruce pegajoso' : ((ok) ? 'P2 listo' : 'P2 pendiente de freno/extremo');
+  const tooltip = ` title="${title}"`;
+  return `<span${tooltip} style="width:8px;height:8px;border-radius:50%;background:${color};box-shadow:0 0 6px ${color};flex-shrink:0;"></span>`;
+}
 
 let lastBalance = null;
 function resolveStratF(s){
@@ -1073,18 +1073,6 @@ function render(s){
     setText("t-order-attempt", "–");
   }
 
-  // ---- Último resultado ----
-  const lo = s.last_trade_outcome;
-  const loEl = document.getElementById("last-outcome");
-  if(lo){
-    loEl.textContent = lo;
-    loEl.className = "val " + (lo==="WIN"?"up":(lo==="LOSS"?"down":""));
-    setText("last-asset", s.last_trade_asset || "");
-    const lp = s.last_trade_profit;
-    const lpe = document.getElementById("last-profit");
-    if(typeof lp === "number"){ lpe.textContent=(lp>=0?"+":"")+lp.toFixed(2)+" USD"; lpe.className="delta "+(lp>=0?"up":"down"); }
-  } else { loEl.textContent="–"; loEl.className="val"; }
-
   // ---- Massaniello ----
   const m = s.masaniello || {};
   setText("m-cycle", m.cycle_num);
@@ -1114,46 +1102,6 @@ function render(s){
   setText("a-losses", s.live_losses);
   setText("a-assets", s.total_assets_scanned || sf.total_assets);
 
-  // ---- Evaluación del escaneo (reject reasons) ----
-  const ev = s.last_scan_eval || {};
-  setText("eval-cycle", ev.cycle != null ? `ciclo #${ev.cycle}` : "");
-  setText("eval-assets", ev.assets);
-  setText("eval-candidates", ev.candidates);
-  setText("eval-sf", ev.strat_f_accepts != null ? ev.strat_f_accepts : "–");
-  const erEl = document.getElementById("eval-rejects");
-  if (ev.reject_counts && Object.keys(ev.reject_counts).length > 0) {
-    const parts = [];
-    for (const [reason, count] of Object.entries(ev.reject_counts)) {
-      const label = reason.replace(/^[AF]:/,""); // strip prefix
-      parts.push(`<span style="display:inline-block;background:var(--surface-3);border-radius:4px;padding:2px 8px;margin:2px 4px 2px 0;white-space:nowrap;"><span style="color:var(--orange);font-weight:510;">${label}</span> <span style="color:var(--muted);">×${count}</span></span>`);
-    }
-    erEl.innerHTML = parts.join("");
-  } else {
-    erEl.textContent = "—";
-  }
-
-  // ---- STRAT-F aceptadas ----
-  const acc = sf.accepted || [];
-  const accB = document.getElementById("acc-body"); accB.innerHTML="";
-  document.getElementById("acc-count").textContent = acc.length;
-  if(acc.length===0){ accB.innerHTML='<tr><td class="empty" colspan="5">ninguna pasó los filtros</td></tr>'; }
-  else acc.forEach(c=>{
-    const tr=document.createElement("tr");
-    const strength = (c.strength!=null) ? c.strength : (c.score!=null? c.score : null);
-    const ctx = [c.ctx, c.event].filter(Boolean).join(" · ");
-    const dir = String(c.direction||"").toLowerCase();
-    tr.innerHTML = `<td class="asset">${c.asset||""}</td>`+
-      `<td class="${dir==="call"?"d-call":"d-put"}">${dir.toUpperCase()||"–"}</td>`+
-      `<td class="score">${strength!=null? (typeof strength==="number"? strength.toFixed(1): strength) : "–"}</td>`+
-      `<td>${c.payout!=null?c.payout+"%":"–"}</td>`+
-      `<td>${ctx||"–"}</td>`+
-      `<td>${stochCell(c.stoch_m15)}</td>`;
-    accB.appendChild(tr);
-  });
-
-  // ---- STRAT-F rechazadas: panel eliminado del hub (2026-07-26). ----
-  // El detalle de rechazos se consulta en el black box, no en el dashboard.
-
   // ---- STRAT-F madurando (R3 young watchlist) ----
   const mat = sf.maturing || [];
   const matB = document.getElementById("mat-body");
@@ -1180,11 +1128,116 @@ function render(s){
     }
   }
 
-  // ---- Barras aceptadas (rechazadas eliminadas del hub) ----
-  const total = acc.length;
-  const pct = total ? 100 : 0;
-  const barAcc = document.getElementById("bar-acc");
-  if (barAcc) barAcc.style.width = pct + "%";
+  // ---- Edificio de Contratación ----
+  renderEdificio(s.edificio);
+}
+
+function renderEdificio(ed){
+  if(!ed || !ed.cards || Object.keys(ed.cards).length === 0){
+    const cont = document.getElementById("edificio-pisos");
+    if(cont) cont.innerHTML = '<div style="color:var(--faint);font-size:12px;font-style:italic;">sin activos en el edificio</div>';
+    ["ed-p1-count","ed-p2-count","ed-p3-count","ed-contratados-count","ed-summary"].forEach(id=>{
+      const e = document.getElementById(id);
+      if(e) e.textContent = "0";
+    });
+    return;
+  }
+  const cards = Object.values(ed.cards);
+  const resumen = ed.resumen || {};
+  setText("ed-p1-count", resumen.en_p1 || 0);
+  setText("ed-p2-count", resumen.en_p2 || 0);
+  setText("ed-p3-count", resumen.en_p3 || 0);
+  setText("ed-contratados-count", resumen.contratados || 0);
+  setText("ed-summary", `total: ${resumen.total_dentro||0} dentro · ciclo #${ed.cycle||0}`);
+
+  // Render by piso
+  const pisos = [
+    { piso: 1, label: "P1 — Recepción", icon: "🚪", color: "var(--accent-2)" },
+    { piso: 2, label: "P2 — Cerebro", icon: "🧠", color: "var(--orange)" },
+    { piso: 3, label: "P3 — Sala de Espera", icon: "⏳", color: "var(--emerald)" },
+    { piso: 4, label: "CONTRATADO", icon: "🎯", color: "#ffd700" },
+  ];
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">';
+
+  for (const p of pisos) {
+    const enPiso = cards.filter(c => c.piso === p.piso);
+    html += `<div style="background:var(--surface-3);border-radius:8px;border:1px solid var(--border);overflow:hidden;">`;
+    html += `<div style="padding:8px 10px;border-bottom:1px solid var(--border-2);display:flex;align-items:center;gap:6px;">`;
+    html += `<span style="font-size:14px;">${p.icon}</span>`;
+    html += `<span style="font-size:12px;font-weight:510;color:${p.color};">${p.label}</span>`;
+    html += `<span style="margin-left:auto;font-size:11px;color:var(--muted);background:var(--surface);border-radius:999px;padding:1px 8px;">${enPiso.length}</span>`;
+    html += `</div>`;
+    html += `<div style="padding:6px 8px;max-height:200px;overflow-y:auto;">`;
+
+    if (enPiso.length === 0) {
+      html += `<div style="color:var(--faint);font-size:11px;font-style:italic;padding:4px;">vacío</div>`;
+    } else {
+      for (const c of enPiso) {
+        const dir = String(c.direction || "").toLowerCase();
+        const dirBadge = dir === "call"
+          ? '<span style="color:var(--emerald);font-weight:510;">CALL</span>'
+          : dir === "put"
+            ? '<span style="color:var(--red);font-weight:510;">PUT</span>'
+            : "";
+        const stochStr = (c.stoch_k != null && c.stoch_d != null)
+          ? `K=${c.stoch_k.toFixed(1)} D=${c.stoch_d.toFixed(1)}`
+          : "";
+        html += `<div style="padding:5px 4px;margin-bottom:4px;background:var(--surface);border-radius:5px;border:1px solid var(--border-2);font-size:11px;">`;
+        html += `<div style="display:flex;align-items:center;gap:6px;">`;
+        html += `<span style="font-weight:510;color:var(--accent-2);font-family:'JetBrains Mono',monospace;">${c.asset}</span>`;
+        html += p2Lights(c);
+        if(dirBadge) html += dirBadge;
+        if(c.score) html += `<span style="color:var(--muted);font-size:10px;">score ${c.score}</span>`;
+        // POI badges
+        if(c.has_poi_p1) html += `<span style="font-size:9px;color:var(--emerald);">✓P1</span>`;
+        if(c.has_poi_p2) html += `<span style="font-size:9px;color:var(--emerald);">✓P2</span>`;
+        if(c.has_poi_p3) html += `<span style="font-size:9px;color:var(--emerald);">✓P3</span>`;
+        // Estado de la orden (solo CONTRATADO)
+        if(c.order_status === "sent"){
+          html += `<span style="font-size:9px;color:var(--emerald);background:rgba(16,185,129,.12);border-radius:999px;padding:1px 6px;">orden enviada${c.order_id ? ' · ' + c.order_id : ''}</span>`;
+        } else if(c.order_status === "failed"){
+          html += `<span style="font-size:9px;color:var(--red);background:rgba(239,68,68,.12);border-radius:999px;padding:1px 6px;">orden falló</span>`;
+        } else if(c.piso === 4){
+          const edad = c.contratado_at ? Math.max(0, Math.round(Date.now()/1000 - c.contratado_at)) : 0;
+          html += `<span style="font-size:9px;color:var(--orange);background:rgba(251,146,60,.12);border-radius:999px;padding:1px 6px;">esperando envío… ${edad}s</span>`;
+        }
+        html += `</div>`;
+        // Reason (if there's space)
+        if(c.reason){
+          html += `<div style="color:var(--muted);font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${c.reason}">${c.reason}</div>`;
+        }
+        // Stoch
+        if(stochStr){
+          html += `<div style="color:var(--faint);font-size:9px;margin-top:1px;">${stochStr}</div>`;
+        }
+        html += `</div>`;
+      }
+    }
+    html += `</div></div>`;
+  }
+
+  html += '</div>';
+
+  // Recent contratados
+  const recientes = ed.contratados_recientes || [];
+  if(recientes.length > 0){
+    html += `<div style="margin-top:12px;padding:8px 10px;background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.15);border-radius:6px;">`;
+    html += `<div style="font-size:11px;font-weight:510;color:var(--emerald);margin-bottom:6px;">🆕 Contratados recientes</div>`;
+    html += `<div style="display:flex;flex-wrap:wrap;gap:6px;">`;
+    for (const e of recientes) {
+      const d = String(e.direction || "").toLowerCase();
+      html += `<span style="background:var(--surface);border:1px solid var(--border-2);border-radius:5px;padding:4px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;">`;
+      html += `${e.asset} `;
+      html += d === "call" ? `<span style="color:var(--emerald);">CALL</span>` : d === "put" ? `<span style="color:var(--red);">PUT</span>` : "";
+      if(e.payout) html += ` ${e.payout}%`;
+      html += `</span>`;
+    }
+    html += `</div></div>`;
+  }
+
+  const cont = document.getElementById("edificio-pisos");
+  if(cont) cont.innerHTML = html;
 }
 
 const dot = document.getElementById("conn-dot");
