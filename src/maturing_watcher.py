@@ -47,7 +47,7 @@ class _CycleAccumulator:
         self.captured = 0
         self.promoted_live = 0
         self.promoted_shadow = 0
-        self.dropped: dict[str, int] = field(default_factory=dict)
+        self.dropped: dict[str, int] = {}
         self.active_before = 0
 
 

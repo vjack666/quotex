@@ -15,7 +15,10 @@ title QUOTEX Web App
 cd /d "%~dp0"
 
 set "PORT=8080"
-set "PY=%~dp0.venv\Scripts\python.exe"
+set "OPENBLAS_NUM_THREADS=1"
+set "OMP_NUM_THREADS=1"
+set "MKL_NUM_THREADS=1"
+set "PY=%~dp0.venv\\Scripts\\python.exe"
 set "URL=http://127.0.0.1:%PORT%/"
 set "HUB_NO_OPEN="
 REM Agente vivo STRAT-F: aprende de cada trade resuelto en tiempo real (Ruben 2026-07-24).
@@ -47,7 +50,9 @@ REM proyecto antes de arrancar (evita bots duplicados por timing/race).
 REM Tambien mata el Edge hub: si el hub revivia el server, aparecerian bots
 REM duplicados. Se mata en bucle hasta 0 app.py.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$n=1; while($n -gt 0){ $p=Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object { ($_.CommandLine -like '*main.py*') -or ($_.CommandLine -like '*app.py*') -or ($_.CommandLine -like '*quotex_hub_edge*') }; $n=$p.Count; if($n -gt 0){ $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }; Start-Sleep -Milliseconds 500 } }; Write-Host '[OK] 0 instancias previas (main.py/app.py/hub)'"
-timeout /t 2 >nul
+REM Stale-lock breaker: remove lock if owning PID is dead (Windows ghost lock).
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p=Get-Content 'runtime\\main.lock'; if($p -and -not (Get-Process -Id ([int]$p) -EA SilentlyContinue)) { Remove-Item 'runtime\\main.lock' -Force -EA SilentlyContinue } } catch {}"
+ping 127.0.0.1 -n 3 >nul
 
 echo.
 echo ============================================================

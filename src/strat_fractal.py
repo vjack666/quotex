@@ -298,6 +298,7 @@ def _run_freno_brain(
     payout: int = 80,
     min_score: float = STRAT_F_MIN_SCORE,
     sym: Optional[str] = None,
+    direction: Optional[str] = None,
 ) -> "Optional[StratFEvaluation]":
     """Ejecuta el motor de leyes (freno = cerebro) y traduce a StratFEvaluation.
 
@@ -355,8 +356,8 @@ def _run_freno_brain(
     # Exigimos evidencia forense de que K superó >=80 y luego cruzó a la baja.
     _m15_k = (stoch_m15 or {}).get("k_vals") or []
     _m15_d = (stoch_m15 or {}).get("d_vals") or []
-    _ob_cross = _require_ob_cross(_m15_k, _m15_d, direction or "")
-    if _ob_cross is None:
+    _ob_cross = _require_ob_cross(_m15_k, _m15_d, res.direction or "")
+    if _ob_cross is None and (res.direction or "").strip().upper() == "PUT":
         return StratFEvaluation(
             has_signal=False,
             m15_context="IMPULSE_DYING",
