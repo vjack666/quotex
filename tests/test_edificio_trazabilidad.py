@@ -11,7 +11,7 @@ import time
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -44,12 +44,13 @@ class FakeBlackBox:
         self.calls.append(("order_result", order_id, outcome, profit))
 
 
-def _bot(edificio, *, client, history=None):
+def _bot(edificio, *, client, history=None, massaniello=None):
     return SimpleNamespace(
         client=client,
         edificio=edificio,
         trades={},
         outcome_history=history if history is not None else deque(maxlen=200),
+        massaniello=massaniello,
     )
 
 
@@ -166,6 +167,64 @@ async def test_f2_check_win_true_resuelve_win(monkeypatch):
     # WIN con profit = amount * payout/100
     assert any(c == ("order_result", "OID-R1", "WIN", 0.9) for c in fake_bb.calls)
     assert edificio.sent_pending()["OID-R1"]["resolved"] is True
+    assert list(history) == ["W"]
+
+
+@pytest.mark.asyncio
+async def test_f2_win_alimenta_sesion_massaniello_del_panel(monkeypatch):
+    # F4: al resolver WIN, los contadores de la sesión Massaniello (fuente del
+    # win rate del panel "Balance" del hub) se actualizan igual que el flujo
+    # STRAT-F clásico (executor.register_win).
+    edificio = _edificio_con_orden_enviada()
+    history = deque()
+    client = SimpleNamespace(check_win=AsyncMock(return_value=True))
+    mgr = SimpleNamespace(register_win=MagicMock(), register_loss=MagicMock())
+    bot = _bot(edificio, client=client, history=history, massaniello=mgr)
+    monkeypatch.setattr("edificio_executor.get_black_box", lambda: FakeBlackBox())
+
+    resueltas = await resolve_contratados(bot)
+
+    assert resueltas == 1
+    mgr.register_win.assert_called_once_with(1.0, 90)
+    mgr.register_loss.assert_not_called()
+    assert list(history) == ["W"]
+
+
+@pytest.mark.asyncio
+async def test_f2_loss_alimenta_sesion_massaniello_del_panel(monkeypatch):
+    edificio = _edificio_con_orden_enviada(order_id="OID-R2", ref=66666)
+    history = deque()
+    client = SimpleNamespace(check_win=AsyncMock(return_value=False))
+    mgr = SimpleNamespace(register_win=MagicMock(), register_loss=MagicMock())
+    bot = _bot(edificio, client=client, history=history, massaniello=mgr)
+    monkeypatch.setattr("edificio_executor.get_black_box", lambda: FakeBlackBox())
+
+    resueltas = await resolve_contratados(bot)
+
+    assert resueltas == 1
+    mgr.register_loss.assert_called_once_with(1.0)
+    mgr.register_win.assert_not_called()
+    assert list(history) == ["L"]
+
+
+@pytest.mark.asyncio
+async def test_f2_sin_manager_massaniello_no_rompe_resolucion(monkeypatch):
+    # Bot sin bot.massaniello (o manager que explota): la resolución sobrevive.
+    edificio = _edificio_con_orden_enviada(order_id="OID-R5", ref=99999)
+    history = deque()
+    client = SimpleNamespace(check_win=AsyncMock(return_value=True))
+
+    class _Explosivo:
+        def register_win(self, *a, **k):
+            raise RuntimeError("boom")
+
+    bot = _bot(edificio, client=client, history=history, massaniello=_Explosivo())
+    monkeypatch.setattr("edificio_executor.get_black_box", lambda: FakeBlackBox())
+
+    resueltas = await resolve_contratados(bot)
+
+    assert resueltas == 1
+    assert edificio.sent_pending()["OID-R5"]["resolved"] is True
     assert list(history) == ["W"]
 
 

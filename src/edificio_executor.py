@@ -358,6 +358,23 @@ async def resolve_contratados(
     if history is not None:
         history.append("W" if outcome == "WIN" else "L")
 
+    # Alimentar el panel "Balance" del hub: sus contadores W/L y win rate
+    # salen de la sesión Massaniello (server._enrich_with_bot → session_status),
+    # no de outcome_history. Sin esto el panel queda en "–" / "0 / 0" aunque
+    # haya órdenes resueltas (desacople detectado 2026-07-31). Mejor esfuerzo:
+    # nunca debe bloquear la resolución.
+    try:
+        mgr = getattr(bot, "massaniello", None)
+        if mgr is not None and hasattr(mgr, "register_win") and hasattr(mgr, "register_loss"):
+            amount = float(info.get("amount") or 0.0)
+            payout_pct = int(info.get("payout") or 80)
+            if outcome == "WIN":
+                mgr.register_win(amount, payout_pct)
+            else:
+                mgr.register_loss(amount)
+    except Exception as exc:
+        log.warning("[EDIFICIO] no se pudo registrar %s en sesión Massaniello (no bloquea): %s", outcome, exc)
+
     log.info(
         "[EDIFICIO] %s: resultado %s %+.2f (ticket=%s)",
         target_info.get("asset"), outcome, profit, target_info.get("order_ref"),
