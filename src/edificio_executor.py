@@ -261,6 +261,12 @@ def _record_sent_to_black_box(
         _EDIFICIO_SCAN_SEQ += 1
         bb = get_black_box()
         scan_id = bb.record_scan_start("EDIFICIO", _EDIFICIO_SCAN_SEQ)
+        # Contexto de auditoría desde la card (snapshot del momento de evaluación).
+        _stoch_full = getattr(card, "stoch_m15_full", None) or {}
+        if not isinstance(_stoch_full, dict) or "k" not in _stoch_full:
+            _stoch_full = {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)}
+        _candles_15m = [c for c in getattr(card, "candles_15m_snap", []) or []]
+        _candles_5m = [c for c in getattr(card, "candles_5m_snap", []) or []]
         bb.record_candidate(scan_id, "EDIFICIO", {
             "asset": ev.asset,
             "direction": direction,
@@ -272,9 +278,20 @@ def _record_sent_to_black_box(
             "order_id": ev.order_id,
             "duration_sec": int(duration),
             "agent_tag": "BOT",
+            "stoch_m15": _stoch_full,
+            "extreme_read": int(getattr(card, "extreme_read", 0) or 0),
+            "candles_15m": _candles_15m,
+            "candles_5m": _candles_5m,
             "strategy_details": {
                 "amount": float(amount),
                 "order_ref": ev.order_ref,
+                "candle_15m_prev": getattr(card, "candle_15m_prev", None),
+                "candle_5m_prev": getattr(card, "candle_5m_prev", None),
+                "brake_ok": bool(getattr(card, "brake_ok", False)),
+                "extreme_ok": bool(getattr(card, "extreme_ok", False)),
+                "cross_ok": bool(getattr(card, "cross_ok", False)),
+                "cross_sticky": bool(getattr(card, "cross_sticky", False)),
+                "piso_previa": getattr(card, "piso", None),
             },
         })
         log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)
@@ -404,6 +421,26 @@ async def _resolve_one(
                 get_black_box().record_order_result(order_id, outcome, float(profit))
             except Exception as exc:
                 log.warning("[EDIFICIO] %s: no se pudo actualizar caja negra (no bloquea): %s", order_id, exc)
+            # Auditoría de cierre: cómo quedaron las velas 5m/15m cuando se
+            # liquidó. Fetch NO bloqueante (mejor esfuerzo, nunca rompe la
+            # resolución). Usa el socket único del bot.
+            try:
+                from candle_patterns import last_closed_shape
+                from connection import fetch_candles
+                from stochastic_m15 import compute_stoch
+
+                _asset = str(info.get("asset", ""))
+                _c15 = await fetch_candles(client, _asset, 900, 16, timeout_sec=10) if _asset else []
+                _c5 = await fetch_candles(client, _asset, 300, 16, timeout_sec=10) if _asset else []
+                _close_ctx = {
+                    "candle_15m": last_closed_shape(_c15) if _c15 else None,
+                    "candle_5m": last_closed_shape(_c5) if _c5 else None,
+                    "stoch_m15_close": compute_stoch(_c15) if _c15 else None,
+                    "exit_price": float(_c15[-1].close) if _c15 else None,
+                }
+                get_black_box().record_order_close_context(order_id, **_close_ctx)
+            except Exception as exc:
+                log.warning("[EDIFICIO] %s: no se pudo registrar cierre (no bloquea): %s", order_id, exc)
             info["resolved"] = True
             return outcome, float(profit)
 

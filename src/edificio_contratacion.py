@@ -75,6 +75,14 @@ class BuildingCard:
     stoch_k: Optional[float] = None
     stoch_d: Optional[float] = None
 
+    # Contexto de auditoría (caja negra) — snapshot del momento de evaluación
+    stoch_m15_full: Optional[dict] = None      # dict completo de compute_stoch()
+    extreme_read: int = 0                      # 1 si extremo (k<=20 CALL | k>=80 PUT)
+    candle_15m_prev: Optional[dict] = None     # forma de la última vela 15m cerrada
+    candle_5m_prev: Optional[dict] = None      # forma de la última vela 5m cerrada
+    candles_15m_snap: list = field(default_factory=list)  # velas 15m crudas (últimas N)
+    candles_5m_snap: list = field(default_factory=list)   # velas 5m crudas (últimas N)
+
     # Metadatos
     payout: int = 0
     score: float = 0.0
@@ -168,6 +176,12 @@ class EdificioContratacion:
         stoch_k: Optional[float] = None,
         stoch_d: Optional[float] = None,
         score: float = 0.0,
+        stoch_m15_full: Optional[dict] = None,
+        extreme_read: int = 0,
+        candle_15m_prev: Optional[dict] = None,
+        candle_5m_prev: Optional[dict] = None,
+        candles_15m: Optional[list] = None,
+        candles_5m: Optional[list] = None,
     ) -> str:
         """Evalúa un activo en el edificio.
 
@@ -201,6 +215,20 @@ class EdificioContratacion:
         card.last_updated = now
         if not card.direction and direction:
             card.direction = direction.upper()
+
+        # Contexto de auditoría: snapshot del momento de evaluación.
+        # Se conserva el del último scan (se sobrescribe a medida que llega).
+        if stoch_m15_full is not None:
+            card.stoch_m15_full = stoch_m15_full
+        card.extreme_read = int(extreme_read or 0)
+        if candle_15m_prev is not None:
+            card.candle_15m_prev = candle_15m_prev
+        if candle_5m_prev is not None:
+            card.candle_5m_prev = candle_5m_prev
+        if candles_15m:
+            card.candles_15m_snap = list(candles_15m)[-24:]
+        if candles_5m:
+            card.candles_5m_snap = list(candles_5m)[-24:]
 
         # Si no paga bien → expulsado
         if not payout_ok and card.piso > PISO_FUERA:

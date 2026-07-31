@@ -769,6 +769,73 @@ class BlackBoxRecorder:
             except Exception:
                 pass
 
+    def record_order_close_context(
+        self,
+        order_id: str,
+        *,
+        candle_15m: Optional[dict] = None,
+        candle_5m: Optional[dict] = None,
+        stoch_m15_close: Optional[Dict[str, Any] | str] = None,
+        exit_price: Optional[float] = None,
+    ) -> None:
+        """Registra el CONTEXTO DE CIERRE de una orden resuelta (WIN/LOSS).
+
+        El edificio resuelve el resultado ~1s después del vencimiento; este
+        método guarda cómo quedaron las velas 5m/15m en ese momento para
+        auditar: "la vela cerró bullish/bearish/doji... cuando se dio el
+        resultado". Nunca debe romper la resolución: errores son warnings.
+        """
+        try:
+            fields: list[str] = []
+            values: list[Any] = []
+            if candle_15m is not None:
+                fields.append("close_candle_15m = ?")
+                values.append(json.dumps(candle_15m, ensure_ascii=False))
+            if candle_5m is not None:
+                fields.append("close_candle_5m = ?")
+                values.append(json.dumps(candle_5m, ensure_ascii=False))
+            if stoch_m15_close is not None:
+                fields.append("close_stoch_m15 = ?")
+                if isinstance(stoch_m15_close, str):
+                    values.append(stoch_m15_close)
+                else:
+                    values.append(json.dumps(stoch_m15_close, ensure_ascii=False))
+            if exit_price is not None:
+                fields.append("exit_price = ?")
+                values.append(float(exit_price))
+            if not fields:
+                return
+
+            con = sqlite3.connect(self.db_path)
+            cur = con.cursor()
+            # Columnas nuevas: ALTER idempotente para DBs antiguos.
+            for _col in ("close_candle_15m", "close_candle_5m", "close_stoch_m15"):
+                try:
+                    cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # ya existe
+            fields.append("updated_at = ?")
+            values.append(datetime.now(timezone.utc).isoformat())
+            values.append(order_id)
+            cur.execute(
+                f"UPDATE scan_candidates SET {', '.join(fields)} WHERE order_id = ?",
+                values,
+            )
+            con.commit()
+            con.close()
+
+            self._log_jsonl({
+                "event": "order_close_context",
+                "ts": datetime.now(timezone.utc).timestamp(),
+                "order_id": order_id,
+                "candle_15m": candle_15m,
+                "candle_5m": candle_5m,
+                "stoch_m15_close": stoch_m15_close,
+                "exit_price": exit_price,
+            })
+        except Exception as exc:  # nosec - nunca rompe la resolución
+            log.warning("[BB] no se pudo registrar contexto de cierre %s: %s", order_id, exc)
+
     def _record_experience_arc(self, order_id: str) -> None:
         """Feature 27 — completa el arco de experiencia de un trade resuelto.
 

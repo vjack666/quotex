@@ -17,6 +17,100 @@ class CandleSignal:
     confirms_direction: bool
 
 
+# ── Clasificador de FORMA de vela (auditoría / caja negra) ────────────────
+# Reutiliza los nombres de patrones existentes del proyecto (inglés):
+#   doji, hammer, shooting_star, inverted_hammer, marubozu, spinning_top,
+#   bullish_engulfing, bearish_engulfing, bullish, bearish, none.
+# Devuelve la forma de la vela MÁS la estructura OHLC para auditoría.
+
+
+def classify_candle_shape(candle: Candle, prev: "Candle | None" = None) -> dict:
+    """Clasifica la FORMA de una vela con los nombres existentes del proyecto.
+
+    Args:
+        candle: vela a clasificar (normalmente la última CERRADA).
+        prev: vela anterior (opcional) — solo se usa para detectar engulfing.
+
+    Returns:
+        dict con: name, side, body_pct, upper_wick_pct, lower_wick_pct,
+        body, total_range, open, high, low, close, ts.
+    """
+    r = _total_range(candle)
+    if r <= 0:
+        return {
+            "name": "none", "side": "doji", "body_pct": 0.0,
+            "upper_wick_pct": 0.0, "lower_wick_pct": 0.0,
+            "body": 0.0, "total_range": 0.0,
+            "open": candle.open, "high": candle.high,
+            "low": candle.low, "close": candle.close, "ts": candle.ts,
+        }
+
+    body = _body(candle)
+    body_pct = body / r
+    upper_pct = _upper_wick(candle) / r
+    lower_pct = _lower_wick(candle) / r
+
+    if _is_bullish(candle):
+        side = "bull"
+    elif _is_bearish(candle):
+        side = "bear"
+    else:
+        side = "doji"
+
+    name = "none"
+    # Mismos umbrales que detect_reversal_pattern: mechas relativas al BODY y
+    # cuerpo anclado a zona alta/baja del rango (2*body / 3*body, 0.2*range).
+    if prev is not None and _engulfs(candle, prev):
+        name = "bullish_engulfing" if _is_bullish(candle) else "bearish_engulfing"
+    elif (
+        body > 0
+        and _body_high_zone(candle)
+        and _lower_wick(candle) >= (2.0 * body)
+        and _upper_wick(candle) < (0.2 * r)
+    ):
+        name = "hammer"
+    elif (
+        body > 0
+        and _body_low_zone(candle)
+        and _upper_wick(candle) >= (2.0 * body)
+        and _lower_wick(candle) < (0.2 * r)
+    ):
+        name = "shooting_star"
+    elif body > 0 and _body_low_zone(candle) and _upper_wick(candle) >= (3.0 * body):
+        name = "inverted_hammer"
+    elif body_pct >= 0.8 and upper_pct < 0.1 and lower_pct < 0.1:
+        name = "marubozu"
+    elif body_pct <= 0.1 + 1e-9:
+        name = "doji"
+    elif body_pct < 0.35:
+        name = "spinning_top"
+    elif side == "bull":
+        name = "bullish"
+    elif side == "bear":
+        name = "bearish"
+
+    return {
+        "name": name, "side": side, "body_pct": round(body_pct, 4),
+        "upper_wick_pct": round(upper_pct, 4), "lower_wick_pct": round(lower_pct, 4),
+        "body": round(body, 6), "total_range": round(r, 6),
+        "open": candle.open, "high": candle.high,
+        "low": candle.low, "close": candle.close, "ts": candle.ts,
+    }
+
+
+def last_closed_shape(candles: List[Candle]) -> dict:
+    """Forma de la ÚLTIMA vela completa cerrada (candles[-2]).
+
+    Consistente con detect_reversal_pattern: [-2] es la última vela cerrada;
+    [-1] es la vela en formación. Devuelve 'none' si no hay suficientes velas.
+    """
+    if not candles:
+        return {"name": "none", "side": "doji", "ts": 0}
+    prev = candles[-2] if len(candles) >= 2 else None
+    target = candles[-2] if len(candles) >= 2 else candles[-1]
+    return classify_candle_shape(target, prev=prev)
+
+
 def _body(c: Candle) -> float:
     return abs(c.close - c.open)
 

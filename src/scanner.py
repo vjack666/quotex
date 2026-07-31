@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from bot_logging import asset_detail, format_reject_summary, is_verbose, short_reason
-from candle_patterns import detect_reversal_pattern, explain_no_pattern_reason
+from candle_patterns import detect_reversal_pattern, explain_no_pattern_reason, last_closed_shape
 import config as _runtime_config
 from config import (
     ADAPTIVE_THRESHOLD_HIGH,
@@ -1465,6 +1465,7 @@ class AssetScanner:
             try:
                 _candles_15m = candles_15m_by_asset.get(_sym, [])
                 _candles_1m = candles_1m_by_asset.get(_sym, [])
+                _candles_5m = candles_5m_by_asset.get(_sym, [])
                 _stoch = compute_stoch(_candles_15m) if _candles_15m else {"k": 50.0, "d": 50.0, "k_prev": 50.0, "d_prev": 50.0}
                 _k = float(_stoch.get("k", 50.0))
                 _d = float(_stoch.get("d", 50.0))
@@ -1507,6 +1508,9 @@ class AssetScanner:
                     if _candles_15m else 0.0
                 )
                 _brake_ok = _prev_range > 0 and _last_range < _prev_range * 0.7
+                # Auditoría: forma de vela de la última vela CERRADA (5m y 15m).
+                _candle_15m_prev = last_closed_shape(_candles_15m) if _candles_15m else None
+                _candle_5m_prev = last_closed_shape(_candles_5m) if _candles_5m else None
                 flags_by_asset[_sym] = {
                     "direction": _direction,
                     "brake_ok": bool(_brake_ok),
@@ -1516,6 +1520,12 @@ class AssetScanner:
                     "stoch_k": _k,
                     "stoch_d": _d,
                     "score": 0.0,
+                    "stoch_m15_full": _stoch,
+                    "extreme_read": int(_extreme_ok),
+                    "candle_15m_prev": _candle_15m_prev,
+                    "candle_5m_prev": _candle_5m_prev,
+                    "candles_15m": list(_candles_15m)[-24:],
+                    "candles_5m": list(_candles_5m)[-24:],
                 }
             except Exception:
                 flags_by_asset[_sym] = {
@@ -3026,6 +3036,12 @@ def _feed_edificio(bot: Any, assets: list, flags_by_asset: dict | None = None) -
                 stoch_k=_flags.get("stoch_k"),
                 stoch_d=_flags.get("stoch_d"),
                 score=float(_flags.get("score", 0.0)),
+                stoch_m15_full=_flags.get("stoch_m15_full"),
+                extreme_read=int(_flags.get("extreme_read", 0) or 0),
+                candle_15m_prev=_flags.get("candle_15m_prev"),
+                candle_5m_prev=_flags.get("candle_5m_prev"),
+                candles_15m=_flags.get("candles_15m"),
+                candles_5m=_flags.get("candles_5m"),
             )
         except Exception as exc:
             log.error("[EDIFICIO] Error evaluando %s: %s", asset, exc)
