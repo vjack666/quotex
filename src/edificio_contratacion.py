@@ -183,8 +183,9 @@ class EdificioContratacion:
         card.stoch_k = stoch_k
         card.stoch_d = stoch_d
         card.score = score
-        card.direction = direction
         card.last_updated = now
+        if not card.direction and direction:
+            card.direction = direction.upper()
 
         # Si no paga bien → expulsado
         if not payout_ok and card.piso > PISO_FUERA:
@@ -242,6 +243,9 @@ class EdificioContratacion:
                 and extreme_ok
             )
             if contract_now:
+                if not card.direction:
+                    card.reason = "CONTRATADO bloqueado: direction vacía"
+                    return "stay"
                 card.piso = CONTRATADO
                 card.contratado_at = now
                 card.p3_at = card.p3_at or now
