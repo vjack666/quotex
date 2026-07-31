@@ -355,6 +355,10 @@ async def api_blackbox():
 async def api_contract_execute(payload: dict):
     """Toma el primer `contratado` pendiente del edificio y ejecuta la orden real.
 
+    Endpoint de respaldo/manual: la ejecución automática la hace el BOT
+    (src/edificio_executor.execute_contratados) en cada ciclo de scan.
+    Si la orden falla, el evento se re-encola (con límite de intentos).
+
     Espera JSON opcional:
       - amount: float (default 1.0)
       - duration: int (default 900)
@@ -400,6 +404,7 @@ async def _execute_pending_contract(bot: Any, payload: dict) -> dict:
 
     client = getattr(bot, "client", None)
     if client is None:
+        bot.edificio.requeue(event)
         return {"ok": False, "reason": "bot_sin_client"}
 
     try:
@@ -421,7 +426,26 @@ async def _execute_pending_contract(bot: Any, payload: dict) -> dict:
             "error": order_result[4] if len(order_result) > 4 else "",
         }
     except Exception as exc:
-        return {"ok": False, "reason": f"order_exception:{exc}"}
+        # No se pierde el evento: se re-encola para el próximo intento.
+        event.tries += 1
+        bot.edificio.requeue(event)
+        return {"ok": False, "reason": f"order_exception:{exc}", "tries": event.tries}
+
+    if not ok:
+        # Broker rechazó: re-encolar con límite de intentos (igual que el bot).
+        event.tries += 1
+        if event.tries <= 3:
+            bot.edificio.requeue(event)
+            return {"ok": False, "reason": "broker_rejected", "broker": broker, "tries": event.tries}
+        card.order_status = "failed"
+        card.reason = f"CONTRATADO falló ({event.tries} intentos) — {broker.get('error')}"
+
+    if ok:
+        card.order_status = "sent"
+        card.order_id = broker.get("order_id", "")
+        card.reason = f"CONTRATADO — orden enviada (id={card.order_id})"
+        event.order_id = card.order_id
+        event.order_status = "sent"
 
     return {
         "ok": ok,
@@ -431,32 +455,6 @@ async def _execute_pending_contract(bot: Any, payload: dict) -> dict:
         "score": event.score,
         "broker": broker,
     }
-
-
-async def _auto_contract_loop() -> None:
-    while True:
-        try:
-            bot = _bot_ref
-            if bot is None:
-                try:
-                    import app as _app
-                    _runner = getattr(_app, "_runner", None)
-                    if _runner is not None and getattr(_runner, "bot", None) is not None:
-                        bot = _runner.bot
-                        set_bot(bot)
-                except Exception:
-                    pass
-            if bot is not None and hasattr(bot, "edificio") and bot.edificio is not None:
-                result = await _execute_pending_contract(bot, {})
-                if result.get("ok"):
-                    log.info("[HUB] auto-executed contract: %s", result.get("asset"))
-                else:
-                    log.warning("[HUB] auto-contract skipped: %s — %s", result.get("asset"), result.get("reason"))
-            else:
-                log.debug("[HUB] auto-contract loop: bot not ready yet")
-        except Exception as exc:
-            log.error("[HUB] auto-contract loop error: %s", exc, exc_info=True)
-        await asyncio.sleep(1.0)
 
 
 @app.post("/api/contract/probe")
@@ -839,7 +837,6 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
     actual_port = _resolve_port(port, host)
     poller = asyncio.create_task(_state_poller())
     relay = asyncio.create_task(_event_relay())
-    auto_contract = asyncio.create_task(_auto_contract_loop())
 
     config = uvicorn.Config(
         app,
@@ -860,17 +857,12 @@ async def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None
         kill_hub_browser_tree()
         poller.cancel()
         relay.cancel()
-        auto_contract.cancel()
         try:
             await poller
         except asyncio.CancelledError:
             pass
         try:
             await relay
-        except asyncio.CancelledError:
-            pass
-        try:
-            await auto_contract
         except asyncio.CancelledError:
             pass
 

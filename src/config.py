@@ -52,6 +52,19 @@ FAST_ENTRY_TF_SEC = TF_1M  # 60s
 ALIGN_SCAN_TO_CANDLE = False
 SCAN_LEAD_SEC = 0.0  # exactamente en el open de la vela 5m
 
+# ── Edificio de Contratación — ejecución de contratados ──────────────
+# Cuando un activo llega a CONTRATADO, el BOT envía la orden real al broker
+# (socket único, regla de oro). Estos flags definen cómo se envía.
+EDIFICIO_ACCOUNT_TYPE = "PRACTICE"      # PRACTICE | REAL
+EDIFICIO_ORDER_AMOUNT = 1.0             # monto por contrato (USD)
+EDIFICIO_ORDER_DURATION_SEC = DURATION_SEC  # vencimiento, alineado a DURATION_SEC
+EDIFICIO_MAX_ORDER_TRIES = 2            # reintentos por evento antes de descartar
+EDIFICIO_STICKY_THRESHOLD = 3.0         # |K-D| < esto ⇒ cruce pegajoso (filtro sticky)
+# Ventana de validez del evento CONTRATADO: si pasa más de esto esperando
+# (p.ej. por un trade abierto), la señal ya no es fresca y NO se envía la
+# orden obsoleta — el activo vuelve a P3 para re-contratar con señal nueva.
+EDIFICIO_MAX_EVENT_AGE_SEC = 120        # 2 scans de 60s
+
 MAX_LOSS_SESSION = 0.20
 
 CYCLE_MAX_OPERATIONS = 5
@@ -249,7 +262,7 @@ STRAT_F_ZONE_MIN_AGE = 3  # velas M5 minimas de antiguedad de la banda/zona ante
 # clasico. ON = el freno manda, el fractal baja a filtro secundario.
 # Encendido para prueba en DEMO (sin riesgo de real). El Discovery alimenta
 # los pesos/umbrales; mientras tanto usa FrenoConfig semilla.
-STRAT_F_FRENO_BRAIN = True
+STRAT_F_FRENO_BRAIN = False
 # Maturing zone watchlist: hold R3 "zona muy joven" until re-eval admits or drops.
 # Mode off|shadow|live (default live). Invalid env → treated as off by normalize_mode.
 MATURING_WATCHLIST_MODE = os.getenv("MATURING_WATCHLIST_MODE", "live").strip().lower()

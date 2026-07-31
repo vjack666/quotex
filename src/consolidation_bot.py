@@ -60,6 +60,7 @@ from scanner import AssetScanner
 from hub.strat_f_panel import StratFPanel
 from maturing_watchlist import MaturingWatchlist
 from maturing_watcher import MaturingWatcher
+from edificio_contratacion import get_edificio, reset_edificio
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -124,6 +125,15 @@ for _h in log.handlers:
         _caf.addHandler(_h)
 _caf.setLevel(logging.INFO)
 _caf.propagate = False
+# Conectar el logger del Edificio de Contratación al mismo archivo: sus
+# mensajes (sube de piso, CONTRATADO, ORDEN ENVIADA, re-encolados) deben
+# quedar auditables en la bitácora del bot.
+_edif = logging.getLogger("edificio_contratacion")
+for _h in log.handlers:
+    if _h not in _edif.handlers:
+        _edif.addHandler(_h)
+_edif.setLevel(logging.INFO)
+_edif.propagate = False
 logging.getLogger("pyquotex").setLevel(logging.WARNING)
 logging.getLogger("websocket").setLevel(logging.CRITICAL)
 
@@ -188,6 +198,8 @@ class ConsolidationBot:
         self.accepted_scans_window: Deque[int] = deque(maxlen=ADAPTIVE_THRESHOLD_WINDOW_SCANS)
         self.current_score_threshold = ADAPTIVE_THRESHOLD_BASE
         self.last_entry_asset: Optional[str] = None
+        # Edificio de Contratación — sistema de 3 pisos
+        self.edificio = get_edificio()
         self.last_entry_asset_streak = 0
         self.asset_loss_streaks: dict[str, int] = {}
         self.asset_blacklist_until: dict[str, float] = {}
@@ -664,6 +676,7 @@ async def main(
                 try:
                     await bot.scan_all()
                 except Exception as exc:  # nunca un ciclo malo tumba el bot
+                    log.exception("[SCAN] Ciclo de escaneo falló — traceback completo:")
                     log.error(
                         "[SCAN] Ciclo de escaneo fallo y se omite: %s. "
                         "El bot sigue vivo y reintenta en el proximo ciclo.",
@@ -674,8 +687,13 @@ async def main(
                 hub = bot._hub_scanner
                 if hub is not None:
                     strat_a_payload = _extract_candidates_for_hub(bot)
+                    _raw_total = bot.stats.get("total_assets_scanned", 0)
+                    try:
+                        total_assets = max(0, int(_raw_total))
+                    except Exception:
+                        total_assets = 0
                     hub.record_scan_cycle(
-                        total_assets=max(0, bot.stats.get("total_assets_scanned", 0)),
+                        total_assets=total_assets,
                         strat_a_candidates=strat_a_payload,
                         balance=bot.current_balance,
                         cycle_id=bot.cycle_id,

@@ -83,6 +83,10 @@ class BuildingCard:
     entered_piso_2_at: Optional[float] = None  # cuándo entró a P2
     entered_piso_3_at: Optional[float] = None  # cuándo entró a P3
 
+    # Estado de la orden enviada al broker (solo cuando piso == CONTRATADO)
+    order_id: str = ""        # id devuelto por el broker
+    order_status: str = ""    # pending | sent | failed
+
     @property
     def has_poi_p1(self) -> bool:
         return self.p1_at is not None
@@ -120,6 +124,9 @@ class ContratadoEvent:
     score: float
     card: Optional[BuildingCard] = None
     timestamp: float = field(default_factory=time.time)
+    tries: int = 0         # intentos de envío de la orden
+    order_id: str = ""     # id devuelto por el broker
+    order_status: str = ""  # pending | sent | failed
 
 
 class EdificioContratacion:
@@ -129,7 +136,9 @@ class EdificioContratacion:
     evalúa transiciones entre pisos cada ciclo, y emite eventos cuando
     un activo está listo para contratar.
 
-    Fase actual: P1, P2, P3 y CONTRATADO activas.
+    Los eventos se consumen con pop_contratados() y la orden real la
+    envía el BOT (src/edificio_executor.execute_contratados) usando el
+    socket único. Si el envío falla, se re-encola con requeue().
     """
 
     def __init__(self) -> None:
@@ -249,6 +258,7 @@ class EdificioContratacion:
                 card.piso = CONTRATADO
                 card.contratado_at = now
                 card.p3_at = card.p3_at or now
+                card.order_status = "pending"
                 card.reason = f"CONTRATADO — {card.direction} ({payout}%)"
                 log.info("[EDIFICIO] %s → CONTRATADO direction=%s payout=%d%%", asset, card.direction, payout)
                 self._contratados.append(
@@ -273,6 +283,15 @@ class EdificioContratacion:
         events = list(self._contratados)
         self._contratados.clear()
         return events
+
+    def requeue(self, event: ContratadoEvent) -> None:
+        """Vuelve a encolar un evento cuyo envío de orden falló.
+
+        El timestamp original se conserva: el cleanup (10 min) sigue
+        aplicando desde el momento en que se generó el evento.
+        """
+        if event not in self._contratados:
+            self._contratados.append(event)
 
     def reset_contratados_recientes(self) -> int:
         count = len(self._contratados)
@@ -312,6 +331,8 @@ class EdificioContratacion:
                     "has_poi_p2": card.has_poi_p2,
                     "has_poi_p3": card.has_poi_p3,
                     "p2_puerta": card.p2_puerta,
+                    "order_id": card.order_id,
+                    "order_status": card.order_status,
                 }
                 for asset, card in self._cards.items()
                 if card.piso >= PISO_1
@@ -323,6 +344,9 @@ class EdificioContratacion:
                     "payout": e.payout,
                     "score": e.score,
                     "timestamp": e.timestamp,
+                    "tries": e.tries,
+                    "order_id": e.order_id,
+                    "order_status": e.order_status,
                 }
                 for e in self._contratados
             ],

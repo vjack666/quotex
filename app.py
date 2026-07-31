@@ -88,7 +88,7 @@ def _setup_web_logging() -> None:
     handler = _WebLogHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
     handler.setLevel(logging.INFO)
-    for name in ("consolidation_bot", "black_box_recorder"):
+    for name in ("consolidation_bot", "black_box_recorder", "edificio_contratacion"):
         logging.getLogger(name).addHandler(handler)
     # Also capture root warnings/errors
     logging.getLogger().addHandler(handler)

@@ -78,6 +78,7 @@ from scan_prefetch import (
 )
 from loop_utils import sleep_with_inline_countdown
 from diversification_enforcer import DiversificationEnforcer
+from edificio_executor import execute_contratados, is_sticky_cross
 from entry_scorer import CandidateEntry, explain_score, score_candidate, select_best
 from models import Candle, ConsolidationZone, PendingReversal, SignalMode
 from strat_a import (
@@ -1459,8 +1460,81 @@ class AssetScanner:
             self.bot.stats["strat_f_signals"] += _accepts
 
         # ── Alimentar el Edificio de Contratación ───────────────────
-        _feed_edificio(self.bot, assets)
-
+        flags_by_asset: dict[str, dict] = {}
+        for _sym, _payout in assets:
+            try:
+                _candles_15m = candles_15m_by_asset.get(_sym, [])
+                _candles_1m = candles_1m_by_asset.get(_sym, [])
+                _stoch = compute_stoch(_candles_15m) if _candles_15m else {"k": 50.0, "d": 50.0, "k_prev": 50.0, "d_prev": 50.0}
+                _k = float(_stoch.get("k", 50.0))
+                _d = float(_stoch.get("d", 50.0))
+                _k_prev = float(_stoch.get("k_prev", _k))
+                _d_prev = float(_stoch.get("d_prev", _d))
+                _direction = ""
+                if len(_candles_1m) >= 17:
+                    try:
+                        _stoch_m1 = compute_stoch(_candles_1m)
+                        _k_vals = _stoch_m1.get("k_vals", [])
+                        if len(_k_vals) >= 4:
+                            _k_now = float(_k_vals[-1])
+                            _k_3ago = float(_k_vals[-4])
+                            if _k_now > _k_3ago and _k < 80.0:
+                                _direction = "CALL"
+                            elif _k_now < _k_3ago and _k > 20.0:
+                                _direction = "PUT"
+                    except Exception:
+                        pass
+                if not _direction:
+                    if _k >= 80.0:
+                        _direction = "PUT"
+                    elif _k <= 20.0:
+                        _direction = "CALL"
+                    elif _k > _d and _k < 50:
+                        _direction = "CALL"
+                    elif _k < _d and _k > 50:
+                        _direction = "PUT"
+                _cross_up = _k_prev < _d_prev and _k >= _d
+                _cross_down = _k_prev > _d_prev and _k <= _d
+                _cross_ok = (_cross_up and _direction == "CALL") or (_cross_down and _direction == "PUT")
+                _cross_sticky = is_sticky_cross(_k, _d, _runtime_config.EDIFICIO_STICKY_THRESHOLD)
+                _extreme_ok = (_k <= 20.0 and _direction == "CALL") or (_k >= 80.0 and _direction == "PUT")
+                _prev_range = (
+                    float(_candles_15m[-2].high - _candles_15m[-2].low)
+                    if len(_candles_15m) >= 2 else 0.0
+                )
+                _last_range = (
+                    float(_candles_15m[-1].high - _candles_15m[-1].low)
+                    if _candles_15m else 0.0
+                )
+                _brake_ok = _prev_range > 0 and _last_range < _prev_range * 0.7
+                flags_by_asset[_sym] = {
+                    "direction": _direction,
+                    "brake_ok": bool(_brake_ok),
+                    "extreme_ok": bool(_extreme_ok),
+                    "cross_ok": bool(_cross_ok),
+                    "cross_sticky": bool(_cross_sticky),
+                    "stoch_k": _k,
+                    "stoch_d": _d,
+                    "score": 0.0,
+                }
+            except Exception:
+                flags_by_asset[_sym] = {
+                    "direction": "",
+                    "brake_ok": False,
+                    "extreme_ok": False,
+                    "cross_ok": False,
+                    "cross_sticky": False,
+                    "stoch_k": 50.0,
+                    "stoch_d": 50.0,
+                    "score": 0.0,
+                }
+        _feed_edificio(self.bot, assets, flags_by_asset=flags_by_asset)
+        # Consumir la cola de contratados y enviar la orden real al broker.
+        # Corre en el socket único del bot (regla de oro) — el hub solo observa.
+        try:
+            await execute_contratados(self.bot)
+        except Exception as exc:
+            log.error("[EDIFICIO] Error ejecutando contratados: %s", exc)
         # One compact line instead of dozens of per-asset skip rows
         n_assets = len(assets)
         n_rej = sum(reject_counts.values())
@@ -2922,26 +2996,31 @@ def _apply_strat_f_result(res, bb, maturing_wl, log, candidates, reject_counts, 
     return res.strat_f_accepts
 
 
-def _feed_edificio(bot: Any, assets: list) -> None:
+def _feed_edificio(bot: Any, assets: list, flags_by_asset: dict | None = None) -> None:
     """Alimenta el Edificio de Contratación con los activos del ciclo de escaneo.
 
-    Solo P1 (Recepción): entra si payout >= MIN_PAYOUT.
+    Solo P1 (Recepción): entra si payout >= MIN_PAYOUT y p2_puerta marca POI.
+    Ahora deriva brake_ok, extreme_ok, cross_ok desde flags reales del scanner.
     """
     edificio = getattr(bot, "edificio", None)
     if edificio is None:
         return
+    flags_by_asset = flags_by_asset or {}
     for asset, payout in assets:
         try:
+            _flags = flags_by_asset.get(asset, {}) if isinstance(flags_by_asset, dict) else {}
             edificio.evaluate(
                 asset=asset,
-                direction="",
+                direction=_flags.get("direction", ""),
                 payout=int(payout or 0),
                 payout_ok=int(payout or 0) >= MIN_PAYOUT,
-                brake_ok=False,
-                extreme_ok=False,
-                cross_ok=False,
-                cross_sticky=False,
-                score=0.0,
+                brake_ok=bool(_flags.get("brake_ok")),
+                extreme_ok=bool(_flags.get("extreme_ok")),
+                cross_ok=bool(_flags.get("cross_ok")),
+                cross_sticky=bool(_flags.get("cross_sticky")),
+                stoch_k=_flags.get("stoch_k"),
+                stoch_d=_flags.get("stoch_d"),
+                score=float(_flags.get("score", 0.0)),
             )
         except Exception as exc:
             log.error("[EDIFICIO] Error evaluando %s: %s", asset, exc)

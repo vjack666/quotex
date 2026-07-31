@@ -1,5 +1,112 @@
 # Estado de sesión
 
+## FIX: CONTRATADO → orden real al broker — 2026-07-31
+
+### Síntoma (Ruben)
+NZDCAD_otc aparecía "CONTRATADO" en el hub pero la orden nunca llegaba al broker.
+
+### Causa raíz (auditoría)
+El único consumidor de `pop_contratados()` era `_auto_contract_loop` (hub/server.py:436),
+que SOLO se arranca dentro de `hub.server.run_server()`. El arranque real
+(`start_webapp.bat → app.py → uvicorn.run(_hub_app)` en main()) nunca pasa por
+`run_server` → el loop jamás corre. El import `run_server as _hub_run_server`
+en app.py:102 existía pero estaba muerto. El activo quedaba clavado en piso 4
+CONTRATADO para siempre (cada scan posterior: reason "P1 OK", stay).
+
+### Fix aplicado
+- NUEVO `src/edificio_executor.py`: `execute_contratados(bot)` consume la cola y
+  envía la orden real con `place_order(client)` — socket único (regla de oro).
+  Re-encola fallos con límite `EDIFICIO_MAX_ORDER_TRIES`; guard de trades abiertos.
+- `src/scanner.py`: tras `_feed_edificio` → `await execute_contratados(self.bot)`;
+  ahora calcula y pasa `cross_sticky` (filtro sticky antes muerto).
+- `src/edificio_contratacion.py`: `ContratadoEvent` con `tries`/`order_id`/`order_status`;
+  `BuildingCard.order_id`/`order_status`; método `requeue()`; expuestos en `get_state()`.
+- `hub/server.py`: eliminado `_auto_contract_loop` (evita doble orden); endpoint
+  manual `/api/contract/execute` ahora re-encola en fallo (no pierde el evento).
+- `src/consolidation_bot.py` + `app.py`: logger `edificio_contratacion` conectado
+  a la bitácora del bot y al ring del hub.
+- `hub/static/index.html`: renderiza piso 4 (CONTRATADO) con estado de orden
+  (enviada · id / falló / esperando envío).
+- `src/config.py`: `EDIFICIO_ACCOUNT_TYPE=PRACTICE`, `EDIFICIO_ORDER_AMOUNT=1.0`,
+  `EDIFICIO_ORDER_DURATION_SEC=900`, `EDIFICIO_MAX_ORDER_TRIES=2`,
+  `EDIFICIO_STICKY_THRESHOLD=3.0`, `EDIFICIO_MAX_EVENT_AGE_SEC=120`.
+
+### Gate de frescura (pedido Ruben, mismo día)
+- Si el evento CONTRATADO espera más de `EDIFICIO_MAX_EVENT_AGE_SEC` (120s, p.ej.
+  por trade abierto), NO se envía la orden obsoleta: `_expire_event` devuelve la
+  card a P3 con POIs intactos para re-contratar con señal fresca.
+- Hub: badge "esperando envío… Ns" con edad en vivo.
+- Tests: +2 (expirado no envía y vuelve a P3; fresco dentro de ventana se envía).
+
+### Tests
+- `tests/test_edificio_contratacion.py` (8) + `tests/test_edificio_executor.py` (7):
+  15 passed. Sin regresiones nuevas: 11+6 fallos de baseline idénticos con/sin fix
+  (verificado por git stash).
+
+### Pendiente
+- ✅ REINICIO HECHO 2026-07-31 12:12:42 (app + servidor, ver sección MONITOREO).
+
+### MONITOREO 1H POST-FIX (Ruben 2026-07-31) — DOCUMENTACIÓN DEL PROBLEMA
+- **Problema documentado:** NZDCAD_otc "CONTRATADO" sin orden al broker (causa raíz
+  arriba). Criterio de cierre: si en 1 hora (12:12 → 13:12) se envía la orden al
+  broker → PROBLEMA SOLUCIONADO. Si continúa → buscar solución.
+- **Línea de base (12:18):** 11 activos en edificio (10 P1, 1 P2), 0 contratados,
+  0 órdenes con order_id en caja negra. Scans cada ~60s OK.
+- **✅ RESULTADO: PROBLEMA SOLUCIONADO (12:32, a los ~20 min del arranque).**
+  Primera orden enviada al broker con id confirmado:
+  - 12:32:17 `[EDIFICIO] USDNGN_otc: ORDEN ENVIADA CALL $1.00 900s → id=88c35e84-…`
+  - 12:35:18 `[EDIFICIO] XAGUSD_otc: ORDEN ENVIADA PUT $1.00 900s → id=bafdcc4b-…`
+  - 12:36:15 `[EDIFICIO] XRPUSD_otc: ORDEN ENVIADA CALL $1.00 900s → id=80233e82-…`
+  - 12:39:18 `[EDIFICIO] ETHUSD_otc: ORDEN ENVIADA PUT $1.00 900s → id=bb0ffe71-…`
+  Flujo completo en vivo: P1 → P2 → P3 → CONTRATADO → ORDEN ENVIADA en el MISMO
+  ciclo (~1-2s). Sin re-encolados, sin rechazos, sin señales expiradas.
+- **Cierre (13:10, hora completa): 7 órdenes enviadas en total.** El proceso se
+  reinició solo a las 12:56 (sin crash en log; probablemente cierre de ventana o
+  relanzamiento manual) y el nuevo proceso volvió a operar correcto:
+  - 13:04:30 XAGUSD_otc PUT → id=acb4ecf9-…
+  - 13:09:36 LINUSD_otc PUT → id=29f512d3-…
+  - 13:09:37 TONUSD_otc PUT → id=fcf29fb0-…
+  Veredicto: **FIX CONFIRMADO en 2 procesos distintos, 0 fallos.**
+- **Nota de trazabilidad (mejora futura):** las órdenes del edificio salen por
+  place_order directo y NO quedan en scan_candidates (black box) ni en
+  trade_journal.candidates (journal de hoy vacío). Su registro es solo el log
+  `[EDIFICIO] ORDEN ENVIADA id=…`. Pendiente: registrar order_id en black box
+  para trazabilidad de resultados WIN/LOSS a los 900s.
+- **Rondas:** cada ~10 min, script `%TEMP%\opencode\monitor_edificio.py` (log +
+  caja negra + hub API).
+
+---
+
+## AUDITORÍA SCANS NOCTURNOS 29→30 Jul — 2026-07-30 (tarde)
+### Objetivo (Ruben)
+Auditar por qué los scans de anoche (post-7PM Ecuador) no generaron entradas reales
+a pesar de tener 128 ACCEPTED en black box. Verificar timezone, scores, y pipeline.
+
+### Hallazgos
+
+**TZ:** Broker UTC-3, Ecuador UTC-5. Midnoche broker = 22:00 Ecuador.
+
+**Black box 2026-07-29.db (post-midnight broker = 19→00 Ecuador):**
+- 688 REJECTED_STRAT_F (per-asset filters)
+- 128 ACCEPTED (pasaron filtros per-asset) — TODOS con score=100.0 / confidence=0.0
+- 119 ACCEPTED_NOT_ENTERED (pasaron select_best pero broker rechazó)
+- 9 ACCEPTED (sin procesar aún)
+
+**Causa raíz de score=100.0:** `f_eval.strength` siempre es 1.0 para cualquier patrón
+que pasa per-asset filters (scanner.py L2576, L2650). STRAT-F no discrimina calidad
+→ todos reciben score perfecto. Score_breakdown = compression:0 + fractal:35 + context:25 + payout:~20 = ~80 base, el resto de boosts.
+
+**Causa raíz de 0 entradas:** 100% de candidatos son OTC. Quotex PRACTICE account
+rechaza OTCs con reason=unexpected. El fix en L2073-76 itera alternativas pero todas
+son OTC → mismo resultado. Las 16 entradas del log fueron de sesiones pre-7PM.
+
+**Bot log noche: 44 scans, Entradas:16 (acumulado), Sin señal:249, Drawdown:-42.8%**
+
+### Pendiente
+- Investigar por qué `f_eval.strength` siempre da 1.0
+- Solucionar entrada en PRACTICE con OTCs
+- Decidir si atacar scorer o broker issue primero
+
 ## AUDITORÍA DE RECHAZOS + columna `band` — 2026-07-25 (tarde)
 ### Objetivo (Ruben)
 Investigar mañana por qué el bot rechaza entradas y si los rechazos "zona muy
