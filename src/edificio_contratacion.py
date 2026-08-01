@@ -182,6 +182,7 @@ class EdificioContratacion:
         candle_5m_prev: Optional[dict] = None,
         candles_15m: Optional[list] = None,
         candles_5m: Optional[list] = None,
+        close_candle_5m: Optional[dict] = None,
     ) -> str:
         """Evalúa un activo en el edificio.
 
@@ -280,10 +281,28 @@ class EdificioContratacion:
         if card.piso == PISO_3:
             if not payout_ok:
                 return self._expulsar(asset)
+            candle_5m_body = None
+            # Preferir datos raw de velas; fallback a close_candle_5m.
+            raw = candles_5m[-1] if candles_5m else None
+            if isinstance(raw, dict):
+                high = raw.get("high")
+                low = raw.get("low")
+                open_ = raw.get("open")
+                close = raw.get("close")
+                total = (high - low) if (high is not None and low is not None) else None
+                body = abs(close - open_) if (close is not None and open_ is not None) else None
+                if total and body is not None and total > 0:
+                    candle_5m_body = body / total
+            if candle_5m_body is None and isinstance(close_candle_5m, dict):
+                total = close_candle_5m.get("total_range")
+                body = close_candle_5m.get("body")
+                if total and body is not None and total > 0:
+                    candle_5m_body = body / total
             contract_now = (
                 card.direction in {"CALL", "PUT"}
                 and (cross_ok or cross_sticky)
                 and extreme_ok
+                and (candle_5m_body is None or candle_5m_body > 0.03)
             )
             if contract_now:
                 if not card.direction:

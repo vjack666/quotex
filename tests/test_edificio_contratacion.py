@@ -136,3 +136,49 @@ def test_card_no_contrata_sin_direction():
     )
     assert result == "stay"
     assert edificio.get_card("A_otc").piso == PISO_3
+
+
+def test_p3_filtra_vela_chica_y_no_contrata():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Vela 5m con body chico: body_pct=0.0167 (1.67%)
+    vela_chica = {
+        "name": "doji",
+        "side": "bull",
+        "body": 0.00001,
+        "total_range": 0.0006,
+        "body_pct": 0.0167,
+        "open": 1.0,
+        "close": 1.00001,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_chica,
+    )
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_3
+
+
+def test_p3_vela_grande_pasa_filtro_y_contrata():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Vela 5m con body grande: body=0.037, total_range=0.042 -> body_pct=0.881 (88.1%)
+    vela_grande = {
+        "name": "bullish_engulfing",
+        "side": "bull",
+        "body": 0.037,
+        "total_range": 0.042,
+        "body_pct": 0.881,
+        "open": 290.942,
+        "close": 290.979,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_grande,
+    )
+    assert result == "contratado"
+    assert edificio.get_card("A_otc").piso == CONTRATADO
