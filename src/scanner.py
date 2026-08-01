@@ -2449,7 +2449,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
         _stoch_m5 = None
         _efficacy_val = None
         try:
-            _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
+            _stoch_m5 = compute_stoch(candles, d_period=3) if candles else None
         except Exception:
             _stoch_m5 = None
         if ctx._eval_override is not None:
@@ -2671,7 +2671,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                 if _mw_entries:
                     setattr(f_candidate, "_maturing_promoted", True)
                     _aligned = recheck_m15_alignment(candles_15m, f_eval.direction)
-                    _stoch_m5 = compute_stoch(candles, k_period=14, d_period=3) if candles else None
+                    _stoch_m5 = compute_stoch(candles, d_period=3) if candles else None
                     _k = (_stoch_m5 or {}).get("k")
                     _exhausted = stoch_m5_exhausted(_k, f_eval.direction)
                     _stoch_m5_json = {
@@ -2681,7 +2681,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                         "exhausted": bool(_exhausted),
                     }
                     # Fase B: estocastico M1 para que el agente aprenda las 3 TFs.
-                    _stoch_m1 = compute_stoch(candles_1m, k_period=14, d_period=3) if candles_1m else None
+                    _stoch_m1 = compute_stoch(candles_1m, d_period=3) if candles_1m else None
                     _stoch_m1_json = {
                         "k": (_stoch_m1 or {}).get("k"),
                         "d": (_stoch_m1 or {}).get("d"),
@@ -2841,7 +2841,7 @@ def _evaluate_strat_f_serial(ctx: StratFEvalContext) -> StratFEvalResult:
                     ),
                 }
             if _stoch_m1_json is None:
-                _s1 = compute_stoch(candles_1m, k_period=14, d_period=3) if candles_1m else compute_stoch([])
+                _s1 = compute_stoch(candles_1m, d_period=3) if candles_1m else compute_stoch([])
                 _stoch_m1_json = {
                     "k": (_s1 or {}).get("k"),
                     "d": (_s1 or {}).get("d"),

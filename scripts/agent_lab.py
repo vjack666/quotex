@@ -194,7 +194,7 @@ async def _default_fetcher(client, asset: str, tf_sec: int, count: int) -> list[
     )
     candles = [{"close": float(c.close), "ts": int(c.ts)} for c in raw]
     # compute_stoch necesita objetos Candle; recalculamos %K por ventana.
-    st = compute_stoch(raw, k_period=14, d_period=3)
+    st = compute_stoch(raw, d_period=3)
     candles[-1]["k"] = st.get("k", 0.0)
     # Para el laboratorio necesitamos %K por vela, no solo la ultima.
     # Reusamos la ventana deslizante manualmente:

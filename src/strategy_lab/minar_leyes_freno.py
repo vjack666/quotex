@@ -94,7 +94,7 @@ def _eventos_freno(series: list[dict], cfg: FrenoConfig):
     from models import Candle
     candles = [Candle(ts=int(s["ts"]), open=s["o"], high=s["h"],
                      low=s["l"], close=s["c"], ticks=0) for s in series]
-    st = compute_stoch(candles, k_period=14, d_period=3, slow_k_period=3,
+    st = compute_stoch(candles, d_period=3, slow_k_period=3,
                        overbought=80.0, oversold=20.0)
     k_vals = np.asarray(st.get("k_vals", []), float)
     d_vals = np.asarray(st.get("d_vals", []), float)
