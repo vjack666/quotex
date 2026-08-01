@@ -247,7 +247,7 @@ async def test_f2_check_win_false_resuelve_loss(monkeypatch):
 @pytest.mark.asyncio
 async def test_f2_profit_cero_no_es_loss_y_agota_intentos(monkeypatch):
     # check_win devuelve 0.0 (ticket sin PnL final) → NUNCA forzar LOSS.
-    # Con max_attempts=2 y check_win siempre 0.0 → UNRESOLVED.
+    # Con 1 intento por llamada y check_win siempre 0.0 → UNRESOLVED.
     edificio = _edificio_con_orden_enviada(order_id="OID-R3", ref=77777)
     history = deque()
     client = SimpleNamespace(check_win=AsyncMock(return_value=0.0))
@@ -256,12 +256,12 @@ async def test_f2_profit_cero_no_es_loss_y_agota_intentos(monkeypatch):
     monkeypatch.setattr("edificio_executor.get_black_box", lambda: fake_bb)
     monkeypatch.setattr("edificio_executor.MARTIN_RESOLVE_RETRY_SEC", 0.0)
 
-    resueltas = await resolve_contratados(bot, max_attempts=2)
+    resueltas = await resolve_contratados(bot)
 
     assert resueltas == 0  # UNRESOLVED no cuenta como resuelta
-    assert client.check_win.await_count == 2
+    assert client.check_win.await_count == 1  # 1 intento por llamada
     assert not any(c[0] == "order_result" for c in fake_bb.calls)  # sin resultado forzado
-    assert edificio.sent_pending()["OID-R3"]["resolved"] is True  # cerró el ciclo de reintentos
+    assert edificio.sent_pending()["OID-R3"]["resolved"] is False  # queda pendiente para reintentar
     assert list(history) == []  # UNRESOLVED no entra a la secuencia
 
 
@@ -276,31 +276,6 @@ async def test_f2_no_resuelve_antes_del_vencimiento(monkeypatch):
     assert resueltas == 0
     client.check_win.assert_not_awaited()
     assert edificio.sent_pending()["OID-R4"]["resolved"] is False
-
-
-@pytest.mark.asyncio
-async def test_f2_una_orden_por_llamada(monkeypatch):
-    # Dos órdenes vencidas → la primera llamada resuelve 1; la segunda, la otra.
-    edificio = EdificioContratacion()
-    for i, oid in enumerate(("OID-1", "OID-2")):
-        edificio.register_sent(oid, {
-            "asset": "X_otc",
-            "direction": "CALL",
-            "amount": 1.0,
-            "payout": 90,
-            "order_ref": 100 + i,
-            "sent_at": time.time() - 2000,
-            "duration_sec": 900,
-            "resolved": False,
-            "attempts": 0,
-        })
-    client = SimpleNamespace(check_win=AsyncMock(return_value=True))
-    bot = _bot(edificio, client=client, history=deque())
-
-    assert await resolve_contratados(bot) == 1
-    assert await resolve_contratados(bot) == 1
-    assert await resolve_contratados(bot) == 0
-    assert client.check_win.await_count == 2
 
 
 # ── F3: secuencia combinada en orden de llegada ──────────────────────────

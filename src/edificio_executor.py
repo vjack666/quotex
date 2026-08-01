@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from config import (
     EDIFICIO_ACCOUNT_TYPE,
@@ -240,6 +240,26 @@ def _retry_or_drop(
 _EDIFICIO_SCAN_SEQ = 0
 
 
+def _candles_to_dicts(candles: Any) -> List[dict]:
+    """Serializa velas (objetos Candle o dicts) a dicts JSON serializables."""
+    out: List[dict] = []
+    for c in candles or []:
+        if isinstance(c, dict):
+            out.append(c)
+        else:
+            out.append(
+                {
+                    "ts": getattr(c, "ts", None),
+                    "open": getattr(c, "open", None),
+                    "high": getattr(c, "high", None),
+                    "low": getattr(c, "low", None),
+                    "close": getattr(c, "close", None),
+                    "ticks": getattr(c, "ticks", 0),
+                }
+            )
+    return out
+
+
 def _record_sent_to_black_box(
     edificio: Any,
     ev: ContratadoEvent,
@@ -265,8 +285,8 @@ def _record_sent_to_black_box(
         _stoch_full = getattr(card, "stoch_m15_full", None) or {}
         if not isinstance(_stoch_full, dict) or "k" not in _stoch_full:
             _stoch_full = {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)}
-        _candles_15m = [c for c in getattr(card, "candles_15m_snap", []) or []]
-        _candles_5m = [c for c in getattr(card, "candles_5m_snap", []) or []]
+        _candles_15m = _candles_to_dicts(getattr(card, "candles_15m_snap", []) or [])
+        _candles_5m = _candles_to_dicts(getattr(card, "candles_5m_snap", []) or [])
         bb.record_candidate(scan_id, "EDIFICIO", {
             "asset": ev.asset,
             "direction": direction,
@@ -309,13 +329,10 @@ async def resolve_contratados(
     """Resuelve el resultado (WIN/LOSS) de las órdenes del edificio ya vencidas.
 
     Corre en el loop del BOT (socket único, regla de oro), llamado desde el
-    scanner junto a execute_contratados. Consulta el resultado con el TICKET
-    numérico (check_win) usando la misma mecánica que el pipeline STRAT-F:
-    profit == 0 NO es LOSS (lag del broker) → se reintenta en el próximo ciclo.
-
-    Decisión: se resuelve UNA orden vencida por llamada para no bloquear el
-    loop (check_win bloquea hasta que el broker liquida); el resto se resuelve
-    en el siguiente scan.
+    scanner junto a execute_contratados. Consulta el resultado con TICKET y/o
+    ID usando la misma mecánica que STRAT-F:
+    - profit == 0 NO es LOSS (lag del broker)
+    - 1 intento por llamada: si no liquida, queda pendiente para el próximo scan
 
     Returns:
         Cantidad de órdenes resueltas en esta llamada.
@@ -325,11 +342,10 @@ async def resolve_contratados(
     if edificio is None or client is None:
         return 0
 
-    max_attempts = int(max_attempts if max_attempts is not None else MARTIN_RESOLVE_MAX_ATTEMPTS)
     sent_orders = edificio.sent_pending()
     now = time.time()
 
-    # Primera orden vencida sin resolver (una por llamada — ver docstring).
+    # Primera orden vencida sin resolver (una por llamada).
     target_id: Optional[str] = None
     target_info: Optional[dict] = None
     for order_id, info in sent_orders.items():
@@ -340,10 +356,17 @@ async def resolve_contratados(
         target_id, target_info = order_id, info
         break
 
+    log.info(
+        "[EDIFICIO][resolve_contratados] pending=%d now=%.3f target=%s",
+        sum(1 for i in sent_orders.values() if not i.get("resolved")),
+        now,
+        target_id or "-",
+    )
     if target_id is None or target_info is None:
         return 0
 
-    outcome, profit = await _resolve_one(bot, client, edificio, target_id, target_info, max_attempts)
+    # Siempre 1 intento por llamada para no bloquear el loop.
+    outcome, profit = await _resolve_one(bot, client, edificio, target_id, target_info, max_attempts=1)
     if outcome not in {"WIN", "LOSS"}:
         return 0
 
@@ -390,7 +413,12 @@ async def _resolve_one(
     info: dict,
     max_attempts: int,
 ) -> tuple[Optional[str], float]:
-    """Reintenta check_win por ticket hasta liquidar o agotar intentos.
+    """Reintenta consultar el resultado por ticket y/o id hasta liquidar.
+
+    Sigue la mecánica anterior de STRAT-F:
+    - Path A: check_win(order_ref) cuando hay ticket numérico.
+    - Path B: get_result(order_id) como fallback cuando el ticket no alcanza.
+    - profit == 0 nunca es LOSS (lag del broker); se reintenta.
 
     Returns:
         (outcome, profit) — outcome "UNRESOLVED" si se agotaron los intentos;
@@ -400,13 +428,15 @@ async def _resolve_one(
     amount = float(info.get("amount") or 0.0)
     payout_pct = int(info.get("payout") or 80)
     attempts = int(info.get("attempts") or 0)
+    has_ref = order_ref > 0
+    has_id = bool(order_id)
 
     for attempt in range(1, max_attempts + 1):
         info["attempts"] = attempts + attempt
         interpreted = None
         try:
-            if order_ref > 0:
-                # check_win blocks until game_state==1; give it real time.
+            if has_ref:
+                # Path A: check_win blocks until game_state==1; give it real time.
                 win_val = await asyncio.wait_for(
                     client.check_win(order_ref),
                     timeout=MARTIN_RESOLVE_TIMEOUT_SEC,
@@ -419,17 +449,47 @@ async def _resolve_one(
                 if interpreted is None:
                     log.info(
                         "⏳ [EDIFICIO] %s: aún no liquidado (check_win=%r) intento %d/%d",
-                        info.get("asset"), win_val, attempt, max_attempts,
+                        info.get("asset"),
+                        win_val,
+                        attempt,
+                        max_attempts,
+                    )
+            elif has_id:
+                # Path B: consulta por id cuando no hay ticket usable.
+                status, payload = await asyncio.wait_for(
+                    client.get_result(order_id),
+                    timeout=MARTIN_RESOLVE_TIMEOUT_SEC,
+                )
+                interpreted = interpret_broker_result(
+                    status=status,
+                    payload=payload,
+                    trade_amount=amount,
+                    payout_pct=payout_pct,
+                )
+                if interpreted is None:
+                    log.info(
+                        "⏳ [EDIFICIO] %s: ticket sin PnL final (status=%r profit=%s) intento %d/%d",
+                        info.get("asset"),
+                        status,
+                        (payload or {}).get("profitAmount") if isinstance(payload, dict) else None,
+                        attempt,
+                        max_attempts,
                     )
         except asyncio.TimeoutError:
             log.info(
                 "⏳ [EDIFICIO] %s: timeout esperando liquidación intento %d/%d",
-                info.get("asset"), attempt, max_attempts,
+                info.get("asset"),
+                attempt,
+                max_attempts,
             )
         except Exception as exc:
             log.warning(
                 "No se pudo obtener resultado de %s / ref=%s intento %d/%d: %s",
-                order_id, order_ref, attempt, max_attempts, exc,
+                order_id,
+                order_ref,
+                attempt,
+                max_attempts,
+                exc,
             )
 
         if interpreted is not None:
@@ -437,10 +497,11 @@ async def _resolve_one(
             try:
                 get_black_box().record_order_result(order_id, outcome, float(profit))
             except Exception as exc:
-                log.warning("[EDIFICIO] %s: no se pudo actualizar caja negra (no bloquea): %s", order_id, exc)
-            # Auditoría de cierre: cómo quedaron las velas 5m/15m cuando se
-            # liquidó. Fetch NO bloqueante (mejor esfuerzo, nunca rompe la
-            # resolución). Usa el socket único del bot.
+                log.warning(
+                    "[EDIFICIO] %s: no se pudo actualizar caja negra (no bloquea): %s",
+                    order_id,
+                    exc,
+                )
             try:
                 from candle_patterns import last_closed_shape
                 from connection import fetch_candles
@@ -457,7 +518,11 @@ async def _resolve_one(
                 }
                 get_black_box().record_order_close_context(order_id, **_close_ctx)
             except Exception as exc:
-                log.warning("[EDIFICIO] %s: no se pudo registrar cierre (no bloquea): %s", order_id, exc)
+                log.warning(
+                    "[EDIFICIO] %s: no se pudo registrar cierre (no bloquea): %s",
+                    order_id,
+                    exc,
+                )
             info["resolved"] = True
             return outcome, float(profit)
 
@@ -468,5 +533,6 @@ async def _resolve_one(
         "⚠ [EDIFICIO] %s: quedó UNRESOLVED (no se forzó LOSS). Se reintentará en otro ciclo.",
         info.get("asset"),
     )
-    info["resolved"] = True
+    # NO marcar resolved=True: la orden sigue pendiente para reintentar en el
+    # próximo scan, igual que STRAT-F con pending reconciliation.
     return "UNRESOLVED", 0.0
