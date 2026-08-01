@@ -312,6 +312,8 @@ def _record_sent_to_black_box(
                 "cross_ok": bool(getattr(card, "cross_ok", False)),
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
                 "piso_previa": getattr(card, "piso", None),
+                "rule_version": "2026-08-01b",
+                "filters_applied": ["payout>=80", "brake+extreme", "cross", "body_5m>0.03"],
             },
         })
         log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)

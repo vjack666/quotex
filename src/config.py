@@ -60,6 +60,8 @@ EDIFICIO_ORDER_AMOUNT = 1.0             # monto por contrato (USD)
 EDIFICIO_ORDER_DURATION_SEC = DURATION_SEC  # vencimiento, alineado a DURATION_SEC
 EDIFICIO_MAX_ORDER_TRIES = 2            # reintentos por evento antes de descartar
 EDIFICIO_STICKY_THRESHOLD = 3.0         # |K-D| < esto ⇒ cruce pegajoso (filtro sticky)
+EDIFICIO_BODY_FILTER_MIN_RATIO = 0.03   # body/total_range mínimo en vela 5m para contratar en P3
+EDIFICIO_RULE_VERSION = "2026-08-01b"   # versión de reglas EDIFICIO para backtest/auditoría
 # Ventana de validez del evento CONTRATADO: si pasa más de esto esperando
 # (p.ej. por un trade abierto), la señal ya no es fresca y NO se envía la
 # orden obsoleta — el activo vuelve a P3 para re-contratar con señal nueva.
