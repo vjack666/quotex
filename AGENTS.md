@@ -8,8 +8,7 @@
 
 ## 1. Antes de empezar (obligatorio)
 
-**Si el usuario escribe solo `start`:** sigue `agent/START.md` (workflow autónomo
-completo). No modifiques código hasta recibir instrucciones.
+**Si el usuario escribe solo `start`:** sigue `agent/START.md` (workflow autónomo completo). No modifiques código hasta recibir instrucciones. Como primera acción del flujo `start`, cargar `C:\Users\v_jac\.hermes.md` y `docs/engineering.md`: esos archivos definen la identidad y el método por defecto para toda la sesión.
 
 **En cualquier otra sesión:**
 
