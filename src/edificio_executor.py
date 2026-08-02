@@ -27,6 +27,7 @@ from config import (
     EDIFICIO_ORDER_AMOUNT,
     EDIFICIO_ORDER_DURATION_SEC,
     EDIFICIO_RULE_VERSION,
+    EDIFICIO_SEND_ORDERS_ENABLED,
     MARTIN_RESOLVE_MAX_ATTEMPTS,
     MARTIN_RESOLVE_RETRY_SEC,
     MARTIN_RESOLVE_TIMEOUT_SEC,
@@ -88,9 +89,6 @@ async def execute_contratados(
     max_event_age_sec = float(
         max_event_age_sec if max_event_age_sec is not None else EDIFICIO_MAX_EVENT_AGE_SEC
     )
-
-    # Gate de envío: activa el experimento completo en demo sin cambiar lógica.
-    from config import EDIFICIO_SEND_ORDERS_ENABLED  # noqa: E402
 
     # Máximo 1 trade concurrente: si hay operaciones abiertas, esperar al
     # próximo ciclo (el evento se conserva; caduca a los 10 min).
