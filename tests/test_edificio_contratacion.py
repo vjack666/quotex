@@ -1,5 +1,6 @@
 """Tests del motor del Edificio de Contratación (src/edificio_contratacion.py)."""
 import sys
+import time
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parent.parent / "src"
@@ -17,22 +18,65 @@ from edificio_contratacion import (  # noqa: E402
 
 
 def _subir_a_p3(edificio: EdificioContratacion, asset: str = "A_otc", direction: str = "PUT") -> None:
-    """Lleva un activo hasta P3 (sala de espera) pasando por P1 y P2."""
+    """Lleva un activo hasta P3 (sala de espera) pasando por P1 y P2.
+
+    Simula el paso de 1 vela M15 para confirmar el freno (deuda #1).
+    """
+    import time as _time
     assert edificio.evaluate(asset=asset, direction=direction, payout=90, payout_ok=True) == "subio"
+    # Primer scan: detecta freno, queda en P1 esperando confirmación.
+    assert edificio.evaluate(
+        asset=asset, direction=direction, payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True,
+    ) == "stay"
+    # Simular paso de 1 vela M15 (901s).
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.brake_at = _time.time() - 901
+    # Segundo scan: freno confirmado, sube a P2.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True,
     ) == "subio"
+    # Tercer scan: en P2, con cruce limpio → P3.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
     ) == "subio"
 
 
+def _llegar_a_contratado(edificio: EdificioContratacion, asset: str = "A_otc", direction: str = "PUT") -> None:
+    """Lleva un activo hasta CONTRATADO, incluyendo delay de ejecución de 5 min."""
+    import time as _time
+    _subir_a_p3(edificio, asset, direction)
+    # Primer evaluate en P3: marca entrada pendiente (delay 5 min).
+    assert edificio.evaluate(
+        asset=asset, direction=direction, payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "stay"
+    # Simular paso de 5 min (delay de ejecución).
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.pending_since = _time.time() - 301
+    # Segundo evaluate: delay cumplido → CONTRATADO.
+    assert edificio.evaluate(
+        asset=asset, direction=direction, payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "contratado"
+
+
 def test_activo_sube_hasta_contratado_y_encola_evento():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
-    # El cruce ya ocurrió al subir; un nuevo scan con cruce + extremo contrata.
+    # En P3, el primer cruce marca entrada pendiente (delay 5 min).
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "stay"
+    # Simular paso de 5 min (delay de ejecución).
+    card = edificio.get_card("A_otc")
+    assert card is not None
+    card.pending_since = time.time() - 301
     assert edificio.evaluate(
         asset="A_otc", direction="PUT", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
@@ -77,6 +121,20 @@ def test_p2_necesita_cruce_para_subir_a_p3():
     assert edificio.get_card("A_otc").piso == PISO_3
 
 
+def test_p2_rechaza_sticky_y_no_subir_a_p3():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Bajar manualmente a P2
+    edificio._cards["A_otc"].piso = PISO_2
+    edificio._cards["A_otc"].p2_at = 1.0
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_sticky=True,
+    )
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_2
+
+
 def test_expulsado_si_deja_de_pagar_en_piso_alto():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
@@ -86,11 +144,7 @@ def test_expulsado_si_deja_de_pagar_en_piso_alto():
 
 def test_requeue_devuelve_el_mismo_evento():
     edificio = EdificioContratacion()
-    _subir_a_p3(edificio)
-    edificio.evaluate(
-        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
-        brake_ok=True, extreme_ok=True, cross_ok=True,
-    )
+    _llegar_a_contratado(edificio)
     events = edificio.pop_contratados()
     assert len(events) == 1
     edificio.requeue(events[0])
@@ -104,11 +158,7 @@ def test_requeue_devuelve_el_mismo_evento():
 
 def test_get_state_expone_estado_de_orden():
     edificio = EdificioContratacion()
-    _subir_a_p3(edificio)
-    edificio.evaluate(
-        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
-        brake_ok=True, extreme_ok=True, cross_ok=True,
-    )
+    _llegar_a_contratado(edificio)
     card = edificio.get_card("A_otc")
     card.order_status = "sent"
     card.order_id = "OID-123"
@@ -180,5 +230,17 @@ def test_p3_vela_grande_pasa_filtro_y_contrata():
         brake_ok=True, extreme_ok=True, cross_ok=True,
         close_candle_5m=vela_grande,
     )
-    assert result == "contratado"
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_3
+    assert edificio.get_card("A_otc").entry_pending is True
+    # Simular delay de ejecución cumplido (5 min).
+    card = edificio.get_card("A_otc")
+    assert card is not None
+    card.pending_since = time.time() - 301
+    result2 = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_grande,
+    )
+    assert result2 == "contratado"
     assert edificio.get_card("A_otc").piso == CONTRATADO

@@ -96,6 +96,12 @@ class BuildingCard:
     order_ref: int = 0        # ticket numérico del broker (para resolver resultado)
     order_status: str = ""    # pending | sent | won | lost | failed
 
+    # Espera post-freno / delay de ejecución
+    brake_at: Optional[float] = None            # primera vez que brake+extremo OK en P1
+    brake_confirmed_at: Optional[float] = None  # cuando pasó 1 vela M15
+    entry_pending: bool = False                 # P3 marcó entrada, esperando delay
+    pending_since: Optional[float] = None       # timestamp del primer CONTRATADO elegible
+
     @property
     def has_poi_p1(self) -> bool:
         return self.p1_at is not None
@@ -255,23 +261,45 @@ class EdificioContratacion:
             if not payout_ok:
                 return self._expulsar(asset)
             if brake_ok and extreme_ok:
-                card.piso = PISO_2
-                card.p2_at = now
-                card.reason = f"P2 OK — brake+extremo ({payout}%)"
-                log.info("[EDIFICIO] %s → P2 (payout=%d%%)", asset, payout)
-                return "subio"
+                if card.brake_at is None:
+                    card.brake_at = now
+                    card.brake_confirmed_at = None
+                    card.reason = f"P1 OK — freno detectado, esperando 1 vela M15 ({payout}%)"
+                    log.info("[EDIFICIO] %s: freno detectado en P1, esperando confirmación...", asset)
+                    return "stay"
+                if card.brake_confirmed_at is None and card.brake_at + 900 < now:
+                    card.brake_confirmed_at = now
+                    card.piso = PISO_2
+                    card.p2_at = now
+                    card.reason = f"P2 OK — freno confirmado + extremo ({payout}%)"
+                    log.info("[EDIFICIO] %s → P2 (brake confirmado tras 1 vela M15, payout=%d%%)", asset, payout)
+                    return "subio"
+                if card.brake_confirmed_at is not None:
+                    card.piso = PISO_2
+                    card.p2_at = now
+                    card.reason = f"P2 OK — freno confirmado + extremo ({payout}%)"
+                    log.info("[EDIFICIO] %s → P2 (brake ya confirmado, payout=%d%%)", asset, payout)
+                    return "subio"
+                card.reason = f"P1 OK — esperando confirmación freno ({payout}%)"
+                return "stay"
+            card.brake_at = None
+            card.brake_confirmed_at = None
             card.reason = f"P1 OK — esperando brake+extremo ({payout}%)"
             return "stay"
 
         if card.piso == PISO_2:
             if not payout_ok:
                 return self._expulsar(asset)
-            if cross_ok or cross_sticky:
+            if cross_ok and not cross_sticky:
                 card.piso = PISO_3
                 card.p3_at = now
-                card.reason = f"P3 OK — cruce {'pegajoso' if cross_sticky else 'confirmado'} ({payout}%)"
+                card.reason = f"P3 OK — cruce confirmado ({payout}%)"
                 log.info("[EDIFICIO] %s → P3 (payout=%d%%)", asset, payout)
                 return "subio"
+            if cross_sticky:
+                card.reason = f"P2 OK — sticky rechazado, esperando cruce limpio ({payout}%)"
+                log.info("[EDIFICIO] %s: sticky rechazado en P2, quedando en espera", asset)
+                return "stay"
             if brake_ok and extreme_ok:
                 card.reason = f"P2 OK — esperando cruce K/D ({payout}%)"
                 return "stay"
@@ -281,51 +309,44 @@ class EdificioContratacion:
         if card.piso == PISO_3:
             if not payout_ok:
                 return self._expulsar(asset)
-            candle_5m_body = None
-            # Preferir datos raw de velas; fallback a close_candle_5m.
-            raw = candles_5m[-1] if candles_5m else None
-            if isinstance(raw, dict):
-                high = raw.get("high")
-                low = raw.get("low")
-                open_ = raw.get("open")
-                close = raw.get("close")
-                total = (high - low) if (high is not None and low is not None) else None
-                body = abs(close - open_) if (close is not None and open_ is not None) else None
-                if total and body is not None and total > 0:
-                    candle_5m_body = body / total
-            if candle_5m_body is None and isinstance(close_candle_5m, dict):
-                total = close_candle_5m.get("total_range")
-                body = close_candle_5m.get("body")
-                if total and body is not None and total > 0:
-                    candle_5m_body = body / total
-            contract_now = (
-                card.direction in {"CALL", "PUT"}
-                and (cross_ok or cross_sticky)
-                and extreme_ok
-                and (candle_5m_body is None or candle_5m_body > 0.03)
-            )
-            if contract_now:
-                if not card.direction:
-                    card.reason = "CONTRATADO bloqueado: direction vacía"
-                    return "stay"
-                card.piso = CONTRATADO
-                card.contratado_at = now
-                card.p3_at = card.p3_at or now
-                card.order_status = "pending"
-                card.reason = f"CONTRATADO — {card.direction} ({payout}%)"
-                log.info("[EDIFICIO] %s → CONTRATADO direction=%s payout=%d%%", asset, card.direction, payout)
-                self._contratados.append(
-                    ContratadoEvent(
+            if not brake_ok:
+                card.piso = PISO_2
+                card.reason = f"Baja a P2 — freno perdido ({payout}%)"
+                log.info("[EDIFICIO] %s: baja a P2 (brake perdido)", asset)
+                return "bajo"
+            if not extreme_ok:
+                card.piso = PISO_2
+                card.reason = f"Baja a P2 — extremo perdido ({payout}%)"
+                log.info("[EDIFICIO] %s: baja a P2 (extremo perdido)", asset)
+                return "bajo"
+            if not cross_ok or cross_sticky:
+                card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
+                return "stay"
+            if card.entry_pending:
+                if card.pending_since is None:
+                    card.pending_since = now
+                if card.pending_since + 300 < now:  # 5 min = inicio próxima vela 15m
+                    card.piso = CONTRATADO
+                    card.contratado_at = now
+                    card.order_status = "pending"
+                    card.reason = f"CONTRATADO — delay ejecución cumplido ({payout}%)"
+                    log.info("[EDIFICIO] %s → CONTRATADO (delay ejecución OK, payout=%d%%)", asset, payout)
+                    ev = ContratadoEvent(
                         asset=asset,
-                        direction=card.direction,
+                        direction=card.direction or direction,
                         payout=payout,
-                        score=score,
+                        score=card.score,
                         card=card,
                         timestamp=now,
                     )
-                )
-                return "contratado"
-            card.reason = f"P3 listo — esperando contratar ({payout}%)"
+                    self._contratados.append(ev)
+                    return "contratado"
+                card.reason = f"P3 OK — delay ejecución ({(card.pending_since + 300 - now):.0f}s restantes, {payout}%)"
+                return "stay"
+            card.entry_pending = True
+            card.pending_since = now
+            card.reason = f"P3 OK — entrada marcada, delay 5 min ({payout}%)"
+            log.info("[EDIFICIO] %s: entrada marcada para próxima vela 15m (delay 5 min)", asset)
             return "stay"
 
         # Si ya entró o volvió atrás, no baja de P1 en esta fase

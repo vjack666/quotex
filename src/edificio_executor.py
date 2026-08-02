@@ -13,8 +13,11 @@ Flujo:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sqlite3
 import time
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from config import (
@@ -109,6 +112,17 @@ async def execute_contratados(
         if now - ev.timestamp > max_event_age_sec:
             _expire_event(edificio, ev, age_sec=now - ev.timestamp)
             continue
+        card = ev.card if ev.card is not None else edificio.get_card(ev.asset)
+        if card is not None and getattr(card, "entry_pending", False):
+            pending_since = getattr(card, "pending_since", None)
+            if pending_since is not None and pending_since + duration / 3 > now:
+                log.info(
+                    "[EDIFICIO] %s: delay ejecución activo (%.0fs restantes) — re-encolado",
+                    ev.asset,
+                    pending_since + duration / 3 - now,
+                )
+                edificio.requeue(ev)
+                continue
         ok, result = await _send_one(
             bot, client, edificio, ev,
             account_type=account_type, amount=amount, duration=duration,
@@ -268,12 +282,7 @@ def _record_sent_to_black_box(
     amount: float,
     duration: int,
 ) -> None:
-    """Registra el envío confirmado en la caja negra (strategy="EDIFICIO").
-
-    La fila queda en scan_candidates con order_id → el resolvedor la actualiza
-    con WIN/LOSS vía record_order_result(order_id, ...). Nunca debe romper el
-    envío: todo error es solo un warning de log.
-    """
+    """Registra el envío confirmado en la caja negra (strategy="EDIFICIO")."""
     global _EDIFICIO_SCAN_SEQ
     if not ev.order_id:
         return
@@ -281,7 +290,6 @@ def _record_sent_to_black_box(
         _EDIFICIO_SCAN_SEQ += 1
         bb = get_black_box()
         scan_id = bb.record_scan_start("EDIFICIO", _EDIFICIO_SCAN_SEQ)
-        # Contexto de auditoría desde la card (snapshot del momento de evaluación).
         _stoch_full = getattr(card, "stoch_m15_full", None) or {}
         if not isinstance(_stoch_full, dict) or "k" not in _stoch_full:
             _stoch_full = {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)}
@@ -311,9 +319,15 @@ def _record_sent_to_black_box(
                 "extreme_ok": bool(getattr(card, "extreme_ok", False)),
                 "cross_ok": bool(getattr(card, "cross_ok", False)),
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
+                "body_5m": getattr(card, "body_5m", None),
                 "piso_previa": getattr(card, "piso", None),
                 "rule_version": "2026-08-01b",
-                "filters_applied": ["payout>=80", "brake+extreme", "cross", "body_5m>0.03"],
+                "filters_applied": [
+                    "payout>=80",
+                    "brake+extreme",
+                    "cross",
+                    "body_5m>0.03",
+                ],
             },
         })
         log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)
@@ -321,7 +335,104 @@ def _record_sent_to_black_box(
         log.warning("[EDIFICIO] %s: no se pudo registrar en caja negra (no bloquea): %s", ev.asset, exc)
 
 
+def _record_failed_send_to_black_box(
+    edificio: Any,
+    ev: ContratadoEvent,
+    card: Any,
+    direction: str,
+    amount: float,
+    duration: int,
+    broker_error: str = "",
+) -> None:
+    """Registra un envío fallido/descartado en caja negra para trazabilidad."""
+    global _EDIFICIO_SCAN_SEQ
+    if not ev.order_id:
+        return
+    try:
+        _EDIFICIO_SCAN_SEQ += 1
+        bb = get_black_box()
+        scan_id = bb.record_scan_start("EDIFICIO", _EDIFICIO_SCAN_SEQ)
+        bb.record_candidate(scan_id, "EDIFICIO", {
+            "asset": ev.asset,
+            "direction": direction,
+            "score": float(card.score or 0.0),
+            "confidence": 0.0,
+            "payout": int(card.payout or 0),
+            "decision": "NO_SEND",
+            "decision_reason": "edificio_failed_send",
+            "order_id": ev.order_id,
+            "duration_sec": int(duration),
+            "agent_tag": "BOT",
+            "reject_reason": broker_error or "BROKER_REJECTED",
+            "strategy_details": {
+                "amount": float(amount),
+                "order_ref": ev.order_ref,
+                "brake_ok": bool(getattr(card, "brake_ok", False)),
+                "extreme_ok": bool(getattr(card, "extreme_ok", False)),
+                "cross_ok": bool(getattr(card, "cross_ok", False)),
+                "cross_sticky": bool(getattr(card, "cross_sticky", False)),
+                "body_5m": getattr(card, "body_5m", None),
+                "piso_previa": getattr(card, "piso", None),
+                "rule_version": "2026-08-01b",
+                "filters_applied": [
+                    "payout>=80",
+                    "brake+extreme",
+                    "cross",
+                    "body_5m>0.03",
+                ],
+                "send_error": broker_error,
+            },
+        })
+    except Exception as exc:
+        log.warning("[EDIFICIO] %s: no se pudo registrar envio fallido en caja negra (no bloquea): %s", ev.asset, exc)
+
+
 # ── Trazabilidad: resolvedor por ticket (F2) ─────────────────────────────
+
+def _infer_loss_reason(edificio: Any, info: dict) -> str:
+    """Infiere la razon de perdida desde la card / strategy_details."""
+    asset = str(info.get("asset", ""))
+    card = edificio.get_card(asset) if asset else None
+    if card is None:
+        return "UNRESOLVED"
+    details = getattr(card, "strategy_details", None) or {}
+    if not bool(details.get("payout", True)):
+        return "NO_PAYOUT"
+    if not bool(details.get("brake_ok", False)):
+        return "NO_BRAKE"
+    if not bool(details.get("extreme_ok", False)):
+        return "NO_EXTREME"
+    if not bool(details.get("cross_ok", False)):
+        return "NO_CROSS"
+    if bool(details.get("cross_sticky", False)):
+        return "STICKY_CROSS"
+    body_5m = details.get("body_5m")
+    if isinstance(body_5m, (int, float)) and float(body_5m) <= 0.03:
+        return "BODY_FILTER"
+    return "UNRESOLVED"
+
+
+def _update_order_loss_reason(order_id: str, loss_reason: str) -> None:
+    """Marca la fila de caja negra con la razon de perdida y trazabilidad."""
+    ts = datetime.now(timezone.utc).isoformat()
+    bb = get_black_box()
+    try:
+        con = sqlite3.connect(bb.db_path)
+        cur = con.cursor()
+        cur.execute(
+            "UPDATE scan_candidates SET loss_reason = ?, agent_tag = ?, updated_at = ? "
+            "WHERE order_id = ?",
+            (loss_reason, "AGENT_LOSS_REASON", ts, order_id),
+        )
+        con.commit()
+    except Exception as exc:
+        log.warning("[EDIFICIO] %s: no se pudo marcar loss_reason=%s: %s", order_id, loss_reason, exc)
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
 
 async def resolve_contratados(
     bot: Any,

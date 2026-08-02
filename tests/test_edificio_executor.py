@@ -20,8 +20,16 @@ from edificio_executor import execute_contratados, is_sticky_cross  # noqa: E402
 
 def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") -> EdificioContratacion:
     """Edificio con un activo ya en CONTRATADO y su evento en cola."""
+    import time as _time
     edificio = EdificioContratacion()
     assert edificio.evaluate(asset=asset, direction=direction, payout=90, payout_ok=True) == "subio"
+    assert edificio.evaluate(
+        asset=asset, direction=direction, payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True,
+    ) == "stay"
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.brake_at = _time.time() - 901
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True,
@@ -30,6 +38,13 @@ def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") 
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
     ) == "subio"
+    assert edificio.evaluate(
+        asset=asset, direction=direction, payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "stay"
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.pending_since = _time.time() - 301
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,

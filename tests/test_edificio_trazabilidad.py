@@ -58,12 +58,23 @@ def _bot(edificio, *, client, history=None, massaniello=None):
 
 @pytest.mark.asyncio
 async def test_f1_envio_confirmado_registra_caja_negra_y_ticket(monkeypatch):
+    import time as _time
     edificio = EdificioContratacion()
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True) == "subio"
+    assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
+                             brake_ok=True, extreme_ok=True) == "stay"
+    card = edificio.get_card("USDNGN_otc")
+    assert card is not None
+    card.brake_at = _time.time() - 901
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True) == "subio"
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "subio"
+    assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
+                             brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
+    card = edificio.get_card("USDNGN_otc")
+    assert card is not None
+    card.pending_since = _time.time() - 301
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "contratado"
 
@@ -106,12 +117,23 @@ async def test_f1_envio_confirmado_registra_caja_negra_y_ticket(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_f1_fallo_caja_negra_no_rompe_envio(monkeypatch):
+    import time as _time
     edificio = EdificioContratacion()
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True) == "subio"
+    assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
+                             brake_ok=True, extreme_ok=True) == "stay"
+    card = edificio.get_card("XAGUSD_otc")
+    assert card is not None
+    card.brake_at = _time.time() - 901
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True) == "subio"
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "subio"
+    assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
+                             brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
+    card = edificio.get_card("XAGUSD_otc")
+    assert card is not None
+    card.pending_since = _time.time() - 301
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "contratado"
 
