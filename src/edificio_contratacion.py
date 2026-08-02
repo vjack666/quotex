@@ -3,14 +3,12 @@
 Cada activo que pasa los filtros básicos entra al edificio y sube piso por piso:
 
   P1 (Recepción)     → paga bien
-  P2 (Cerebro)       → freno OK + extremo OK
-  P3 (Sala de Espera) → espera cruce K/D limpio
+  P2 (Cerebro)       → freno OK + extremo OK, espera separación K/D limpia
+  P3 (Sala de Espera) → cruce limpio confirmado + vela 5m válida (body o martillo)
   CONTRATADO         → entrada al trade
 
 El activo NO puede saltarse pisos. Cada piso emite un POI que certifica
 que la condición fue verificada en ese nivel.
-
-Fase actual: solo P1 activa.
 """
 
 from __future__ import annotations
@@ -19,6 +17,14 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from config import (
+    EDIFICIO_BODY_FILTER_MIN_RATIO,
+    EDIFICIO_BRAKE_CONFIRM_RATIO,
+    EDIFICIO_HAMMER_MIN_TAIL_RATIO,
+    EDIFICIO_POST_BRAKE_MIN_RATIO,
+    EDIFICIO_SEPARATION_WAIT_SEC,
+)
 
 log = logging.getLogger("edificio_contratacion")
 
@@ -69,11 +75,21 @@ class BuildingCard:
     brake_ok: bool = False
     extreme_ok: bool = False
     cross_ok: bool = False
-    cross_sticky: bool = False  # True si el cruce es pegajoso (no confiable)
+    cross_sticky: bool = False  # True si el cruce es pegajoso; usar como espera, no como veto
+    # Puerta P2→P3: momento en que el cruce limpio (|K-D| >= sticky) apareció.
+    # El cruce debe MANTENERSE EDIFICIO_SEPARATION_WAIT_SEC antes de promover.
+    cross_separation_since: Optional[float] = None
 
     # Stoch M15 snapshot
     stoch_k: Optional[float] = None
     stoch_d: Optional[float] = None
+    # |K-D| en el momento de la evaluación (para caja negra / auditoría)
+    kd_distance: Optional[float] = None
+
+    # Body filter 5m
+    body_5m: Optional[float] = None  # body/total_range de la última vela 5m cerrada
+    # Patrón de la vela 5m en P3 (name del shape classifier) para caja negra
+    pattern_5m: Optional[str] = None
 
     # Contexto de auditoría (caja negra) — snapshot del momento de evaluación
     stoch_m15_full: Optional[dict] = None      # dict completo de compute_stoch()
@@ -97,10 +113,24 @@ class BuildingCard:
     order_status: str = ""    # pending | sent | won | lost | failed
 
     # Espera post-freno / delay de ejecución
-    brake_at: Optional[float] = None            # primera vez que brake+extremo OK en P1
-    brake_confirmed_at: Optional[float] = None  # cuando pasó 1 vela M15
+    brake_at: Optional[float] = None            # primera vez que brake+extremo OK en P1 (candidato)
+    # Confirmación del freno con vela M15 CERRADA (deuda #1): al detectar el
+    # candidato se guarda el rango/ts de la última vela 15m cerrada; cuando esa
+    # vela cierra se compara range(nueva cerrada) < EDIFICIO_BRAKE_CONFIRM_RATIO
+    # × range(referencia). Solo entonces se promueve a P2.
+    brake_reference_range: Optional[float] = None  # range (high-low) de la vela 15m cerrada de referencia
+    brake_reference_ts: Optional[float] = None     # ts de esa vela de referencia (para detectar el cierre)
+    brake_verdict: Optional[str] = None            # CONFIRMED | REJECTED | CANCELLED (caja negra)
+    brake_ratio: Optional[float] = None            # range(nueva cerrada) / range(referencia) al veredicto
+    brake_witness_ts: Optional[float] = None       # ts de la vela que cerró y desencadenó el veredicto
+    brake_confirmed_at: Optional[float] = None  # cuando pasó la confirmación con vela cerrada
     entry_pending: bool = False                 # P3 marcó entrada, esperando delay
     pending_since: Optional[float] = None       # timestamp del primer CONTRATADO elegible
+
+    # Experimento body post-freno (sin veto todavía)
+    post_brake_body_ratio: Optional[float] = None   # body/range primera vela M15 post-freno
+    post_brake_would_pass: Optional[bool] = None    # True si supera corte actual
+    post_brake_measured_at: Optional[float] = None  # ts vela usada para la medición
 
     @property
     def has_poi_p1(self) -> bool:
@@ -143,6 +173,44 @@ class ContratadoEvent:
     order_id: str = ""     # id devuelto por el broker
     order_ref: int = 0     # ticket numérico del broker (para resolver resultado)
     order_status: str = ""  # pending | sent | won | lost | failed
+
+
+def _detect_hammer_pattern(
+    candle: Optional[dict],
+    direction: str,
+    min_tail_ratio: float,
+) -> bool:
+    """True si la vela 5m es un martillo válido en la dirección del trade.
+
+    CALL → martillo alcista: mecha inferior larga (rechazo de mínimos).
+    PUT  → martillo invertido: mecha superior larga (rechazo de máximos).
+
+    La mecha principal debe ser >= min_tail_ratio * body y el cuerpo debe
+    quedar anclado al lado opuesto de la mecha. Requiere body > 0.
+    """
+    if not isinstance(candle, dict):
+        return False
+    try:
+        o = float(candle.get("open") or 0.0)
+        h = float(candle.get("high") or 0.0)
+        l = float(candle.get("low") or 0.0)
+        c = float(candle.get("close") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    body = abs(c - o)
+    if body <= 0:
+        return False
+    rng = h - l
+    if rng <= 0:
+        return False
+    upper = h - max(o, c)
+    lower = min(o, c) - l
+    direction = (direction or "").upper()
+    if direction == "CALL":
+        return lower >= min_tail_ratio * body and upper < 0.3 * rng
+    if direction == "PUT":
+        return upper >= min_tail_ratio * body and lower < 0.3 * rng
+    return False
 
 
 class EdificioContratacion:
@@ -218,6 +286,10 @@ class EdificioContratacion:
         card.cross_sticky = cross_sticky
         card.stoch_k = stoch_k
         card.stoch_d = stoch_d
+        if stoch_k is not None and stoch_d is not None:
+            card.kd_distance = abs(float(stoch_k) - float(stoch_d))
+        else:
+            card.kd_distance = None
         card.score = score
         card.last_updated = now
         if not card.direction and direction:
@@ -236,6 +308,15 @@ class EdificioContratacion:
             card.candles_15m_snap = list(candles_15m)[-24:]
         if candles_5m:
             card.candles_5m_snap = list(candles_5m)[-24:]
+
+        # Patrón de la vela 5m cerrada (para caja negra / martillo M5).
+        _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else candle_5m_prev
+        card.pattern_5m = str(_c5.get("name")) if isinstance(_c5, dict) and _c5.get("name") else None
+
+        # Medición post-freno REINTENTABLE: si aún no hay vela M15 post-freno
+        # cerrada en el snapshot, se reintenta en el próximo ciclo (no se pierde).
+        if card.brake_confirmed_at is not None:
+            self._measure_post_brake(card)
 
         # Si no paga bien → expulsado
         if not payout_ok and card.piso > PISO_FUERA:
@@ -261,29 +342,59 @@ class EdificioContratacion:
             if not payout_ok:
                 return self._expulsar(asset)
             if brake_ok and extreme_ok:
+                # Nuevo candidato: capturar la vela 15m cerrada de referencia.
                 if card.brake_at is None:
                     card.brake_at = now
                     card.brake_confirmed_at = None
-                    card.reason = f"P1 OK — freno detectado, esperando 1 vela M15 ({payout}%)"
-                    log.info("[EDIFICIO] %s: freno detectado en P1, esperando confirmación...", asset)
+                    card.brake_verdict = None
+                    card.brake_ratio = None
+                    card.brake_witness_ts = None
+                    self._brake_set_reference(card)
+                    card.reason = f"P1 OK — freno candidato, esperando vela M15 cerrada ({payout}%)"
+                    log.info("[EDIFICIO] %s: freno candidato en P1, esperando vela M15 cerrada...", asset)
                     return "stay"
-                if card.brake_confirmed_at is None and card.brake_at + 900 < now:
+                # Candidato activo: asegurar referencia (por si el snapshot estaba vacío).
+                self._brake_set_reference(card)
+                # Confirmar el freno con la vela CERRADA (deuda #1): cuando la
+                # vela en formación cierra, comparar su range contra la referencia.
+                ratio, witness_ts = self._brake_confirm(card)
+                if ratio is None:
+                    # Sin vela nueva cerrada aún: esperar (no resetea).
+                    card.reason = f"P1 OK — esperando cierre de vela M15 para freno ({payout}%)"
+                    return "stay"
+                card.brake_ratio = ratio
+                card.brake_witness_ts = witness_ts
+                if ratio < EDIFICIO_BRAKE_CONFIRM_RATIO:
                     card.brake_confirmed_at = now
+                    card.brake_verdict = "CONFIRMED"
                     card.piso = PISO_2
                     card.p2_at = now
-                    card.reason = f"P2 OK — freno confirmado + extremo ({payout}%)"
-                    log.info("[EDIFICIO] %s → P2 (brake confirmado tras 1 vela M15, payout=%d%%)", asset, payout)
+                    card.reason = f"P2 OK — freno confirmado con vela M15 cerrada + extremo ({payout}%)"
+                    log.info(
+                        "[EDIFICIO] %s → P2 (freno CONFIRMED ratio=%.2f, payout=%d%%)",
+                        asset, ratio, payout,
+                    )
+                    # Experimento: medir body/ratio de la primera vela M15 post-freno
+                    self._measure_post_brake(card)
                     return "subio"
-                if card.brake_confirmed_at is not None:
-                    card.piso = PISO_2
-                    card.p2_at = now
-                    card.reason = f"P2 OK — freno confirmado + extremo ({payout}%)"
-                    log.info("[EDIFICIO] %s → P2 (brake ya confirmado, payout=%d%%)", asset, payout)
-                    return "subio"
-                card.reason = f"P1 OK — esperando confirmación freno ({payout}%)"
+                # La vela cerró sin compresión: rechazar y esperar un nuevo candidato.
+                card.brake_verdict = "REJECTED"
+                card.brake_at = None
+                card.brake_confirmed_at = None
+                self._brake_clear_reference(card)
+                card.reason = f"P1 OK — freno sin compresión, esperando nuevo candidato ({payout}%)"
+                log.info(
+                    "[EDIFICIO] %s: freno RECHAZADO (ratio=%.2f ≥ %.2f)",
+                    asset, ratio, EDIFICIO_BRAKE_CONFIRM_RATIO,
+                )
                 return "stay"
+            # Se perdió brake o extremo antes del cierre de la vela: cancelar.
+            if card.brake_at is not None:
+                card.brake_verdict = "CANCELLED"
+                log.info("[EDIFICIO] %s: freno CANCELLED (se perdió brake/extremo)", asset)
             card.brake_at = None
             card.brake_confirmed_at = None
+            self._brake_clear_reference(card)
             card.reason = f"P1 OK — esperando brake+extremo ({payout}%)"
             return "stay"
 
@@ -291,14 +402,30 @@ class EdificioContratacion:
             if not payout_ok:
                 return self._expulsar(asset)
             if cross_ok and not cross_sticky:
-                card.piso = PISO_3
-                card.p3_at = now
-                card.reason = f"P3 OK — cruce confirmado ({payout}%)"
-                log.info("[EDIFICIO] %s → P3 (payout=%d%%)", asset, payout)
-                return "subio"
+                # Cruce limpio: el separación K/D debe MANTENERSE una vela M15
+                # antes de promover a P3 (evita subir con un tick aislado).
+                if card.cross_separation_since is None:
+                    card.cross_separation_since = now
+                    card.reason = f"P2 OK — separación K/D detectada, esperando confirmación ({payout}%)"
+                    log.info(
+                        "[EDIFICIO] %s: cruce limpio en P2, esperando separación (%.0fs)",
+                        asset, EDIFICIO_SEPARATION_WAIT_SEC,
+                    )
+                    return "stay"
+                if card.cross_separation_since + EDIFICIO_SEPARATION_WAIT_SEC < now:
+                    card.piso = PISO_3
+                    card.p3_at = now
+                    card.cross_separation_since = None
+                    card.reason = f"P3 OK — separación confirmada ({payout}%)"
+                    log.info("[EDIFICIO] %s → P3 (separación confirmada, payout=%d%%)", asset, payout)
+                    return "subio"
+                card.reason = f"P2 OK — esperando confirmación separación ({(card.cross_separation_since + EDIFICIO_SEPARATION_WAIT_SEC - now):.0f}s, {payout}%)"
+                return "stay"
+            # Sin cruce limpio (sticky o sin cruce): la separación se reinicia.
+            card.cross_separation_since = None
             if cross_sticky:
-                card.reason = f"P2 OK — sticky rechazado, esperando cruce limpio ({payout}%)"
-                log.info("[EDIFICIO] %s: sticky rechazado en P2, quedando en espera", asset)
+                card.reason = f"P2 OK — sticky: esperar separación K/D ({payout}%)"
+                log.info("[EDIFICIO] %s: sticky en P2, quedando en espera", asset)
                 return "stay"
             if brake_ok and extreme_ok:
                 card.reason = f"P2 OK — esperando cruce K/D ({payout}%)"
@@ -319,8 +446,19 @@ class EdificioContratacion:
                 card.reason = f"Baja a P2 — extremo perdido ({payout}%)"
                 log.info("[EDIFICIO] %s: baja a P2 (extremo perdido)", asset)
                 return "bajo"
-            if not cross_ok or cross_sticky:
+            if not cross_ok:
                 card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
+                return "stay"
+            # Gate vela 5m: body fuerte O martillo M5 en dirección del trade.
+            # El filtro se aplica al MOMENTO de marcar la entrada; si la vela
+            # no confirma, no se marca entrada y se espera la próxima vela.
+            _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else getattr(card, "candle_5m_prev", None)
+            if not self._5m_gate_pass(_c5, direction):
+                card.reason = (
+                    f"P3 OK — vela 5m sin confirmar "
+                    f"(body<{EDIFICIO_BODY_FILTER_MIN_RATIO} y no martillo) ({payout}%)"
+                )
+                log.info("[EDIFICIO] %s: vela 5m rechazada en P3 (patrón=%s)", asset, card.pattern_5m)
                 return "stay"
             if card.entry_pending:
                 if card.pending_since is None:
@@ -406,8 +544,14 @@ class EdificioContratacion:
                     "extreme_ok": card.extreme_ok,
                     "cross_ok": card.cross_ok,
                     "cross_sticky": card.cross_sticky,
+                    "cross_separation_since": card.cross_separation_since,
                     "stoch_k": card.stoch_k,
                     "stoch_d": card.stoch_d,
+                    "kd_distance": card.kd_distance,
+                    "pattern_5m": card.pattern_5m,
+                    "brake_verdict": card.brake_verdict,
+                    "brake_ratio": card.brake_ratio,
+                    "brake_reference_ts": card.brake_reference_ts,
                     "p1_at": card.p1_at,
                     "p2_at": card.p2_at,
                     "p3_at": card.p3_at,
@@ -469,6 +613,127 @@ class EdificioContratacion:
             e for e in self._contratados
             if now - e.timestamp < 600
         ]
+
+    def _brake_set_reference(self, card: BuildingCard) -> None:
+        """Captura la vela 15m cerrada de referencia del candidato de freno.
+
+        La referencia es la última vela CERRADA del snapshot (candles[-2];
+        [-1] es la vela en formación) en el momento de la detección. Solo se
+        captura UNA vez; si el snapshot aún no tiene vela cerrada, se reintenta
+        en el próximo ciclo (no se pierde el candidato).
+        """
+        if card.brake_reference_ts is not None:
+            return
+        candles = list(getattr(card, "candles_15m_snap", []) or [])
+        if len(candles) < 2:
+            return
+        ref = candles[-2]
+        try:
+            _ts = float(ref.get("ts", 0) or 0)
+            _rng = float(ref.get("high", 0)) - float(ref.get("low", 0))
+        except (TypeError, ValueError):
+            return
+        if _ts <= 0 or _rng <= 0:
+            return
+        card.brake_reference_ts = _ts
+        card.brake_reference_range = _rng
+
+    def _brake_confirm(self, card: BuildingCard) -> tuple:
+        """Devuelve (ratio, witness_ts) si la vela M15 en formación ya cerró.
+
+        La vela cierra cuando candles[-2] (última cerrada) deja de ser la de
+        referencia: la nueva cerrada es esa vela. ratio = range(nueva cerrada)
+        / range(referencia). Sin vela nueva cerrada → (None, None).
+        """
+        if card.brake_reference_ts is None or card.brake_reference_range is None:
+            return None, None
+        candles = list(getattr(card, "candles_15m_snap", []) or [])
+        if len(candles) < 2:
+            return None, None
+        nueva = candles[-2]
+        try:
+            _ts = float(nueva.get("ts", 0) or 0)
+            _rng = float(nueva.get("high", 0)) - float(nueva.get("low", 0))
+        except (TypeError, ValueError):
+            return None, None
+        if _ts <= 0 or _ts == card.brake_reference_ts:
+            return None, None  # la vela aún no cerró (misma última cerrada)
+        if _rng <= 0:
+            return None, None
+        return _rng / card.brake_reference_range, _ts
+
+    def _brake_clear_reference(self, card: BuildingCard) -> None:
+        """Limpia la referencia del candidato de freno (rechazo o cancelación)."""
+        card.brake_reference_range = None
+        card.brake_reference_ts = None
+
+    def _measure_post_brake(self, card: BuildingCard) -> None:
+        """Mide el body/range de la primera vela M15 post-freno.
+
+        REINTENTABLE: si la vela post-freno aún no está en el snapshot (recién
+        se confirmó el freno), se reintenta en cada ciclo hasta lograrlo. Nunca
+        veta la operación: solo audita (EDIFICIO_POST_BRAKE_MIN_RATIO = 0.0).
+        """
+        try:
+            if card.post_brake_body_ratio is not None:
+                return  # ya medido
+            if card.brake_confirmed_at is None:
+                return
+            candles = list(getattr(card, "candles_15m_snap", []) or [])
+            if not candles:
+                return
+            post = [c for c in candles if c.get("ts", 0) > card.brake_confirmed_at]
+            if not post:
+                log.debug(
+                    "[EDIFICIO][EXPERIMENTO] %s: sin vela post-freno aún, reintentaré",
+                    getattr(card, "asset", "?"),
+                )
+                return
+            c = post[0]
+            o = float(c.get("open", 0))
+            h = float(c.get("high", 0))
+            l = float(c.get("low", 0))
+            c_ = float(c.get("close", 0))
+            rng = h - l
+            if rng <= 0:
+                return
+            body = abs(c_ - o) / rng
+            card.post_brake_body_ratio = float(body)
+            card.post_brake_would_pass = body >= EDIFICIO_POST_BRAKE_MIN_RATIO
+            card.post_brake_measured_at = float(c.get("ts", 0))
+            log.info(
+                "[EDIFICIO][EXPERIMENTO] %s post_brake_body=%.2f pass=%s",
+                card.asset,
+                body,
+                card.post_brake_would_pass,
+            )
+        except Exception as exc:
+            log.debug("[EDIFICIO][EXPERIMENTO] %s medicion post-freno fallo: %s", getattr(card, "asset", "?"), exc)
+
+    def _5m_gate_pass(self, candle: Optional[dict], direction: str) -> bool:
+        """Vela 5m válida para contratar en P3.
+
+        Pasa si el body es fuerte (body_pct >= EDIFICIO_BODY_FILTER_MIN_RATIO)
+        o si es un martillo M5 en la dirección del trade. Sin contexto 5m
+        (None) no bloquea: mantiene el comportamiento anterior.
+        """
+        if not isinstance(candle, dict):
+            return True
+        body_pct: Optional[float] = None
+        try:
+            body_pct = float(candle.get("body_pct") or 0.0)
+        except (TypeError, ValueError):
+            body_pct = None
+        if body_pct is None:
+            try:
+                body = float(candle.get("body") or 0.0)
+                rng = float(candle.get("total_range") or 0.0)
+                body_pct = body / rng if rng > 0 else 0.0
+            except (TypeError, ValueError):
+                body_pct = 0.0
+        if body_pct >= EDIFICIO_BODY_FILTER_MIN_RATIO:
+            return True
+        return _detect_hammer_pattern(candle, direction, EDIFICIO_HAMMER_MIN_TAIL_RATIO)
 
     def reset(self) -> None:
         """Resetea el edificio completo."""

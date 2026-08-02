@@ -26,6 +26,7 @@ from config import (
     EDIFICIO_MAX_ORDER_TRIES,
     EDIFICIO_ORDER_AMOUNT,
     EDIFICIO_ORDER_DURATION_SEC,
+    EDIFICIO_RULE_VERSION,
     MARTIN_RESOLVE_MAX_ATTEMPTS,
     MARTIN_RESOLVE_RETRY_SEC,
     MARTIN_RESOLVE_TIMEOUT_SEC,
@@ -88,6 +89,9 @@ async def execute_contratados(
         max_event_age_sec if max_event_age_sec is not None else EDIFICIO_MAX_EVENT_AGE_SEC
     )
 
+    # Gate de envío: activa el experimento completo en demo sin cambiar lógica.
+    from config import EDIFICIO_SEND_ORDERS_ENABLED  # noqa: E402
+
     # Máximo 1 trade concurrente: si hay operaciones abiertas, esperar al
     # próximo ciclo (el evento se conserva; caduca a los 10 min).
     trades_abiertos = getattr(bot, "trades", None)
@@ -107,6 +111,9 @@ async def execute_contratados(
     enviadas = 0
     now = time.time()
     for ev in events:
+        if not EDIFICIO_SEND_ORDERS_ENABLED:
+            edificio.requeue(ev)
+            continue
         # Gate de frescura: una señal que esperó demasiado ya no es válida.
         # Se descarta el evento (sin orden obsoleta) y el activo vuelve a P3.
         if now - ev.timestamp > max_event_age_sec:
@@ -293,6 +300,22 @@ def _record_sent_to_black_box(
         _stoch_full = getattr(card, "stoch_m15_full", None) or {}
         if not isinstance(_stoch_full, dict) or "k" not in _stoch_full:
             _stoch_full = {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)}
+        # |K-D| al momento de la evaluación (caja negra / análisis de separación).
+        _k = _stoch_full.get("k") if isinstance(_stoch_full, dict) else None
+        _d = _stoch_full.get("d") if isinstance(_stoch_full, dict) else None
+        if _k is None:
+            _k = getattr(card, "stoch_k", None)
+        if _d is None:
+            _d = getattr(card, "stoch_d", None)
+        _kd_distance = None
+        try:
+            if _k is not None and _d is not None:
+                _kd_distance = abs(float(_k) - float(_d))
+        except (TypeError, ValueError):
+            _kd_distance = None
+        # Cruce limpio (no sticky): la puerta que el edificio exige para contratar.
+        _cross_limpieza_ok = bool(getattr(card, "cross_ok", False) and not getattr(card, "cross_sticky", False))
+        _pattern_5m = getattr(card, "pattern_5m", None)
         _candles_15m = _candles_to_dicts(getattr(card, "candles_15m_snap", []) or [])
         _candles_5m = _candles_to_dicts(getattr(card, "candles_5m_snap", []) or [])
         bb.record_candidate(scan_id, "EDIFICIO", {
@@ -308,6 +331,14 @@ def _record_sent_to_black_box(
             "agent_tag": "BOT",
             "stoch_m15": _stoch_full,
             "extreme_read": int(getattr(card, "extreme_read", 0) or 0),
+            "kd_distance": _kd_distance,
+            "cross_limpieza_ok": int(_cross_limpieza_ok),
+            "pattern_5m": _pattern_5m,
+            "brake_verdict": getattr(card, "brake_verdict", None),
+            "brake_ratio": getattr(card, "brake_ratio", None),
+            "brake_ref_range": getattr(card, "brake_reference_range", None),
+            "brake_witness_ts": getattr(card, "brake_witness_ts", None),
+            "brake_rule_version": EDIFICIO_RULE_VERSION,
             "candles_15m": _candles_15m,
             "candles_5m": _candles_5m,
             "strategy_details": {
@@ -319,15 +350,21 @@ def _record_sent_to_black_box(
                 "extreme_ok": bool(getattr(card, "extreme_ok", False)),
                 "cross_ok": bool(getattr(card, "cross_ok", False)),
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
+                "cross_limpieza_ok": _cross_limpieza_ok,
+                "kd_distance": _kd_distance,
+                "pattern_5m": _pattern_5m,
                 "body_5m": getattr(card, "body_5m", None),
                 "piso_previa": getattr(card, "piso", None),
-                "rule_version": "2026-08-01b",
+                "rule_version": EDIFICIO_RULE_VERSION,
                 "filters_applied": [
                     "payout>=80",
                     "brake+extreme",
-                    "cross",
-                    "body_5m>0.03",
+                    "cross+separacion_K/D",
+                    "body_5m>0.03|martillo_M5",
                 ],
+                "post_brake_body_ratio": float(getattr(card, "post_brake_body_ratio", 0) or 0) if getattr(card, "post_brake_body_ratio", None) is not None else None,
+                "post_brake_would_pass": bool(getattr(card, "post_brake_would_pass", False)) if getattr(card, "post_brake_would_pass", None) is not None else None,
+                "post_brake_measured_at": float(getattr(card, "post_brake_measured_at", 0) or 0) if getattr(card, "post_brake_measured_at", None) is not None else None,
             },
         })
         log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)
@@ -373,12 +410,12 @@ def _record_failed_send_to_black_box(
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
                 "body_5m": getattr(card, "body_5m", None),
                 "piso_previa": getattr(card, "piso", None),
-                "rule_version": "2026-08-01b",
+                "rule_version": EDIFICIO_RULE_VERSION,
                 "filters_applied": [
                     "payout>=80",
                     "brake+extreme",
-                    "cross",
-                    "body_5m>0.03",
+                    "cross+separacion_K/D",
+                    "body_5m>0.03|martillo_M5",
                 ],
                 "send_error": broker_error,
             },
@@ -390,23 +427,22 @@ def _record_failed_send_to_black_box(
 # ── Trazabilidad: resolvedor por ticket (F2) ─────────────────────────────
 
 def _infer_loss_reason(edificio: Any, info: dict) -> str:
-    """Infiere la razon de perdida desde la card / strategy_details."""
+    """Infiere la razon de perdida desde la card del edificio."""
     asset = str(info.get("asset", ""))
     card = edificio.get_card(asset) if asset else None
     if card is None:
         return "UNRESOLVED"
-    details = getattr(card, "strategy_details", None) or {}
-    if not bool(details.get("payout", True)):
+    if float(getattr(card, "payout", 0) or 0) <= 0:
         return "NO_PAYOUT"
-    if not bool(details.get("brake_ok", False)):
+    if not getattr(card, "brake_ok", False):
         return "NO_BRAKE"
-    if not bool(details.get("extreme_ok", False)):
+    if not getattr(card, "extreme_ok", False):
         return "NO_EXTREME"
-    if not bool(details.get("cross_ok", False)):
+    if not getattr(card, "cross_ok", False):
         return "NO_CROSS"
-    if bool(details.get("cross_sticky", False)):
+    if getattr(card, "cross_sticky", False):
         return "STICKY_CROSS"
-    body_5m = details.get("body_5m")
+    body_5m = getattr(card, "body_5m", None)
     if isinstance(body_5m, (int, float)) and float(body_5m) <= 0.03:
         return "BODY_FILTER"
     return "UNRESOLVED"
@@ -488,6 +524,12 @@ async def resolve_contratados(
     if card is not None:
         card.order_status = "won" if outcome == "WIN" else "lost"
         card.reason = f"Resultado: {outcome} ({profit:+.2f})"
+
+    # Poblar loss_reason para LOSS (diagnóstico)
+    if outcome == "LOSS":
+        loss_reason = _infer_loss_reason(edificio, target_info)
+        _update_order_loss_reason(target_id, loss_reason)
+        log.info("[EDIFICIO] %s: loss_reason=%s", target_info.get("asset"), loss_reason)
 
     # Secuencia combinada cronológica (hub "Secuencia (W/L)").
     history = getattr(bot, "outcome_history", None)

@@ -353,6 +353,32 @@ class BlackBoxRecorder:
                 cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} TEXT")
             except sqlite3.OperationalError:
                 pass  # ya existe
+        # Experiment columns: post-brake body measurement
+        for _col in ("post_brake_body_ratio", "post_brake_would_pass", "post_brake_measured_at"):
+            try:
+                cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} REAL")
+            except sqlite3.OperationalError:
+                pass
+        # Edificio: separación K/D del cruce, cruce limpio y patrón de vela 5m.
+        # Permiten analizar el efecto de la separación |K-D| sobre el WR sin
+        # tener que parsear strategy_details.
+        _EXTRA_COLS = {
+            "kd_distance": "REAL",
+            "cross_limpieza_ok": "INTEGER",
+            "pattern_5m": "TEXT",
+            # Confirmación del freno con vela M15 cerrada (deuda #1): verdict
+            # CONFIRMED/REJECTED/CANCELLED, ratio medido y ts de la vela testigo.
+            "brake_verdict": "TEXT",
+            "brake_ratio": "REAL",
+            "brake_ref_range": "REAL",
+            "brake_witness_ts": "REAL",
+            "brake_rule_version": "TEXT",
+        }
+        for _col, _ctype in _EXTRA_COLS.items():
+            try:
+                cur.execute(f"ALTER TABLE scan_candidates ADD COLUMN {_col} {_ctype}")
+            except sqlite3.OperationalError:
+                pass
 
         # 'band' = nivel/precio de la zona fractal evaluada (REAL). Permite unir
         # EXACTO rechazo -> promocion via maturing_watchlist (make_key usa band).
@@ -371,18 +397,53 @@ class BlackBoxRecorder:
             except (TypeError, ValueError):
                 band = None
 
+        # Edificio: separación K/D, cruce limpio y patrón 5m (query directa).
+        kd_distance = data.get("kd_distance", None)
+        if kd_distance is not None:
+            try:
+                kd_distance = float(kd_distance)
+            except (TypeError, ValueError):
+                kd_distance = None
+        cross_limpieza_ok = int(data.get("cross_limpieza_ok", 0) or 0)
+        pattern_5m = data.get("pattern_5m", None)
+        # Confirmación del freno con vela M15 cerrada (deuda #1): verdict y
+        # detalles para auditar la nueva mecánica sin parsear strategy_details.
+        brake_verdict = data.get("brake_verdict", None)
+        brake_ratio = data.get("brake_ratio", None)
+        if brake_ratio is not None:
+            try:
+                brake_ratio = float(brake_ratio)
+            except (TypeError, ValueError):
+                brake_ratio = None
+        brake_ref_range = data.get("brake_ref_range", None)
+        if brake_ref_range is not None:
+            try:
+                brake_ref_range = float(brake_ref_range)
+            except (TypeError, ValueError):
+                brake_ref_range = None
+        brake_witness_ts = data.get("brake_witness_ts", None)
+        if brake_witness_ts is not None:
+            try:
+                brake_witness_ts = float(brake_witness_ts)
+            except (TypeError, ValueError):
+                brake_witness_ts = None
+        brake_rule_version = data.get("brake_rule_version", None)
+
         cur.execute('''
             INSERT INTO scan_candidates 
             (scan_id, ts, strategy, asset, direction, score, confidence, payout,
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
              candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-             extreme_read, agent_tag, band)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
+             brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
             candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-            extreme_read, agent_tag, band
+            extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
+            brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()

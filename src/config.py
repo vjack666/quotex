@@ -55,13 +55,32 @@ SCAN_LEAD_SEC = 0.0  # exactamente en el open de la vela 5m
 # ── Edificio de Contratación — ejecución de contratados ──────────────
 # Cuando un activo llega a CONTRATADO, el BOT envía la orden real al broker
 # (socket único, regla de oro). Estos flags definen cómo se envía.
-EDIFICIO_ACCOUNT_TYPE = "PRACTICE"      # PRACTICE | REAL
+EDIFICIO_ACCOUNT_TYPE = "PRACTICE"       # PRACTICE | REAL
+EDIFICIO_SEND_ORDERS_ENABLED = True      # demo completa: enviar órdenes demo
 EDIFICIO_ORDER_AMOUNT = 1.0             # monto por contrato (USD)
 EDIFICIO_ORDER_DURATION_SEC = DURATION_SEC  # vencimiento, alineado a DURATION_SEC
+
 EDIFICIO_MAX_ORDER_TRIES = 2            # reintentos por evento antes de descartar
 EDIFICIO_STICKY_THRESHOLD = 3.0         # |K-D| < esto ⇒ cruce pegajoso (filtro sticky)
 EDIFICIO_BODY_FILTER_MIN_RATIO = 0.03   # body/total_range mínimo en vela 5m para contratar en P3
-EDIFICIO_RULE_VERSION = "2026-08-01b"   # versión de reglas EDIFICIO para backtest/auditoría
+# Puerta P2→P3: un cruce limpio (|K-D| >= sticky) debe MANTENERSE esta cantidad
+# de segundos antes de promover a P3 (espera de separación). Análisis caja negra
+# 07-17..08-01 (Kaplan-Meier sobre 7.103 rachas): S(60)=94.4% / S(300)=82.6% /
+# S(900)=71.3% y el WR NO mejora con la persistencia → 900s descarta ~23pp de
+# cruces elegibles sin ganancia. 60s retiene 94.4% filtrando solo ticks aislados.
+EDIFICIO_SEPARATION_WAIT_SEC = 60       # ventana corta (300s es techo defendible)
+# Martillo M5 en P3: mecha principal (inferior en CALL / superior en PUT) debe
+# ser >= este múltiplo del body para validar la vela como martillo.
+EDIFICIO_HAMMER_MIN_TAIL_RATIO = 2.0
+# Confirmación del freno (deuda #1): el candidato (flag en vivo del scanner,
+# vela parcial vs cerrada) NO confirma por tiempo: espera el cierre de la
+# próxima vela M15 y exige que la vela CERRADA mantenga compresión
+# range(nueva cerrada) < este ratio × range(vela cerrada de referencia).
+EDIFICIO_BRAKE_CONFIRM_RATIO = 0.7
+EDIFICIO_RULE_VERSION = "2026-08-02e"   # versión de reglas EDIFICIO para backtest/auditoría
+# Espera post-freno matemática (body/range de la 1ª vela M15 post-freno).
+# 0.0 = medición activa sin veto; subir cuando el experimento defina el corte.
+EDIFICIO_POST_BRAKE_MIN_RATIO = 0.0
 # Ventana de validez del evento CONTRATADO: si pasa más de esto esperando
 # (p.ej. por un trade abierto), la señal ya no es fresca y NO se envía la
 # orden obsoleta — el activo vuelve a P3 para re-contratar con señal nueva.

@@ -14,8 +14,8 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from edificio_contratacion import CONTRATADO, ContratadoEvent, EdificioContratacion  # noqa: E402
-from edificio_executor import execute_contratados, is_sticky_cross  # noqa: E402
+from edificio_contratacion import CONTRATADO, PISO_2, ContratadoEvent, EdificioContratacion, BuildingCard  # noqa: E402
+from edificio_executor import execute_contratados, is_sticky_cross, _infer_loss_reason  # noqa: E402
 
 
 def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") -> EdificioContratacion:
@@ -29,11 +29,22 @@ def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") 
     ) == "stay"
     card = edificio.get_card(asset)
     assert card is not None
-    card.brake_at = _time.time() - 901
+    # Confirmación del freno por vela cerrada (deuda #1): campos explicitados.
+    card.brake_at = 1.0
+    card.brake_confirmed_at = 2.0
+    card.brake_verdict = "CONFIRMED"
+    card.brake_ratio = 0.50
+    card.brake_witness_ts = 2.0
+    card.piso = PISO_2
+    card.p2_at = 2.0
+    # Cruce limpio en P2: inicia la espera de separación (ventana 60s).
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
-        brake_ok=True, extreme_ok=True,
-    ) == "subio"
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "stay"
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.cross_separation_since = _time.time() - 901
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
@@ -228,3 +239,62 @@ def test_is_sticky_cross():
     assert is_sticky_cross(50.0, 54.0, threshold=3.0) is False
     assert is_sticky_cross(None, 50.0, threshold=3.0) is False
     assert is_sticky_cross(50.0, None, threshold=3.0) is False
+
+
+def test_infer_loss_reason_from_card():
+    edificio = SimpleNamespace(
+        get_card=lambda asset: BuildingCard(
+            asset="X",
+            direction="CALL",
+            payout=90,
+            payout_ok=True,
+            brake_ok=True,
+            extreme_ok=True,
+            cross_ok=True,
+            cross_sticky=False,
+        )
+    )
+    card = edificio.get_card("X")
+    card.body_5m = 0.05
+    assert _infer_loss_reason(edificio, {"asset": "X"}) == "UNRESOLVED"
+
+
+def test_infer_loss_reason_no_brake():
+    card = BuildingCard(asset="X", direction="CALL", payout=90)
+    card.brake_ok = False
+    edificio = SimpleNamespace(get_card=lambda asset: card)
+    assert _infer_loss_reason(edificio, {"asset": "X"}) == "NO_BRAKE"
+
+
+def test_infer_loss_reason_no_payout():
+    card = BuildingCard(asset="X", direction="CALL", payout=0)
+    edificio = SimpleNamespace(get_card=lambda asset: card)
+    assert _infer_loss_reason(edificio, {"asset": "X"}) == "NO_PAYOUT"
+
+
+def test_infer_loss_reason_sticky_cross():
+    card = BuildingCard(asset="X", direction="CALL", payout=90)
+    card.payout_ok = True
+    card.brake_ok = True
+    card.extreme_ok = True
+    card.cross_ok = True
+    card.cross_sticky = True
+    edificio = SimpleNamespace(get_card=lambda asset: card)
+    assert _infer_loss_reason(edificio, {"asset": "X"}) == "STICKY_CROSS"
+
+
+def test_infer_loss_reason_body_filter():
+    card = BuildingCard(asset="X", direction="CALL", payout=90)
+    card.payout_ok = True
+    card.brake_ok = True
+    card.extreme_ok = True
+    card.cross_ok = True
+    card.cross_sticky = False
+    card.body_5m = 0.02
+    edificio = SimpleNamespace(get_card=lambda asset: card)
+    assert _infer_loss_reason(edificio, {"asset": "X"}) == "BODY_FILTER"
+
+
+def test_infer_loss_reason_unresolved_when_card_missing():
+    edificio = SimpleNamespace(get_card=lambda asset: None)
+    assert _infer_loss_reason(edificio, {"asset": "Y"}) == "UNRESOLVED"

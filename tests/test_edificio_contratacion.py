@@ -20,25 +20,35 @@ from edificio_contratacion import (  # noqa: E402
 def _subir_a_p3(edificio: EdificioContratacion, asset: str = "A_otc", direction: str = "PUT") -> None:
     """Lleva un activo hasta P3 (sala de espera) pasando por P1 y P2.
 
-    Simula el paso de 1 vela M15 para confirmar el freno (deuda #1).
+    Usa la confirmación del freno por vela M15 cerrada y la ventana de
+    separación K/D limpia cumplida para la puerta P2→P3.
     """
-    import time as _time
     assert edificio.evaluate(asset=asset, direction=direction, payout=90, payout_ok=True) == "subio"
     # Primer scan: detecta freno, queda en P1 esperando confirmación.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True,
     ) == "stay"
-    # Simular paso de 1 vela M15 (901s).
     card = edificio.get_card(asset)
     assert card is not None
-    card.brake_at = _time.time() - 901
-    # Segundo scan: freno confirmado, sube a P2.
+    # Confirmación del freno por vela cerrada: simular vela M15 testigo.
+    card.brake_at = 1.0
+    card.brake_confirmed_at = 2.0
+    card.brake_verdict = "CONFIRMED"
+    card.brake_ratio = 0.50
+    card.brake_witness_ts = 2.0
+    card.piso = PISO_2
+    card.p2_at = 2.0
+    # Tercer scan: en P2, cruce limpio → inicia la espera de separación.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
-        brake_ok=True, extreme_ok=True,
-    ) == "subio"
-    # Tercer scan: en P2, con cruce limpio → P3.
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    ) == "stay"
+    # Simular la ventana de separación K/D cumplida (>> EDIFICIO_SEPARATION_WAIT_SEC).
+    card = edificio.get_card(asset)
+    assert card is not None
+    card.cross_separation_since = 1.0
+    # Cuarto scan: separación confirmada → P3.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
@@ -111,8 +121,10 @@ def test_p2_necesita_cruce_para_subir_a_p3():
     _subir_a_p3(edificio)
     edificio.pop_contratados()
     # Bajar manualmente a P2 simulando una card nueva que ya pasó P1+P2
+    # y cuya separación K/D ya está confirmada.
     edificio._cards["A_otc"].piso = PISO_2
     edificio._cards["A_otc"].p2_at = 1.0
+    edificio._cards["A_otc"].cross_separation_since = 1.0
     result = edificio.evaluate(
         asset="A_otc", direction="PUT", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
@@ -121,7 +133,7 @@ def test_p2_necesita_cruce_para_subir_a_p3():
     assert edificio.get_card("A_otc").piso == PISO_3
 
 
-def test_p2_rechaza_sticky_y_no_subir_a_p3():
+def test_p2_sin_cruce_limpio_no_subir_a_p3():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
     # Bajar manualmente a P2
@@ -129,10 +141,84 @@ def test_p2_rechaza_sticky_y_no_subir_a_p3():
     edificio._cards["A_otc"].p2_at = 1.0
     result = edificio.evaluate(
         asset="A_otc", direction="PUT", payout=90, payout_ok=True,
-        brake_ok=True, extreme_ok=True, cross_sticky=True,
+        brake_ok=True, extreme_ok=True, cross_ok=False,
     )
     assert result == "stay"
     assert edificio.get_card("A_otc").piso == PISO_2
+
+
+def test_p2_espera_separacion_y_se_reinicia():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Bajar manualmente a P2
+    edificio._cards["A_otc"].piso = PISO_2
+    edificio._cards["A_otc"].p2_at = 1.0
+    card = edificio.get_card("A_otc")
+    assert card.cross_separation_since is None
+    # Primer cruce limpio: inicia la ventana de separación, NO sube aún.
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=False,
+    ) == "stay"
+    assert card.cross_separation_since is not None
+    assert card.piso == PISO_2
+    # Si el cruce se pierde, la ventana se reinicia.
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=False, cross_sticky=False,
+    ) == "stay"
+    assert card.cross_separation_since is None
+    # Un cruce sticky también reinicia la ventana.
+    card.cross_separation_since = time.time() - 10
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=True,
+    ) == "stay"
+    assert card.cross_separation_since is None
+    # Cruce limpio de nuevo y ventana cumplida → P3.
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=False,
+    ) == "stay"
+    assert card.cross_separation_since is not None
+    card.cross_separation_since = time.time() - 901
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=False,
+    ) == "subio"
+    assert card.piso == PISO_3
+    assert card.cross_separation_since is None  # se limpia tras promover
+
+
+def test_p2_sticky_espera_en_p2_y_no_subir_a_p3():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Bajar manualmente a P2
+    edificio._cards["A_otc"].piso = PISO_2
+    edificio._cards["A_otc"].p2_at = 1.0
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=False, cross_sticky=True,
+    )
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_2
+    # Si luego se convierte en cross limpio, inicia la espera de separación.
+    result2 = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=False,
+    )
+    assert result2 == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_2
+    assert edificio.get_card("A_otc").cross_separation_since is not None
+    # Tras la ventana de separación cumplida, sube a P3 en el mismo scan.
+    card = edificio.get_card("A_otc")
+    card.cross_separation_since = time.time() - 901
+    result3 = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True, cross_sticky=False,
+    )
+    assert result3 == "subio"
+    assert edificio.get_card("A_otc").piso == PISO_3
 
 
 def test_expulsado_si_deja_de_pagar_en_piso_alto():
@@ -244,3 +330,107 @@ def test_p3_vela_grande_pasa_filtro_y_contrata():
     )
     assert result2 == "contratado"
     assert edificio.get_card("A_otc").piso == CONTRATADO
+
+
+def test_p3_martillo_m5_valida_entrada():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Martillo alcista: body chico (2% < filtro 3%) pero mecha inferior larga
+    # (0.0014 / body 0.0006 = 2.33x >= EDIFICIO_HAMMER_MIN_TAIL_RATIO 2.0).
+    vela_martillo = {
+        "name": "hammer",
+        "side": "bull",
+        "body_pct": 0.02,
+        "open": 1.0000,
+        "high": 1.0008,
+        "low": 0.9986,
+        "close": 1.0006,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_martillo,
+    )
+    assert result == "stay"
+    card = edificio.get_card("A_otc")
+    assert card.piso == PISO_3
+    assert card.entry_pending is True  # el martillo valida la entrada
+    assert card.pattern_5m == "hammer"
+
+
+def test_p3_martillo_en_direccion_opuesta_no_valida():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Martillo alcista (mecha inferior larga) NO vale para un PUT.
+    vela_martillo = {
+        "name": "hammer",
+        "side": "bull",
+        "body_pct": 0.02,
+        "open": 1.0000,
+        "high": 1.0008,
+        "low": 0.9986,
+        "close": 1.0006,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_martillo,
+    )
+    assert result == "stay"
+    card = edificio.get_card("A_otc")
+    assert card.entry_pending is False  # sin body fuerte ni martillo PUT
+
+
+def test_p3_vela_sin_body_ni_martillo_bloquea_entrada():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    card = edificio.get_card("A_otc")
+    assert card.entry_pending is False
+    # Vela con mechas largas en AMBOS lados: body_pct 0.0273 (< 3%) y ninguna
+    # mecha califica como martillo (la contraparte supera 0.3*rng).
+    vela_plana = {
+        "name": "spinning_top",
+        "side": "bull",
+        "body_pct": 0.0273,
+        "open": 1.0000,
+        "high": 1.0120,
+        "low": 0.9900,
+        "close": 1.0006,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_plana,
+    )
+    assert result == "stay"
+    assert card.piso == PISO_3
+    assert card.entry_pending is False  # no marcó entrada
+
+
+def test_post_brake_medicion_reintentable_cuando_llega_vela():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    card = edificio.get_card("A_otc")
+    assert card.brake_confirmed_at is not None
+    # En P2, sin vela post-freno en el snapshot → aún sin medición (reintenta).
+    assert card.post_brake_body_ratio is None
+    # Llega la vela M15 post-freno (ts > brake_confirmed_at): se mide en el
+    # próximo ciclo aunque la promoción a P3 aún esté esperando separación.
+    _now = time.time()
+    velas = [
+        {"ts": _now + 100, "open": 1.0, "high": 1.01, "low": 0.995, "close": 1.005},
+        {"ts": _now + 200, "open": 1.0, "high": 1.02, "low": 0.99, "close": 1.015},
+    ]
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        candles_15m=velas,
+    )
+    assert result == "stay"  # sigue en P3 (entrada marcada, esperando delay)
+    assert card.piso == PISO_3
+    assert card.post_brake_body_ratio is not None
+    assert card.post_brake_measured_at == _now + 100
+    assert card.post_brake_would_pass is not None

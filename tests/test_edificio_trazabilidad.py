@@ -20,7 +20,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from connection import interpret_broker_result  # noqa: E402
-from edificio_contratacion import EdificioContratacion  # noqa: E402
+from edificio_contratacion import EdificioContratacion, PISO_2  # noqa: E402
 from edificio_executor import execute_contratados, resolve_contratados  # noqa: E402
 
 
@@ -65,16 +65,27 @@ async def test_f1_envio_confirmado_registra_caja_negra_y_ticket(monkeypatch):
                              brake_ok=True, extreme_ok=True) == "stay"
     card = edificio.get_card("USDNGN_otc")
     assert card is not None
-    card.brake_at = _time.time() - 901
+    # Confirmación del freno por vela cerrada (deuda #1): veredicto explícito.
+    card.brake_at = 1.0
+    card.brake_confirmed_at = 2.0
+    card.brake_verdict = "CONFIRMED"
+    card.brake_ratio = 0.50
+    card.brake_witness_ts = 2.0
+    card.piso = PISO_2
+    card.p2_at = 2.0
+    # Cruce limpio en P2 → espera de separación K/D.
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
-                             brake_ok=True, extreme_ok=True) == "subio"
+                             brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
+    card = edificio.get_card("USDNGN_otc")
+    assert card is not None
+    card.cross_separation_since = 1.0
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "subio"
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
     card = edificio.get_card("USDNGN_otc")
     assert card is not None
-    card.pending_since = _time.time() - 301
+    card.pending_since = 1.0
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "contratado"
 
@@ -114,7 +125,6 @@ async def test_f1_envio_confirmado_registra_caja_negra_y_ticket(monkeypatch):
     assert info["resolved"] is False
     assert info["amount"] == 1.0
 
-
 @pytest.mark.asyncio
 async def test_f1_fallo_caja_negra_no_rompe_envio(monkeypatch):
     import time as _time
@@ -124,16 +134,27 @@ async def test_f1_fallo_caja_negra_no_rompe_envio(monkeypatch):
                              brake_ok=True, extreme_ok=True) == "stay"
     card = edificio.get_card("XAGUSD_otc")
     assert card is not None
-    card.brake_at = _time.time() - 901
+    # Confirmación del freno por vela cerrada (deuda #1): veredicto explícito.
+    card.brake_at = 1.0
+    card.brake_confirmed_at = 2.0
+    card.brake_verdict = "CONFIRMED"
+    card.brake_ratio = 0.50
+    card.brake_witness_ts = 2.0
+    card.piso = PISO_2
+    card.p2_at = 2.0
+    # Cruce limpio en P2 → espera de separación K/D.
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
-                             brake_ok=True, extreme_ok=True) == "subio"
+                             brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
+    card = edificio.get_card("XAGUSD_otc")
+    assert card is not None
+    card.cross_separation_since = 1.0
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "subio"
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
     card = edificio.get_card("XAGUSD_otc")
     assert card is not None
-    card.pending_since = _time.time() - 301
+    card.pending_since = 1.0
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "contratado"
 
