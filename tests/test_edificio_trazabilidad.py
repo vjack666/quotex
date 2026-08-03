@@ -54,6 +54,15 @@ def _bot(edificio, *, client, history=None, massaniello=None):
     )
 
 
+@pytest.fixture(autouse=True)
+def _aislar_csv_auditoria(tmp_path, monkeypatch):
+    """Los tests de resolución no deben escribir en el CSV de producción."""
+    monkeypatch.setattr(
+        "edificio_executor._AUDIT_CSV_PATH",
+        tmp_path / "edificio_order_audit.csv",
+    )
+
+
 # ── F1: registro del envío ───────────────────────────────────────────────
 
 @pytest.mark.asyncio

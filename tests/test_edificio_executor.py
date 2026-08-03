@@ -15,7 +15,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from edificio_contratacion import CONTRATADO, PISO_2, ContratadoEvent, EdificioContratacion, BuildingCard  # noqa: E402
-from edificio_executor import execute_contratados, is_sticky_cross, _infer_loss_reason  # noqa: E402
+from edificio_executor import execute_contratados, is_sticky_cross, _infer_loss_reason, _append_order_audit  # noqa: E402
 
 
 def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") -> EdificioContratacion:
@@ -298,3 +298,39 @@ def test_infer_loss_reason_body_filter():
 def test_infer_loss_reason_unresolved_when_card_missing():
     edificio = SimpleNamespace(get_card=lambda asset: None)
     assert _infer_loss_reason(edificio, {"asset": "Y"}) == "UNRESOLVED"
+
+
+def test_append_order_audit_escribe_loss_reason_en_fila_loss(tmp_path, monkeypatch):
+    """T1: el CSV de auditoría escribe loss_reason real solo en órdenes LOSS."""
+    import csv as _csv
+
+    from edificio_executor import _AUDIT_CSV_PATH
+
+    csv_path = tmp_path / "edificio_order_audit.csv"
+    monkeypatch.setattr("edificio_executor._AUDIT_CSV_PATH", csv_path)
+
+    # Card nueva sin freno -> _infer_loss_reason devuelve "NO_BRAKE".
+    card = BuildingCard(asset="X", direction="CALL", payout=90)
+    edificio = SimpleNamespace(get_card=lambda asset: card)
+
+    _append_order_audit(
+        edificio,
+        {"asset": "X", "sent_at": 1.0, "amount": 1.0, "duration_sec": 900,
+         "order_id": "O-1", "order_ref": 42},
+        "LOSS",
+        -1.0,
+    )
+    _append_order_audit(
+        edificio,
+        {"asset": "X", "sent_at": 1.0, "amount": 1.0, "duration_sec": 900,
+         "order_id": "O-2", "order_ref": 43},
+        "WIN",
+        0.9,
+    )
+
+    rows = list(_csv.DictReader(csv_path.open(encoding="utf-8")))
+    assert len(rows) == 2
+    loss_row = next(r for r in rows if r["outcome"] == "LOSS")
+    win_row = next(r for r in rows if r["outcome"] == "WIN")
+    assert loss_row["loss_reason"] == "NO_BRAKE"
+    assert win_row["loss_reason"] == ""

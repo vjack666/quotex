@@ -13,11 +13,13 @@ Flujo:
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 import sqlite3
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, List, Optional
 
 from config import (
@@ -146,6 +148,8 @@ def _expire_event(edificio: Any, ev: ContratadoEvent, *, age_sec: float) -> None
         card.piso = PISO_3
         card.order_status = ""
         card.reason = f"Señal expirada ({age_sec:.0f}s esperando) — devuelto a P3"
+        card.entry_pending = False
+        card.pending_since = None
     log.info(
         "[EDIFICIO] %s: señal expirada (%.0fs > ventana) — no se envía, vuelve a P3",
         ev.asset, age_sec,
@@ -221,6 +225,12 @@ async def _send_one(
             "duration_sec": int(duration),
             "resolved": False,
             "attempts": 0,
+            "brake_ts": getattr(card, "brake_witness_ts", None),
+            "piso_previa": getattr(card, "piso", None),
+            "brake_confirmed_at": getattr(card, "brake_confirmed_at", None),
+            "p3_at": getattr(card, "p3_at", None),
+            "contract_at": getattr(card, "contratado_at", None),
+            "cross_separation_since": getattr(card, "cross_separation_since", None),
         })
         return True, {"order_id": order_id, "order_ref": order_ref}
 
@@ -468,6 +478,91 @@ def _update_order_loss_reason(order_id: str, loss_reason: str) -> None:
             pass
 
 
+_AUDIT_CSV_PATH = Path(__file__).resolve().parents[1] / "data" / "exports" / "edificio_order_audit.csv"
+_AUDIT_CSV_HEADER = [
+    "sent_at","asset","direction","amount","duration_sec","order_id","order_ref",
+    "resolved_at","outcome","profit","delta_sec","loss_reason",
+    "brake_ts","brake_confirmed_at","p3_at","contract_at","piso_previa"
+]
+
+
+def _append_order_audit(edificio: Any, info: dict, outcome: str, profit: float) -> None:
+    """Append a row to the Edificio order audit CSV (best effort)."""
+    sent_at = info.get("sent_at")
+    resolved_at = time.time()
+    delta_sec = None
+    try:
+        if sent_at is not None:
+            delta_sec = round(float(resolved_at) - float(sent_at), 3)
+    except Exception:
+        delta_sec = None
+    loss_reason = ""
+    try:
+        if outcome == "LOSS":
+            loss_reason = _infer_loss_reason(edificio, info)
+    except Exception:
+        loss_reason = ""
+    row = [
+        sent_at,
+        info.get("asset"),
+        info.get("direction"),
+        info.get("amount"),
+        info.get("duration_sec"),
+        info.get("order_id"),
+        info.get("order_ref"),
+        resolved_at,
+        outcome,
+        profit,
+        delta_sec,
+        loss_reason,
+        info.get("brake_ts"),
+        info.get("brake_confirmed_at"),
+        info.get("p3_at"),
+        info.get("contract_at"),
+        info.get("piso_previa"),
+        info.get("cross_separation_since"),
+    ]
+    try:
+        _AUDIT_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        write_header = not _AUDIT_CSV_PATH.exists() or _AUDIT_CSV_PATH.stat().st_size == 0
+        with _AUDIT_CSV_PATH.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if write_header:
+                w.writerow(_AUDIT_CSV_HEADER)
+            w.writerow(row)
+    except Exception:
+        pass
+
+
+async def _record_close_context(
+    client: Any,
+    order_id: str,
+    info: dict,
+) -> None:
+    """Best-effort close-context capture moved off the resolver path."""
+    try:
+        from candle_patterns import last_closed_shape
+        from connection import fetch_candles
+        from stochastic_m15 import compute_stoch
+
+        _asset = str(info.get("asset", ""))
+        _c15 = await fetch_candles(client, _asset, 900, 16, timeout_sec=10) if _asset else []
+        _c5 = await fetch_candles(client, _asset, 300, 16, timeout_sec=10) if _asset else []
+        _close_ctx = {
+            "candle_15m": last_closed_shape(_c15) if _c15 else None,
+            "candle_5m": last_closed_shape(_c5) if _c5 else None,
+            "stoch_m15_close": compute_stoch(_c15) if _c15 else None,
+            "exit_price": float(_c15[-1].close) if _c15 else None,
+        }
+        get_black_box().record_order_close_context(order_id, **_close_ctx)
+    except Exception as exc:
+        log.warning(
+            "[EDIFICIO] %s: no se pudo registrar cierre background (no bloquea): %s",
+            order_id,
+            exc,
+        )
+
+
 async def resolve_contratados(
     bot: Any,
     *,
@@ -550,6 +645,12 @@ async def resolve_contratados(
                 mgr.register_loss(amount)
     except Exception as exc:
         log.warning("[EDIFICIO] no se pudo registrar %s en sesión Massaniello (no bloquea): %s", outcome, exc)
+
+    # CSV auditoría órdenes (no bloquea; fallback silencioso si falla)
+    try:
+        _append_order_audit(edificio, target_info, outcome, profit)
+    except Exception:
+        pass
 
     log.info(
         "[EDIFICIO] %s: resultado %s %+.2f (ticket=%s)",
@@ -656,23 +757,12 @@ async def _resolve_one(
                     exc,
                 )
             try:
-                from candle_patterns import last_closed_shape
-                from connection import fetch_candles
-                from stochastic_m15 import compute_stoch
-
-                _asset = str(info.get("asset", ""))
-                _c15 = await fetch_candles(client, _asset, 900, 16, timeout_sec=10) if _asset else []
-                _c5 = await fetch_candles(client, _asset, 300, 16, timeout_sec=10) if _asset else []
-                _close_ctx = {
-                    "candle_15m": last_closed_shape(_c15) if _c15 else None,
-                    "candle_5m": last_closed_shape(_c5) if _c5 else None,
-                    "stoch_m15_close": compute_stoch(_c15) if _c15 else None,
-                    "exit_price": float(_c15[-1].close) if _c15 else None,
-                }
-                get_black_box().record_order_close_context(order_id, **_close_ctx)
+                asyncio.get_running_loop().create_task(
+                    _record_close_context(client, order_id, info)
+                )
             except Exception as exc:
                 log.warning(
-                    "[EDIFICIO] %s: no se pudo registrar cierre (no bloquea): %s",
+                    "[EDIFICIO] %s: no se pudo lanzar registro de cierre (no bloquea): %s",
                     order_id,
                     exc,
                 )
