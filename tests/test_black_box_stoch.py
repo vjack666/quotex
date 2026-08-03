@@ -13,18 +13,14 @@ from black_box_recorder import get_black_box, BLACK_BOX_DB
 
 
 @pytest.fixture
-def bb():
-    # Usa la DB real del día (init la crea con migración de columnas nuevas).
-    recorder = get_black_box()
+def bb(tmp_path, monkeypatch):
+    # Aísla la DB de caja negra para no tocar la del día.
+    import black_box_recorder as bbr
+
+    monkeypatch.setattr(bbr, "DB_DIR", tmp_path)
+    monkeypatch.setattr(bbr, "BLACK_BOX_DB", tmp_path / "black_box_strat_test.db")
+    recorder = bbr.BlackBoxRecorder()
     yield recorder
-    # no borramos la DB del día; solo limpiamos el candidato insertado
-    try:
-        con = sqlite3.connect(recorder.db_path)
-        con.execute("DELETE FROM scan_candidates WHERE asset = 'TESTSTOCH_otc'")
-        con.commit()
-        con.close()
-    except Exception:
-        pass
 
 
 def test_record_candidate_stores_stoch_m5_and_funnel(bb):
@@ -132,3 +128,40 @@ def test_record_candidate_agent_tag_distinguishes_who(bb):
     con.close()
     assert res[0] == "WIN"
     assert res[1] == "WATCHDOG"
+
+
+def test_record_candidate_persists_direction_source(tmp_path, monkeypatch):
+    """Persistencia de la telemetría Fase A: origen de la dirección M1/M15/''.
+
+    Usamos una DB aislada porque la DB de producción no se contamina con fixtures.
+    """
+    db = tmp_path / "test_direction_source.db"
+    monkeypatch.setattr(
+        "black_box_recorder.BLACK_BOX_DB",
+        db,
+    )
+    bb = __import__("black_box_recorder").BlackBoxRecorder()
+    for source in ("M1", "M15", ""):
+        bb.record_candidate(
+            1,
+            "EDIFICIO",
+            {
+                "asset": "TESTDS_otc",
+                "direction": "CALL" if source != "PUT" else "PUT",
+                "score": 60.0,
+                "payout": 80,
+                "decision": "ACCEPTED",
+                "decision_reason": f"TEST:{source}",
+                "stoch_m15": {"k": 40.0, "d": 42.0},
+                "direction_source": source if source else None,
+            },
+        )
+    con = sqlite3.connect(bb.db_path)
+    rows = con.execute(
+        "SELECT id, direction_source FROM scan_candidates WHERE asset = 'TESTDS_otc' ORDER BY id ASC"
+    ).fetchall()
+    con.close()
+    assert len(rows) == 3
+    assert rows[0][1] == "M1"
+    assert rows[1][1] == "M15"
+    assert rows[2][1] is None

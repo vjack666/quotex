@@ -1472,6 +1472,7 @@ class AssetScanner:
                 _d = float(_stoch.get("d", 50.0))
                 _k_prev = float(_stoch.get("k_prev", _k))
                 _d_prev = float(_stoch.get("d_prev", _d))
+                _direction_source = ""
                 _direction = ""
                 if len(_candles_1m) >= 17:
                     try:
@@ -1482,8 +1483,10 @@ class AssetScanner:
                             _k_3ago = float(_k_vals[-4])
                             if _k_now > _k_3ago and _k < 80.0:
                                 _direction = "CALL"
+                                _direction_source = "M1"
                             elif _k_now < _k_3ago and _k > 20.0:
                                 _direction = "PUT"
+                                _direction_source = "M1"
                     except Exception:
                         pass
                 if not _direction:
@@ -1495,6 +1498,8 @@ class AssetScanner:
                         _direction = "CALL"
                     elif _k < _d and _k > 50:
                         _direction = "PUT"
+                    if _direction:
+                        _direction_source = "M15"
                 _cross_up = _k_prev < _d_prev and _k >= _d
                 _cross_down = _k_prev > _d_prev and _k <= _d
                 _cross_ok = (_cross_up and _direction == "CALL") or (_cross_down and _direction == "PUT")
@@ -1514,6 +1519,7 @@ class AssetScanner:
                 _candle_5m_prev = last_closed_shape(_candles_5m) if _candles_5m else None
                 flags_by_asset[_sym] = {
                     "direction": _direction,
+                    "direction_source": _direction_source,
                     "brake_ok": bool(_brake_ok),
                     "extreme_ok": bool(_extreme_ok),
                     "cross_ok": bool(_cross_ok),
