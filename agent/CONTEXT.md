@@ -25,7 +25,17 @@
 
 ---
 
-## 2. Strategy A — Consolidation (5m)
+## ⭐ Estado de estrategias (2026-08-03)
+
+- **STRAT-A**: primer paso hacia el Edificio — etapa **conclusa**, misión cumplida.
+- **STRAT-F y todas las demás estrategias** (STRAT-B, SMC, etc.): **archivadas**, etapa concluida.
+- **Edificio de Contratación** (`src/edificio_contratacion.py`): **ÚNICA estrategia activa** y **FINAL para operar en REAL**.
+- NO reactivar estrategias archivadas sin pedido explícito del usuario.
+- Las secciones 2-7 a continuación describen módulos de la era STRAT-F: se conservan como referencia técnica, NO son la estrategia en uso.
+
+---
+
+## 2. Strategy A — Consolidation (5m) (ARCHIVADA — referencia)
 
 **Module:** `strat_a.py`
 

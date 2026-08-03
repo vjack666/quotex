@@ -6,6 +6,15 @@
 
 ---
 
+## ⭐ Estado de estrategias (2026-08-03) — INFORMACIÓN DE ARRANQUE
+
+- **STRAT-A**: fue el primer paso hacia el Edificio de Contratación — etapa **conclusa**, misión cumplida.
+- **STRAT-F y todas las demás estrategias**: archivadas / etapa concluida.
+- **Edificio de Contratación** (`src/edificio_contratacion.py`): es la **ÚNICA estrategia activa** y la **estrategia FINAL para operar en REAL**.
+- No reactivar ninguna estrategia archivada sin pedido explícito del usuario.
+
+---
+
 ## 1. Antes de empezar (obligatorio)
 
 **Si el usuario escribe solo `start`:** sigue `agent/START.md` (workflow autónomo completo). No modifiques código hasta recibir instrucciones. Como primera acción del flujo `start`, cargar `C:\Users\v_jac\.hermes.md` y `docs/engineering.md`: esos archivos definen la identidad y el método por defecto para toda la sesión.

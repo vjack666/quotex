@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-> Last updated: 2026-07-20 (math filters + contextual scoring)
+> Last updated: 2026-08-03 (estrategias archivadas; Edificio = única activa)
 > Full detail: `docs/CHANGELOG_2026-07-16.md`
 
 ---
@@ -13,9 +13,22 @@
 | Type | HFT binary options bot for Quotex |
 | Language | Python 3.10+ (running 3.13/3.14) |
 | Risk manager | **Massaniello** (ops / ITM / timeout / PRACTICE) |
-| Strategy focus | **STRAT-F** live + **stoch M15 help hard** |
+| Strategy focus | **Edificio de Contratación** (ÚNICA activa — final, para REAL) |
 | Roadmap | #1–#7 done; #9–#10 done; #11 done; #15 done; #16 done; #17 watchdog_bot done; #8 schedule_auto paused |
 | Data collection | **24/7** — cycle end resets Massaniello only; `DAILY_LOSS_GUARD_ENABLED=False` en disco (sin freno diario) |
+
+---
+
+## Estrategias archivadas (etapa concluida — NO reactivar sin pedido del usuario)
+
+| Estrategia | Estado | Nota |
+|------------|--------|------|
+| STRAT-A (consolidación 5m) | ✅ conclusa | Fue el primer paso hacia el Edificio — misión cumplida |
+| STRAT-F (fractal + stoch M15) | ✅ archivada | Etapa concluida |
+| STRAT-B, SMC y demás | ✅ archivadas | Etapa concluida |
+
+> El **Edificio de Contratación** (`src/edificio_contratacion.py`) es la estrategia
+> FINAL para operar en real. Todo el trabajo actual es sobre él.
 
 ---
 

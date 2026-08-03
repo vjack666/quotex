@@ -1,8 +1,18 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> Last session: 2026-07-20 — STRAT-F math filters + contextual scoring
+> Last session: 2026-08-03 — auditoría Edificio de Contratación cerrada (47/47, 4 commits)
 > **Changelog:** `docs/CHANGELOG_2026-07-16.md`
+
+---
+
+## ⭐ Estado de estrategias (DEUDA SALDADA — leer antes de cualquier otra cosa)
+
+- **STRAT-A**: primer paso hacia el Edificio — etapa **conclusa**, misión cumplida.
+- **STRAT-F y todas las demás estrategias**: **archivadas**, etapa concluida.
+- **Edificio de Contratación** (`src/edificio_contratacion.py`): **ÚNICA estrategia activa** y **FINAL para operar en REAL**.
+- NO reactivar estrategias archivadas sin pedido explícito del usuario.
+- Todo lo que sigue en este documento describe la era STRAT-F: es historia, no estado actual.
 
 ---
 
