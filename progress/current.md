@@ -21,12 +21,13 @@ Auditoría del Edificio de Contratación (plan ideal vs código) — CERRADA.
 
 ## Next
 
-1. **T2 — dirección M1 vs M15** (read-only): reporte cuantitativo de caja negra — ¿cuántas señales usan dirección M1 vs fallback M15? ¿WR difiere? Recomendación: alinear a M15 como juez o mantener con datos. Esperar aprobación del usuario antes de tocar código.
-2. **T3 — cierre del experimento post-freno** (read-only): contar muestra `post_brake_body_ratio` por bucket y WR; fijar criterio de corte (n>=30/bucket) y fecha. Si `0.0` es óptimo → cerrar como documentación; si hay sesgo → code-change con aprobación.
+1. **T2 — dirección M1 vs M15** (EN CURSO, nueva tanda): instrumentar `direction_source` en caja negra (Fase A, telemetría sin tocar la decisión), juntar muestra en demo, y con los datos decidir si M15 es el juez (plan) o si M1 se mantiene. Lista: `progress/todos_direction_source_2026-08-03.md`.
+2. **T3 — cierre del experimento post-freno** (referenciado, después de T2): contar muestra `post_brake_body_ratio` por bucket y WR; fijar criterio de corte (n>=30/bucket) y fecha. Si `0.0` es óptimo → cerrar como documentación; si hay sesgo → code-change con aprobación.
 3. Esperar feedback del usuario sobre comportamiento del Edificio en demo.
 
 ## Referencia
 
-- Lista maestra: `progress/todos_auditoria_edificio_2026-08-03.md` (T2/T3 pendientes, read-only).
+- Nueva tanda activa: `progress/todos_direction_source_2026-08-03.md` (T2, Fase A telemetría).
+- Tanda cerrada (archivada): `progress/plan_completado/todos_auditoria_edificio_2026-08-03.md`.
 - Plan ideal: `docs/EDIFICIO_CONTRATACION.md`.
 - Auditorías: `docs/EDIFICIO_AUDIT_FLOW_2026-08-01.md`, `docs/EDIFICIO_RULES_AUDIT_2026-08-01.md`.

@@ -1,5 +1,12 @@
 # TODOS — Auditoría del Edificio de Contratación (2026-08-03)
 
+> ⛔ **PLAN COMPLETADO — 2026-08-03.** Esta tanda quedó CERRADA y verificada
+> (suite Edificio 47/47, init.ps1 sin crecimiento de los 32 fallos preexistentes).
+> Commits: `3c1c473`, `ac0b5e8`, `127d6f1`, `ddd36c4`, `e15c1c4`.
+> Los ítems read-only que quedaron (T2 dirección M1/M15, T3 post-brake) se
+> trasladaron a la nueva tanda: **`progress/todos_direction_source_2026-08-03.md`**.
+> Archivo histórico — NO re-ejecutar nada de acá sin pedido explícito.
+
 > Lista de trabajo preparada por la ventana principal tras la auditoría
 > **plan ideal (`docs/EDIFICIO_CONTRATACION.md`) vs código real**.
 > Destinada a **Hermes (otra ventana)**: configúrala y ejecútala.
