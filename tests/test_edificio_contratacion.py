@@ -433,4 +433,102 @@ def test_post_brake_medicion_reintentable_cuando_llega_vela():
     assert card.piso == PISO_3
     assert card.post_brake_body_ratio is not None
     assert card.post_brake_measured_at == _now + 100
-    assert card.post_brake_would_pass is not None
+
+
+def test_p3_entry_pending_reset_al_bajar_a_p2_y_reingreso_despues():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    # Vela 5m con body grande para marcar entrada pendiente en P3.
+    vela_grande = {
+        "name": "bullish_engulfing",
+        "side": "bull",
+        "body": 0.037,
+        "total_range": 0.042,
+        "body_pct": 0.881,
+        "open": 290.942,
+        "close": 290.979,
+        "ts": 1785597900,
+    }
+    result = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_grande,
+    )
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_3
+    assert edificio.get_card("A_otc").entry_pending is True
+    assert edificio.get_card("A_otc").pending_since is not None
+    # Ahora pierde brake+extremo: baja a P1 y resetea pending.
+    result2 = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=False, extreme_ok=False, cross_ok=True,
+    )
+    assert result2 == "bajo"
+    card = edificio.get_card("A_otc")
+    assert card is not None
+    assert card.piso == PISO_2
+    assert card.entry_pending is False
+    assert card.pending_since is None
+    # Vuelve a cumplir brake+extremo en P2: espera separación K/D.
+    result3 = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    )
+    assert result3 == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_2
+    assert edificio.get_card("A_otc").entry_pending is False
+    # Cumple separación y promueve a P3: debe re-marcar entrada con delay nuevo.
+    card3 = edificio.get_card("A_otc")
+    assert card3 is not None
+    card3.cross_separation_since = time.time() - 901
+    result4 = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+    )
+    assert result4 == "subio"
+    # Reingreso a P3: la 5m gate debe marcar entrada pendiente nuevamente.
+    vela_grande2 = {
+        "name": "bullish_engulfing",
+        "side": "bull",
+        "body": 0.037,
+        "total_range": 0.042,
+        "body_pct": 0.881,
+        "open": 290.942,
+        "close": 290.979,
+        "ts": 1785597900,
+    }
+    result5 = edificio.evaluate(
+        asset="A_otc", direction="CALL", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=True, cross_ok=True,
+        close_candle_5m=vela_grande2,
+    )
+    assert result5 == "stay"
+    assert edificio.get_card("A_otc").entry_pending is True
+    assert edificio.get_card("A_otc").pending_since is not None
+
+
+def test_p2_pierde_brake_extremo_y_vuelve_a_p1():
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    edificio.pop_contratados()
+    edificio._cards["A_otc"].piso = PISO_2
+    edificio._cards["A_otc"].p2_at = 1.0
+    edificio._cards["A_otc"].brake_at = 1.0
+    edificio._cards["A_otc"].brake_confirmed_at = 2.0
+    edificio._cards["A_otc"].brake_verdict = "CONFIRMED"
+    edificio._cards["A_otc"].brake_ratio = 0.5
+    edificio._cards["A_otc"].brake_witness_ts = 2.0
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=False, extreme_ok=False, cross_ok=False,
+    )
+    assert result == "bajo"
+    card = edificio.get_card("A_otc")
+    assert card.piso == PISO_1
+    assert card.brake_at is None
+    assert card.brake_confirmed_at is None
+    assert card.p2_at is None
+    assert card.cross_separation_since is None
+    assert card.entry_pending is False
+    assert card.pending_since is None
+

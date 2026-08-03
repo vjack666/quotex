@@ -28,6 +28,7 @@ from config import (
     COOLDOWN_BETWEEN_ENTRIES,
     DRY_RUN_VERBOSE,
     DURATION_SEC,
+    EDIFICIO_BRAKE_CONFIRM_RATIO,
     H1_CANDLES_LOOKBACK,
     H1_FETCH_TIMEOUT_SEC,
     H1_TF_SEC,
@@ -1507,7 +1508,7 @@ class AssetScanner:
                     float(_candles_15m[-1].high - _candles_15m[-1].low)
                     if _candles_15m else 0.0
                 )
-                _brake_ok = _prev_range > 0 and _last_range < _prev_range * 0.7
+                _brake_ok = _prev_range > 0 and _last_range < _prev_range * EDIFICIO_BRAKE_CONFIRM_RATIO
                 # Auditoría: forma de vela de la última vela CERRADA (5m y 15m).
                 _candle_15m_prev = last_closed_shape(_candles_15m) if _candles_15m else None
                 _candle_5m_prev = last_closed_shape(_candles_5m) if _candles_5m else None

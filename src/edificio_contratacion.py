@@ -431,7 +431,18 @@ class EdificioContratacion:
                 card.reason = f"P2 OK — esperando cruce K/D ({payout}%)"
                 return "stay"
             card.reason = f"P2 pendiente — brake+extremo ({payout}%)"
-            return "stay"
+            card.piso = PISO_1
+            card.cross_separation_since = None
+            card.entry_pending = False
+            card.pending_since = None
+            card.brake_at = None
+            card.brake_confirmed_at = None
+            card.brake_verdict = None
+            card.brake_ratio = None
+            card.brake_witness_ts = None
+            card.p2_at = None
+            log.info("[EDIFICIO] %s: baja a P1 (perdió brake+extremo)", asset)
+            return "bajo"
 
         if card.piso == PISO_3:
             if not payout_ok:
@@ -440,11 +451,15 @@ class EdificioContratacion:
                 card.piso = PISO_2
                 card.reason = f"Baja a P2 — freno perdido ({payout}%)"
                 log.info("[EDIFICIO] %s: baja a P2 (brake perdido)", asset)
+                card.entry_pending = False
+                card.pending_since = None
                 return "bajo"
             if not extreme_ok:
                 card.piso = PISO_2
                 card.reason = f"Baja a P2 — extremo perdido ({payout}%)"
                 log.info("[EDIFICIO] %s: baja a P2 (extremo perdido)", asset)
+                card.entry_pending = False
+                card.pending_since = None
                 return "bajo"
             if not cross_ok:
                 card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
