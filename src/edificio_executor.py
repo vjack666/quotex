@@ -347,6 +347,7 @@ def _record_sent_to_black_box(
             "brake_ref_range": getattr(card, "brake_reference_range", None),
             "brake_witness_ts": getattr(card, "brake_witness_ts", None),
             "brake_rule_version": EDIFICIO_RULE_VERSION,
+            "direction_source": getattr(card, "direction_source", None),
             "candles_15m": _candles_15m,
             "candles_5m": _candles_5m,
             "strategy_details": {
