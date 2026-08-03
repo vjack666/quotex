@@ -355,12 +355,9 @@ Scan cada 60s:
 ---
 
 ## 8. Próximos pasos recomendados
-
-1. **Implementar espera post-freno** (Deuda #1): `MIN_BRAKE_WAIT = 1 vela M15 cerrada`.
-2. **Eliminar cross_sticky** como entrada (Deuda #2): cambiar a `cross_ok=True` y `cross_sticky=False`.
-3. **Poblar loss_reason** (Deuda #4): agregar en `resolve_one()` según fase de fallo.
-4. **Implementar delay de ejecución** (Deuda #5): entrada al inicio de próxima vela 15m.
-5. **Validar con black box** después de cada cambio: medir WR por condición.
+1. **Entregar T2/T3 (evidencia read-only):** análisis de dirección M1 y post-brake en ventana real (sin código nuevo sin aprobación).
+2. Definir si se ajusta `EDIFICIO_BRAKE_CONFIRM_RATIO` o se mantiene `0.7` a partir de la evidencia.
+3. **Validar en backtest** cualquier cambio posterior (WR por condición + Massaniello).
 
 ---
 

@@ -56,7 +56,15 @@ resueltos) no muestran correlación entre separación K/D y win rate.
 
 ## 5. Qué no tocar sin autorización
 
-- `src/edificio_contratacion.py` fuera de P3
-- `src/edificio_executor.py` fuera de `_record_sent_to_black_box`
-- `EDIFICIO_STICKY_THRESHOLD` (sin evidencia cuantitativa)
+- `src/edificio_contratacion.py` fuera de P3 sin autorización
+- `src/edificio_executor.py` fuera de trazabilidad/send/resolve
+- `EDIFICIO_STICKY_THRESHOLD` sin evidencia cuantitativa
 - Cualquier regla sin test verde previo
+
+## 6. Cambios aplicados post-2026-08-01
+
+- CSV auditoría órdenes: `data/exports/edificio_order_audit.csv` con `sent_at`, `resolved_at`, `delta_sec`, `loss_reason`, timestamps de freno/P3/contratado.
+- Scanner unificado: `_brake_ok` usa `EDIFICIO_BRAKE_CONFIRM_RATIO` desde `src/config.py`.
+- P2 sin `brake_ok+extreme_ok` → vuelve a P1 con resets (`brake_at=None`, `cross_separation_since=None`, `entry_pending=False`, `pending_since=None`).
+- Expiración de evento resetea `entry_pending`/`pending_since`.
+- Fetch de contexto de cierre movido a background task desde resolvedor (`_record_close_context`).
