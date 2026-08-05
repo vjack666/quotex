@@ -1,0 +1,196 @@
+# Tribunal de Evidencia Científica — v1.0
+# Fuente oficial estructurada del tribunal del Laboratorio.
+# Generado desde docs/LAB_EVIDENCIA_CIENTIFICA.md.
+# Este archivo es la única fuente de verdad para promotion_gate.py.
+
+version: "1.0"
+source_document: "docs/LAB_EVIDENCIA_CIENTIFICA.md"
+
+sample_min:
+  individual_condition: 60
+  compound_condition: 100
+  multi_asset:
+    per_asset: 30
+    min_assets: 2
+
+  rule: "Si no se alcanza, el experimento es inconcluyente. No se promueve ni se descarta."
+
+significance:
+  confidence_level: 0.95
+  p_value_max: 0.05
+
+  rule: "Si p-valor > 0.05, el experimento es inconcluyente."
+
+confidence_intervals:
+  level: 0.95
+  metrics:
+    - win_rate
+    - expected_value
+    - profit_factor
+  null_values:
+    win_rate: 0.5
+    expected_value: 0.0
+    profit_factor: 1.0
+
+  rule: "Si el intervalo incluye el valor nulo, el experimento es inconcluyente."
+
+temporal_validation:
+  train_ratio_min: 0.60
+  train_ratio_max: 0.70
+  val_ratio_min: 0.15
+  val_ratio_max: 0.20
+  test_ratio_min: 0.15
+  test_ratio_max: 0.20
+
+  rules:
+    - test_set_is_sacred: true
+      description: "El conjunto de test no se usa para ajustar parámetros, elegir modelos o períodos."
+    - train_test_divergence_alarm_pp: 10
+      description: "Si la diferencia en winrate entre train y test supera 10pp, posible sobreajuste."
+    - inconsistent_train_test: inconclusive
+      description: "Si el resultado en test difiere sustancialmente del train, el experimento es inconcluyente."
+
+walk_forward:
+  min_windows: 3
+  max_divergence_percent: 10.0
+
+  rule: "Si el resultado walk-forward difiere del resultado estático en más del 10% relativo, inconcluyente."
+
+robustness:
+  min_passed: 3
+  total_tests: 5
+  tests:
+    - id: parameter_perturbation
+      name: "Perturbación de parámetros ±10%"
+      description: "Variar la condición en ±10% y verificar que el resultado se mantiene."
+      pass_criterion: "resultado positivo en al menos 6 de 10 perturbaciones"
+    - id: stress_period
+      name: "Stress period"
+      description: "Evaluar en períodos de alta volatilidad, baja volatilidad, tendencia y rango."
+      pass_criterion: "resultado no cae por debajo del baseline en ningún régimen"
+    - id: bootstrap_1000
+      name: "Bootstrap 1000"
+      description: "Remuestrear los eventos 1000 veces y verificar la distribución."
+      pass_criterion: "IC bootstrap no incluye valor nulo"
+    - id: multi_asset
+      name: "Multi-activo"
+      description: "Repetir en al menos 2 activos distintos."
+      pass_criterion: "resultado positivo en al menos 2 de 3 activos"
+    - id: multi_timeframe
+      name: "Multi-timeframe"
+      description: "Repetir en al menos 2 timeframes distintos."
+      pass_criterion: "resultado positivo en al menos 2 timeframes"
+
+  fail_rule: "Si falla 2 o más pruebas, el experimento es refutado. No se promueve."
+
+minimum_improvement:
+  win_rate_pp_vs_baseline: 3.0
+  expected_value_relative_percent: 10.0
+  profit_factor_min: 1.3
+  max_event_reduction_percent: 50.0
+
+  rule: "Si mejora una métrica pero empeora otra significativamente, inconcluyente."
+
+systemic_impact:
+  required: true
+  evaluation_points:
+    - "¿Cuántas condiciones existentes se ven afectadas?"
+    - "¿Abre nuevas oportunidades o cierra las actuales?"
+    - "¿Cambia la distribución de ganancias/pérdidas?"
+    - "¿Introduce correlación no deseada?"
+
+  rule: "Si el impacto sistémico es negativo o desconocido, inconcluyente."
+
+power_analysis:
+  required_power: 0.80
+  min_events_by_effect:
+    plus_5_pp: 1200
+    plus_10_pp: 400
+    plus_20_pp: 150
+
+  rule: "Si el poder es menor al requerido, inconcluyente aunque el resultado sea positivo."
+
+evidence_hierarchy:
+  levels:
+    - id: 1
+      name: Observacional
+      promotes: false
+      description: "Datos históricos sin aislamiento. Solo formula hipótesis."
+    - id: 2
+      name: Aislada
+      promotes: false
+      description: "Condición medida separada, sin look-ahead, sin combinación."
+      next_requirement: "cumplir mínimos de muestra y métrica"
+    - id: 3
+      name: Reproducida
+      promotes: false
+      description: "Repetida en distintos períodos o activos."
+      next_requirement: "consistencia mantenida"
+    - id: 4
+      name: Robustecida
+      promotes: false
+      description: "Pasa tests de walk-forward, bootstrap, stress."
+      next_requirement: "todas las pruebas de robustez"
+    - id: 5
+      name: Demostrada
+      promotes: true
+      description: "Cumple todos los criterios del tribunal."
+
+falsification:
+  min_attempts_before_promotion: 3
+  allow_counterexample_refutation: true
+  description: "Todo experimento debe incluir un intento explícito de demostrar que la hipótesis es falsa."
+
+reproducibility:
+  required_inputs:
+    - "datos con ruta y checksum"
+    - "código del experimento"
+    - "versión de dependencias"
+    - "comandos exactos de ejecución"
+    - "semilla aleatoria fija (si aplica)"
+  verification:
+    clean_environment: true
+
+prohibitions:
+  - "look_ahead"
+  - "post_hoc_parameter_tuning"
+  - "cherry_picking_periods"
+  - "promote_without_isolation"
+  - "ignore_negative_results"
+  - "remove_events_without_documentation"
+  - "mix_train_test"
+  - "report_only_positive_metrics"
+
+verdicts:
+  - id: promoted
+    label: "Promovido"
+    description: "Cumple todos los criterios. Listo para el Edificio."
+  - id: refuted
+    label: "Refutado"
+    description: "Falsado por evidencia o falló robustez/estadística."
+  - id: inconclusive
+    label: "Inconcluyente"
+    description: "Datos insuficientes o resultados mixtos."
+  - id: overfitted
+    label: "Sobreajustado"
+    description: "Train/test difiere sustancialmente."
+
+revalidation:
+  max_months: 12
+  triggers:
+    - "market_regime_change_detected: volatilidad promedio cambia >30%"
+    - "frequency_drop: caída >40% respecto a validación original"
+    - "new_condition_added: nueva condición en el Edificio que pueda interactuar"
+
+tracing:
+  required_fields:
+    - "experiment_id"
+    - "hypothesis"
+    - "tribunal_version"
+    - "baseline_id"
+    - "baseline_version"
+    - "dataset_checksum"
+    - "code_version"
+    - "verdict"
+    - "promoted_date"
+    - "revalidation_date"
