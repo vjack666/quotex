@@ -200,6 +200,14 @@ def build_feature_frame(df: pd.DataFrame, df_htf: Optional[pd.DataFrame] = None)
     split_mask[train_end:] = "test"
     cross, cross_ago, cruce_en_zona = _cross_flags(k, d)
 
+    # ── Confirmaciones CAUSALES ──
+    # Regla dura: una confirmación en la vela i sólo usa datos hasta i (velas
+    # cerradas). Nada de i+1 / i+2: eso es look-ahead y contamina el dataset.
+    # El "freno confirmado" = freno en i + continuación visible EN i:
+    #   - el rango de i está en contracción vs la vela previa (el impulso se frenó), y
+    #   - el contexto ya está en zona de interés (cruce_en_zona o cruce reciente).
+    # El "cruce limpio" = en i el estocástico ya está fuera de zona muerta y con
+    #   separación K/D suficiente (estado observable, no predicho).
     brake_confirmed = np.zeros(n, dtype=bool)
     cross_clean_confirmed = np.zeros(n, dtype=bool)
     brake_confirm_ratio = 0.7
@@ -209,13 +217,16 @@ def build_feature_frame(df: pd.DataFrame, df_htf: Optional[pd.DataFrame] = None)
         if brake_transition[i] and not brake_confirmed[i]:
             ref_range = float(range_[i - 1])
             ref_ok = ref_range > 0 and np.isfinite(ref_range)
-            if ref_ok:
-                next_ok = bool(cruce_en_zona[i + 1]) or bool(cross_ago[i + 1] == 0) or bool(brake_transition[i + 1])
-                if next_ok and float(range_[i + 1]) < brake_confirm_ratio * ref_range:
-                    brake_confirmed[i] = True
+            # evidencia de continuación VISIBLE en i (sin mirar adelante)
+            context_ok = bool(cruce_en_zona[i]) or bool(cross_ago[i] == 0) or bool(brake_transition[i - 1])
+            if ref_ok and context_ok and float(range_[i]) < brake_confirm_ratio * ref_range:
+                brake_confirmed[i] = True
 
         if cruce_en_zona[i] and not cross_clean_confirmed[i]:
-            if float(kd_dist[i + 1]) >= kd_min_separation:
+            # estado observable en i: separación suficiente y fuera de zona muerta
+            kd_ok = np.isfinite(kd_dist[i]) and float(kd_dist[i]) >= kd_min_separation
+            in_extreme = (k[i] <= 20.0 or k[i] >= 80.0) and (d[i] <= 20.0 or d[i] >= 80.0)
+            if kd_ok and in_extreme:
                 cross_clean_confirmed[i] = True
 
     out = pd.DataFrame({
