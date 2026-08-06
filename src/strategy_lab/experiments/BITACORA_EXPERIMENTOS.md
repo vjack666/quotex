@@ -432,3 +432,61 @@ El veredicto es "inconcluso por muestra", no "refutado". Dos caminos:
 - `src/strategy_lab/promotion_gate.py` (`evaluate_family` + `FamilyDecision`)
 - `tests/test_promotion_gate.py` (+4 tests FDR)
 - Sin commit: pendiente de OK humano por §15 del tribunal.
+
+---
+
+## Fase 5 — Cierre (2026-08-06)
+
+- **Commit FDR**: `1df48aa` (feat(lab): parche FDR/Bonferroni en tribunal + evaluate_family),
+  pusheado a origin/main. 5 archivos, 436 inserciones, suite 10/10 verde.
+- El ajuste FDR/Bonferroni quedó operativo en `evaluate_family()` (promotion_gate.py).
+- Decisión humana: ejecutar Fase 1 (datos reales amplios) antes de cerrar. Ver abajo.
+
+---
+
+## Fase 1 — Prueba de existencia del efecto (cohorte REAL, aislada) (2026-08-06)
+
+**Principio medicina**: Fase 1 = laboratorio con cohorte REAL (EURUSD real 2004-2024).
+Fase 2 (OTC) = ensayo clínico, COMPLETAMENTE SEPARADO. No se mezclan jamás.
+
+- **Fuente**: `C:\Users\v_jac\Desktop\backtest quotex\datos de velas\data\EURUSD\M15\2004..2024.csv`
+  (datos REALES HistData; NO OTC — el repo no tiene CSV OTC, confirmado en
+  `backtest quotex/docs/DECISION_OTC_SIN_HORARIO.md`).
+- **Cohorte aislada** (sin tocar SMC_ROOT compartido, para no contaminar camino OTC):
+  `data/strategy_lab/cohorte_real_eurusd/EURUSD_M15.parquet` → 543.310 velas M15.
+- **Motor libre**: `run_secuencia_libre(pairs=["EURUSD"], root=WORK_ROOT)` — SOLO EURUSD real.
+- **Resultado**:
+  - Expedientes nacidos: 65.344 · Completas: 7.975 · WR global completas: 0.2866.
+  - Firmas distintas: 39 · Firmas con n≥100: 12.
+  - FDR-BH sobre las 12: **PROMOVIDAS=0 · INCONCLUS=12 · REFUTADAS=0**.
+- **Detalle (n, WR, p_raw, power)**:
+  - extremo>freno>separacion>cruce>martillo: n=2436 WR=0.2775 p=1.8e-110 power=0.84 → INCONCLUSIVE (WR<0.5)
+  - extremo>freno>separacion>martillo>cruce: n=1176 WR=0.5298 p=4.4e-02 power=0.54 → INCONCLUSIVE
+  - freno>separacion>extremo>cruce>martillo: n=1071 WR=0.2372 p=2.0e-69 power=0.50 → INCONCLUSIVE
+  - freno>separacion>extremo>martillo>cruce: n=907 WR=0.4344 p=8.7e-05 power=0.44 → INCONCLUSIVE
+  - extremo>freno>martillo>separacion>cruce: n=396 WR=0.4747 p=3.4e-01 power=0.22 → INCONCLUSIVE
+  - extremo>freno>cruce>martillo: n=183 WR=0.5301 p=4.6e-01 power=0.12 → INCONCLUSIVE
+  - extremo>freno>martillo>cruce (intuición trader): n=118 WR=0.6102 p=2.1e-02 power=0.10 → INCONCLUSIVE
+  - cruce>freno>martillo: n=113 WR=0.0088 p=2.2e-32 power=0.09 → INCONCLUSIVE (anti-efecto)
+- **Veredicto Fase 1**: el efecto de ORDEN de eventos NO sobrevive el tribunal ni con
+  20 años de datos reales. Firmas con n grande (2000+) tienen WR<0.30 (peor que azar);
+  firmas con WR>0.5 tienen n pequeño y power<0.2. El FDR no promueve ninguna.
+- **Conclusión**: tal como pidió el humano ("enterarnos ahora"), la hipótesis de orden
+  freno>martillo>cruce queda REFUTADA-EN-REAL (efecto no promovible con muestra amplia).
+- **Fase 2 (OTC)**: pendiente, OPCIONAL. Como el laboratorio real ya negó el efecto,
+  el ensayo clínico OTC tiene bajo valor esperado. Se mantiene el dataset OTC separado
+  para validación externa si el humano lo requiere.
+
+### Archivos de Fase 1
+- `data/strategy_lab/cohorte_real_eurusd/EURUSD_M15.parquet` (cohorte real concatenada)
+- `data/strategy_lab/cohorte_real_eurusd/secuencia_libre_events_real.parquet` (expedientes)
+- No se commiteó el parquet (es artifact de datos, no código del lab).
+
+---
+
+## Cierre de ciclo (2026-08-06)
+
+- FDR commiteado (`1df48aa`). Fase 1 ejecutada y documentada. Fase 2 OTC pendiente/opcional.
+- Hipótesis "orden de eventos (freno>martillo>cruce)" declarada INCONCLUSIVE-POR-MUESTRA-AMPLIA
+  en cohorte real; no promovible. El Edificio sigue con su configuración Fase 6 (sin cambios).
+
