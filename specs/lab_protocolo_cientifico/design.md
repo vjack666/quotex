@@ -9,7 +9,9 @@
 `hypothesis.md`, `risks.md`, `validation.md` se entregan como PLANTILLAS
 estándar (una carpeta `specs/_templates/` o `docs/lab_templates/`) que todo
 EXP-XXX copia. No es código: es formato obligatorio. Esto satisface R1–R3 sin
-crear lógica nueva.
+crear lógica nueva. La plantilla `validation.md` incluye además (observaciones
+Trader-Humano): Effect Size con umbral mínimo (R12) y Costo operacional /
+edge neto (R13).
 
 ### D2 — ADR como archivos markdown planos
 `docs/decisions/ADR-NNN.md` con frontmatter mínimo (título, fecha, estado).

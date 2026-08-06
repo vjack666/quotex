@@ -53,6 +53,22 @@ El laboratorio debe controlar explícitamente el riesgo de falsos positivos al
 evaluar múltiples hipótesis (corrección FDR/Bonferroni obligatoria antes de
 promover).
 
+**Artículo 10 — Dominio experimental**
+Una hipótesis solo puede promocionarse para el dominio donde obtuvo evidencia
+(REAL ≠ OTC ≠ Crypto ≠ Índices ≠ timeframes). La evidencia en un dominio no
+transfiere a otro. EURUSD REAL es entorno de descubrimiento; la validación
+final de candidatos para OTC debe realizarse sobre datos OTC recolectados por
+el propio sistema.
+
+**Artículo 11 — Parsimonia**
+Entre dos hipótesis con evidencia equivalente, el laboratorio promoverá siempre
+la más simple. Se rechazan modelos innecesariamente complejos.
+
+**Artículo 12 — Muerte definitiva**
+Una hipótesis refutada en tres datasets independientes queda archivada de forma
+definitiva y no vuelve a experimentarse sin una propuesta metodológica nueva
+(ADR o SPEC dedicado).
+
 ---
 
 ## Cláusula de prevalencia

@@ -73,6 +73,24 @@ EL ciclo de vida científico (Hypothesis → Designed → Protocol Frozen →
 Running → Analyzed → Peer Reviewed → Archived, ya en `docs/specs.md`) DEBE
 usarse para todo EXP-XXX.
 
+### R12 — Effect Size mínimo (observación Trader-Humano 2)
+CUANDO un experimento emita `validation.md`, DEBE reportar un Effect Size
+explícito (WR lift, Odds Ratio, Expected Value o Sharpe, según defina el
+Scientist) y declarar un umbral mínimo para promoción. Una hipótesis con
+p significativo pero Effect Size operativamente irrelevante NO se promueve.
+
+### R13 — Costo operacional (observación Trader-Humano 3)
+CUANDO un experimento evalúe una condición, `validation.md` DEBE incluir el
+costo operacional: spread, slippage, latencia, repaint, retraso, payout y
+comisiones. La promoción considera el edge neto después de costos, no el
+patrón aislado.
+
+### R14 — Dominio, parsimonia y muerte definitiva (observación Trader-Humano 1,4,5)
+EL laboratorio DEBE cumplir los Art. 10 (Dominio), 11 (Parsimonia) y 12
+(Muerte definitiva) del `docs/LAB_CHARTER.md`. Toda promoción declara el
+dominio validado; entre evidencias equivalentes se prefiere la más simple; una
+hipótesis refutada 3× en datasets independientes se archiva definitivamente.
+
 ## No duplicación
 
 - R1–R3 extienden el "Contrato de experimento EXP-XXX" de
@@ -95,3 +113,6 @@ usarse para todo EXP-XXX.
 - R9 → T10
 - R10 → T11
 - R11 → T12 (extiende specs.md existente)
+- R12 → T4, T15 (Effect Size en validation.md + plantilla)
+- R13 → T4, T16 (costo operacional en validation.md + plantilla)
+- R14 → T17 (cumple Art. 10/11/12 del Charter; checklist en specs.md)

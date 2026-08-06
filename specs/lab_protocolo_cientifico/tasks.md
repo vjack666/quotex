@@ -25,6 +25,9 @@
 
 - [ ] T13 — `pytest tests/` en verde para cualquier código nuevo (T8, T10, T11). Cubre: R9, R10.
 - [ ] T14 — Reproducibilidad: `lab run EXP-039-reanalysis` produce `reports/EXP-XXX/results.json` idéntico en dos corridas (mismo seed/dataset_hash). Cubre: R9, R8.
+- [ ] T15 — Extender `docs/lab_templates/validation.md` con sección Effect Size (WR lift / Odds Ratio / EV / Sharpe + umbral mínimo). Cubre: R12.
+- [ ] T16 — Extender `docs/lab_templates/validation.md` con sección Costo operacional (spread/slippage/latencia/repaint/retraso/payout/comisiones; edge neto). Cubre: R13.
+- [ ] T17 — Documentar en `docs/specs.md` el cumplimiento de Art. 10/11/12 (Dominio/Parsimonia/Muerte definitiva) como checklist del ciclo de vida. Cubre: R14.
 
 ## Notas
 
