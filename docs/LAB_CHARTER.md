@@ -66,8 +66,18 @@ la más simple. Se rechazan modelos innecesariamente complejos.
 
 **Artículo 12 — Muerte definitiva**
 Una hipótesis refutada en tres datasets independientes queda archivada de forma
-definitiva y no vuelve a experimentarse sin una propuesta metodológica nueva
+definitiva y no vuelve a experimentarse sin una proposta metodológica nueva
 (ADR o SPEC dedicado).
+
+**Artículo 13 — Separación descubrimiento / validación (regla del trader-humano)**
+EURUSD REAL es exclusivamente entorno de **descubrimiento** de hipótesis y
+modelos de secuencia, por su gran volumen histórico. Ninguna hipótesis podrá
+promoverse al Edificio únicamente con evidencia REAL. Toda hipótesis descubierta
+debe validarse posteriormente sobre datos **OTC recolectados por el propio
+laboratorio** antes de considerarse operable. El histórico REAL es el
+"microscopio" para encontrar patrones; el OTC de Quotex es el "ensayo clínico"
+que decide si esos patrones sobreviven en el entorno donde realmente se opera.
+Esta separación metodológica es inquebrantable y no puede omitirse por conveniencia.
 
 ---
 
