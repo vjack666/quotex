@@ -1,0 +1,13 @@
+{
+  "domain": "REAL",
+  "alpha": 0.05,
+  "fdr_method": "fdr_bh",
+  "poder_min": 0.8,
+  "n_min": 100,
+  "baseline_wr": 0.5,
+  "payout": 0.85,
+  "seed": 42,
+  "pipeline": "extremo>freno>cruce>martillo",
+  "series": "PIPELINE (secuencia como estrategia)",
+  "hypothesis": "specs/lab_protocolo_cientifico/hypothesis_exp061_070.md"
+}

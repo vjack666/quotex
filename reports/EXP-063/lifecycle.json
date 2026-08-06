@@ -1,0 +1,8 @@
+{
+  "experiment_id": "EXP-063",
+  "stage": "Archived",
+  "verdict": "FAIL",
+  "domain": "REAL",
+  "seed": 42,
+  "dataset_hash": "sha256:ff5882d1eaa06f07"
+}

@@ -1,0 +1,11 @@
+pipeline,nacidos,entradas,wins,wr,ev,p,exp,report,p_adj_fdr,p_adj_bonf
+freno,13635,13635,6759,0.4957,-0.5786,0.3205081226821835,EXP-061,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-061\summary.md,0.000395,1.0
+freno>extremo,13635,2384,1255,0.5264,-0.5525,0.01044924134257232,EXP-062,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-062\summary.md,0.000395,0.104492
+freno>extremo>cruce,13635,2178,1139,0.523,-0.5555,0.03387095592734912,EXP-063,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-063\summary.md,0.000395,0.33871
+freno>extremo>cruce>separacion,13635,2088,1026,0.4914,-0.5823,0.4437110900566431,EXP-064,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-064\summary.md,0.000395,1.0
+freno>extremo>cruce>separacion>martillo,13635,279,140,0.5018,-0.5735,1.0,EXP-065,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-065\summary.md,0.000395,1.0
+extremo>freno>separacion>martillo>cruce,41290,898,387,0.431,-0.6337,3.945627783180458e-05,EXP-066,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-066\summary.md,0.000395,0.000395
+freno>separacion>extremo>martillo>cruce,13635,229,113,0.4934,-0.5806,0.8948924092509116,EXP-067,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-067\summary.md,0.000395,1.0
+extremo>freno>martillo>cruce,41290,1600,764,0.4775,-0.5941,0.0758650510568864,EXP-068,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-068\summary.md,0.000395,0.758651
+extremo>freno>cruce>martillo,41290,1763,934,0.5298,-0.5497,0.013230843213289191,EXP-069,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-069\summary.md,0.000395,0.132308
+freno>separacion>extremo>cruce>martillo,13635,347,183,0.5274,-0.5517,0.3339069144011011,EXP-070,C:\Users\v_jac\Desktop\QUOTEX\reports\EXP-070\summary.md,0.000395,1.0
