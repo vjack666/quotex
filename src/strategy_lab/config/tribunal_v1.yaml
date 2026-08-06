@@ -161,6 +161,24 @@ prohibitions:
   - "mix_train_test"
   - "report_only_positive_metrics"
 
+multiple_comparisons:
+  # Cuando se evalúan N hipótesis a la vez (p.ej. 36 firmas de secuencia),
+  # los p-valores individuales NO se interpretan crudos: por azar alguna
+  # cae "arriba". Lo detectó el revisor externo. Se ajustan antes del veredicto.
+  enabled: true
+  default_method: fdr_bh            # fdr_bh (Benjamini-Hochberg) | bonferroni
+  methods:
+    fdr_bh:
+      name: "Benjamini-Hochberg (FDR control)"
+      description: "Controla la tasa de falsos descubrimientos entre todas las firmas evaluadas."
+      pass_criterion: "p_ajustado < p_value_max del bloque; si ninguna pasa, INCONCLUSIVE para la familia."
+    bonferroni:
+      name: "Bonferroni (FWER control)"
+      description: "Corrección más conservadora: alpha / N. Controla la probabilidad de al menos un falso positivo."
+      pass_criterion: "p_ajustado < p_value_max; si ninguna pasa, INCONCLUSIVE para la familia."
+  # Semilla fija para cualquier permutación/shuffle usada en control negativo.
+  seed: 20260805
+
 verdicts:
   - id: promoted
     label: "Promovido"

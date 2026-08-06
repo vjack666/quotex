@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 
 from strategy_lab.evidence import EvidenceReport
+from strategy_lab.multiple_comparisons import AdjustedResult, adjust_pvalues
 from strategy_lab.robustness import RobustnessReport
 
 
@@ -171,4 +172,119 @@ def evaluate(
         failed_criteria=failed,
         warnings=warnings,
         details=details,
+    )
+
+
+@dataclass(frozen=True)
+class FamilyDecision:
+    """Veredicto sobre una FAMILIA de hipótesis evaluadas a la vez.
+
+    Cada miembro (p.ej. una firma de secuencia) recibe su GateDecision
+    individual, pero el p-valor se ajusta por comparaciones múltiples
+    (FDR/Bonferroni) ANTES de emitir el veredicto. Así el tribunal no
+    promueve ruido por azar cuando se evalúan 36 firmas juntas.
+    """
+
+    method: str
+    alpha: float
+    n_tests: int
+    adjusted: AdjustedResult
+    per_member: List[GateDecision]
+    promoted_members: List[str]
+    inconclusive_members: List[str]
+    refuted_members: List[str]
+
+
+def evaluate_family(
+    members: List[GateDecision],
+    *,
+    ids: Optional[List[str]] = None,
+    method: str = "fdr_bh",
+    alpha: float = 0.05,
+    tribunal_path: Union[str, Path] = Path("src/strategy_lab/config/tribunal_v1.yaml"),
+) -> FamilyDecision:
+    """Aplica ajuste de comparaciones múltiples sobre una familia de veredictos.
+
+    Flujo:
+      1. Toma el p-valor crudo de cada miembro (significancia individual).
+      2. Ajusta por FDR/Bonferroni usando `multiple_comparisons`.
+      3. Sobrescribe el p-valor efectivo y, si el ajustado no pasa, marca
+         `significance` como fallida en el GateDecision del miembro.
+      4. Re-clasifica el veredicto: si la única falla era significancia cruda
+         y el ajuste la hunde, baja a INCONCLUSIVE (no a REFUTADO: el ajuste
+         por azar no prueba que la señal es falsa, solo que no es distinguible).
+
+    `members` debe venir de `evaluate(...)` individual. Si no se pasan `ids`,
+    se usan los `experiment_id` de cada GateDecision.
+    """
+    if not members:
+        raise ValueError("evaluate_family requiere al menos un miembro")
+
+    mc = _load_tribunal(tribunal_path).get("multiple_comparisons", {})
+    if mc.get("enabled", True):
+        method = mc.get("default_method", method)
+    alpha = float(alpha)
+
+    ids = ids or [m.experiment_id for m in members]
+    raw_p = [float(m.details.get("significance", {}).get("actual", 1.0)) for m in members]
+    # Si el detalle no trae el p-valor, lo reconstruimos del fallo de significancia
+    for i, m in enumerate(members):
+        if m.details.get("significance", {}).get("actual") is None:
+            raw_p[i] = 1.0
+
+    adjusted = adjust_pvalues(raw_p, method=method, alpha=alpha, ids=ids)
+
+    per_member: List[GateDecision] = []
+    promoted: List[str] = []
+    inconclusive: List[str] = []
+    refuted: List[str] = []
+
+    for i, m in enumerate(members):
+        adj_p = adjusted.adj_p[i]
+        passed_adj = adj_p < alpha
+        new_failed = list(m.failed_criteria)
+        new_details = dict(m.details)
+        new_details["significance"] = {
+            "required": f"p<{alpha} (ajustado {method})",
+            "actual": adj_p,
+            "raw": raw_p[i],
+            "passed": passed_adj,
+        }
+        # Si antes pasaba significancia cruda pero el ajuste la hunde:
+        if not passed_adj:
+            if not any("significance" in c for c in m.failed_criteria):
+                new_failed.append(
+                    f"significance_adjusted: p_adj={adj_p:.4f} >= {alpha} ({method})"
+                )
+            verdict = "INCONCLUSIVE"
+        else:
+            verdict = m.verdict
+
+        per_member.append(
+            GateDecision(
+                experiment_id=m.experiment_id,
+                verdict=verdict,
+                criteria_passed=m.criteria_passed - (len(new_failed) - len(m.failed_criteria)),
+                criteria_failed=len(new_failed),
+                failed_criteria=new_failed,
+                warnings=list(m.warnings),
+                details=new_details,
+            )
+        )
+        if verdict == "PASS":
+            promoted.append(m.experiment_id)
+        elif verdict == "INCONCLUSIVE":
+            inconclusive.append(m.experiment_id)
+        else:
+            refuted.append(m.experiment_id)
+
+    return FamilyDecision(
+        method=method,
+        alpha=alpha,
+        n_tests=adjusted.n_tests,
+        adjusted=adjusted,
+        per_member=per_member,
+        promoted_members=promoted,
+        inconclusive_members=inconclusive,
+        refuted_members=refuted,
     )

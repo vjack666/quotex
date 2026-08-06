@@ -347,3 +347,88 @@ El usuario opera por intuición: "la hipótesis nace con freno en POI y mayor at
 - **Default fijado en código**: `src/edificio_contratacion.py` instancia `SequenceEngine` con `min_kd_distance=2.0`.
 - **Criterios**: `entrada_count > 0` y `noise_count = 0`.
 - **Siguiente acción**: ejecutar captura live y registrar en EXP-039.
+
+---
+
+## Fase 5 — Veredicto real del tribunal + parche FDR/Bonferroni (2026-08-05)
+
+### Contexto (el hueco del revisor externo)
+Cuando se evalúan 36 firmas juntas, cada una con su p-valor binomial contra el
+baseline, por azar algunas caen "arriba" del umbral. Sin ajuste por comparaciones
+múltiples el tribunal promovería basura. Lo detectó el revisor externo.
+
+### Cambio 1 — Parche FDR en `tribunal_v1.yaml`
+Sección nueva `multiple_comparisons`:
+- `enabled: true`, `default_method: fdr_bh` (Benjamini-Hochberg).
+- Alternativa `bonferroni` (FWER, más conservadora: alpha/N).
+- `seed: 20260805` fija para cualquier control negativo/permutación.
+
+### Cambio 2 — `src/strategy_lab/multiple_comparisons.py` (nuevo)
+Funciones puras, solo stdlib:
+- `bonferroni(pvalues, alpha)` → p_ajustado = min(1, p*N).
+- `benjamini_hochberg(pvalues, alpha)` → step-up FDR, p_ajustados monotonicos cap a 1.
+- `adjust_pvalues(pvalues, method, alpha, ids)` → dispatcher que etiqueta por id.
+
+### Cambio 3 — `evaluate_family()` en `promotion_gate.py` (nuevo)
+Recibe la lista de `GateDecision` individuales, ajusta el p-valor de cada miembro
+por FDR/Bonferroni ANTES del veredicto, y re-clasifica:
+- si el ajuste hunde la significancia → `INCONCLUSIVE` (no `REFUTADO`: el ajuste
+  por azar no prueba que la señal sea falsa, solo que no es distinguible).
+- emite `FamilyDecision` con `promoted/inconclusive/refuted_members`.
+
+### Verificación
+- `tests/test_promotion_gate.py`: +4 tests (Bonferroni escala, BH monotono,
+  `evaluate_family` hunde ruido bajo comparaciones múltiples, `evaluate_family`
+  promueve señal real). Suite promotion_gate: **10/10 verde**.
+- FDR rechaza una firma con p=0.04 crudo sobre 36 (Bonferroni: 0.04*36=1.44→cap 1.0);
+  BH promueve solo señal con p=1e-6 sobre 10.
+
+### PASO 2 — Veredicto sobre las 9 firmas con n≥100 (datos reales)
+Dataset: `data/strategy_lab/secuencia_libre_events.parquet`
+(46,891 expedientes · 6,259 completas · WR global 0.3208).
+
+**Baseline del tribunal = 0.5 (azar puro).** Nota: usar 0.3208 (WR global del
+motor libre) es tramposo — es el promedio de todas las firmas, no un nulo. Se
+descarta ese baseline para el veredicto.
+
+| Firma (n≥100) | n | WR | p crudo | power | Veredicto |
+|---|---|---|---|---|---|
+| extremo>freno>separacion>cruce>martillo | 2019 | 0.3041 | 5.1e-71 | 0.77 | INCONCLUSIVE |
+| extremo>freno>separacion>martillo>cruce | 985 | 0.5401 | 1.3e-02 | 0.47 | INCONCLUSIVE |
+| freno>separacion>extremo>cruce>martillo | 783 | 0.2503 | 4.3e-46 | 0.39 | INCONCLUSIVE |
+| freno>separacion>extremo>martillo>cruce | 676 | 0.4320 | 4.6e-04 | 0.34 | INCONCLUSIVE |
+| extremo>freno>martillo>separacion>cruce | 326 | 0.4785 | 4.7e-01 | 0.19 | INCONCLUSIVE |
+| extremo>freno>cruce>separacion>martillo | 266 | 0.0263 | 3.0e-67 | 0.16 | INCONCLUSIVE |
+| cruce>extremo>freno>separacion>martillo | 191 | 0.2408 | 3.9e-13 | 0.13 | INCONCLUSIVE |
+| extremo>freno>cruce>martillo | 126 | 0.5556 | 2.5e-01 | 0.10 | INCONCLUSIVE |
+| extremo>freno>martillo>cruce | 111 | 0.5676 | 1.8e-01 | 0.09 | INCONCLUSIVE |
+
+`evaluate_family(method=fdr_bh)` → **PROMOVIDAS: 0 · INCONCLUSIVE: 9 · REFUTADAS: 0**
+`evaluate_family(method=bonferroni)` → idéntico (0 promovidas).
+
+### ¿Por qué ninguna pasa? (causas reales, NO el ajuste FDR)
+El ajuste FDR **pasa** en todas; lo que hunde el veredicto es el propio tribunal:
+1. **power < 0.80** en las 9 (rango 0.09–0.77). El tribunal exige poder mínimo.
+2. **IC de win_rate incluye el nulo 0.5** en las firmas de WR medio (0.48–0.57):
+   por definición del tribunal, inconclusive.
+3. **robustez 0/5** y **systemic_impact no evaluado** (pendientes de ejecutar).
+
+### Conclusión Fase 5
+**INCONCLUSIVE para todas las candidatas.** El ajuste FDR no cambia el veredicto
+(era esperable: el problema es muestra/poder, no comparaciones múltiples). La
+mejor candidata (`extremo>freno>martillo>cruce`, n=111, WR=0.5676, +6.8pp sobre
+azar) tiene power 0.09 — insuficiente para promover con confianza.
+
+### PASO 3 — Decisión de datos (PENDIENTE DE ELECCIÓN DEL USUARIO)
+El veredicto es "inconcluso por muestra", no "refutado". Dos caminos:
+- **A) Aceptar** que la hipótesis no es promovible con los datos actuales y cerrar.
+- **B) Recolectar más datos** (ventana temporal más larga y/o más pares M15) para
+  llevar las firmas prometedoras a n≥500 y power≥0.80.
+- Nota: correr más código no arregla falta de muestra; es trabajo de recolección.
+
+### Archivos
+- `src/strategy_lab/config/tribunal_v1.yaml` (sección `multiple_comparisons`)
+- `src/strategy_lab/multiple_comparisons.py` (nuevo)
+- `src/strategy_lab/promotion_gate.py` (`evaluate_family` + `FamilyDecision`)
+- `tests/test_promotion_gate.py` (+4 tests FDR)
+- Sin commit: pendiente de OK humano por §15 del tribunal.
