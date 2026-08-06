@@ -183,6 +183,31 @@
       ],
       "status": "done",
       "done_at": "2026-07-31"
+    },
+    {
+      "id": 38,
+      "name": "lab_protocolo_cientifico",
+      "title": "Protocolo de Investigacion Cientifica Reproducible (evolucion del SDD)",
+      "phase": "lab_gobernanza",
+      "priority": 38,
+      "description": "Unificar y formalizar las piezas que faltan para convertir el laboratorio en un protocolo cientifico reproducible, apoyandose en lo existente (tribunal FDR/Bonferroni, runner, marco experimental, auditoria). Fase 1: Scientist role (ya en specs.md), hypothesis.md estandarizado (H0/H1/alpha/FDR/poder/n), risks.md, validation.md, ADR. Fase 2: versionado datasets, congelamiento protocolo, reports inmutables (seed/hash/env), CLI lab run, CI cientifico, estados cientificos.",
+      "acceptance": [
+        "Plantilla hypothesis.md estandarizada con H0/H1/alfa/FDR/poder/n_minimo",
+        "Plantilla risks.md con amenazas del laboratorio",
+        "Plantilla validation.md con IC95/poder/FDR/bootstrap/permutacion/robustez y veredicto unico",
+        "docs/decisions/ con ADR-001..N registrando decisiones metodologicas",
+        "Versionado de datasets (datasets/dataset_vNNN/ + manifest.json + hashes)",
+        "CLI unico: lab run EXP-XXX reproduce exactamente el resultado",
+        "Evidencia inmutable en reports/EXP-XXX/ con seed.txt + environment.txt + dataset_hash.txt",
+        "CI cientifico: lint+tests+coverage+dataset_hash+reproducibilidad+FDR+power+reporte",
+        "Estados cientificos del ciclo de vida (Hypothesis->Archived) documentados y usados",
+        "Todo elemento extiende/referencia lo existente; sin documentos redundantes",
+        "pytest tests/ en verde para cualquier codigo nuevo"
+      ],
+      "status": "spec_ready",
+      "sdd": true,
+      "spec_path": "specs/lab_protocolo_cientifico/",
+      "note": "Subordinado a docs/LAB_CHARTER.md. No duplica tribunal/marco/evidencia existentes."
     }
   ]
 }
