@@ -1,0 +1,15 @@
+{
+  "domain": "REAL",
+  "alpha": 0.05,
+  "fdr_method": "fdr_bh",
+  "poder_min": 0.8,
+  "n_min": 100,
+  "baseline_wr": 0.5,
+  "payout": 0.85,
+  "seed": 42,
+  "oversold": 25,
+  "overbought": 75,
+  "min_separation": 4,
+  "grid": "5x4 extremo x separacion",
+  "hypothesis": "specs/lab_protocolo_cientifico/hypothesis_exp040.md"
+}
