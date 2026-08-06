@@ -1,7 +1,32 @@
 # PROJECT_STATE
 
-> Last updated: 2026-08-03 (estrategias archivadas; Edificio = única activa)
-> Full detail: `docs/CHANGELOG_2026-07-16.md`
+> Last updated: **2026-08-06** — Laboratorio Científico Reproducible instituido (Feature 38 DONE, commit `dc53c97`).
+> Full detail: `docs/CHANGELOG_2026-07-16.md` + `docs/LAB_CHARTER.md`
+
+---
+
+## 🔬 Laboratorio Científico (2026-08-06) — LEER PRIMERO al retomar
+
+**Milestone actual:** Feature 38 `lab_protocolo_cientifico` = DONE y pusheada.
+El bot ahora tiene un sistema de gobierno de hipótesis (Charter → spec → EXP).
+
+| Capa | Archivo | Rol |
+|------|---------|-----|
+| Constitución | `docs/LAB_CHARTER.md` | Art.1–12 (FDR, Dominio, Parsimonia, Muerte definitiva) — inquebrantable |
+| Manual | `docs/specs.md` | SDD + ciclo de vida científico + checklist Art.6/10/11/12 + Trader-Humano |
+| Spec | `specs/lab_protocolo_cientifico/` | requirements/design/tasks/trader_humano_review (aprobado) |
+| Plantillas | `docs/lab_templates/*.md` | hypothesis / risks / validation (con Effect Size + Costo) |
+| ADR | `docs/decisions/ADR-001..004` | FDR, REAL/OTC, Dominio, Parsimonia/Muerte |
+| Dataset | `datasets/dataset_v001/manifest.json` | versionado, referencia SMC_ROOT (sin copiar) |
+| CLI | `scripts/lab_run.py` | `lab run EXP-XXX` (reproducible, congela protocolo) |
+| CI | `scripts/lab_ci.py` + `.github/workflows/lab-ci.yml` | hash + reproducibilidad + FDR + reporte inmutable |
+| Runner | `src/strategy_lab/experiment_runner.py` | reports inmutables (seed/env/hash/protocol/lifecycle) |
+
+**Bloqueos:** ninguno de la feature 38. Próximo paso sugerido: aplicar el lab
+al embudo roto del Edificio (EXP-039: 40→2→0→0; cuello = FRENO).
+
+**Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry
+= 19 passed. `lab run` y `lab ci` GREEN sobre datos sintéticos.
 
 ---
 

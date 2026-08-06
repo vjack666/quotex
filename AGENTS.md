@@ -17,7 +17,9 @@
 
 ## 1. Antes de empezar (obligatorio)
 
-**Si el usuario escribe solo `start`:** sigue `agent/START.md` (workflow autónomo completo). No modifiques código hasta recibir instrucciones. Como primera acción del flujo `start`, cargar `C:\Users\v_jac\.hermes.md` y `docs/engineering.md`: esos archivos definen la identidad y el método por defecto para toda la sesión.
+**Si el usuario escribe solo `start`:** sigue `agent/START.md` (workflow autónomo completo). No modifiques código hasta recibir instrucciones. Como primera acción del flujo `start`, cargar `C:\\Users\\v_jac\\.hermes.md` y `docs/engineering.md`: esos archivos definen la identidad y el método por defecto para toda la sesión.
+
+**Si el usuario dice `listo por hoy` / `voy a apagar` / `cerrar sesión` / `terminamos` / frase equivalente:** sigue `agent/CLOSE.md` (protocolo de cierre). NO pedir confirmación para cerrar; ejecutar el workflow (git limpio de la sesión + actualizar `/agent/*` y `progress/*` + resumen) y soltar el control. Esto asegura que la próxima sesión (`start`) arranque desde donde quedamos, no de cero.
 
 **En cualquier otra sesión:**
 
@@ -34,6 +36,7 @@
 | Archivo / carpeta | Qué contiene | Cuándo leerlo |
 |---|---|---|
 | `agent/START.md` | Workflow autónomo: usuario escribe `start` | Trigger `start` |
+| `agent/CLOSE.md` | Protocolo de cierre: usuario dice "listo por hoy"/"voy a apagar" | Trigger cierre |
 | `agent/HANDOFF.md` | Transferencia entre sesiones/máquinas | Siempre, al empezar |
 | `agent/PROJECT_STATE.md` | Estado arquitectura, milestone, bloqueos | Siempre, al empezar |
 | `agent/TASKS.md` | Tareas In Progress / Next / Completed | Siempre, al empezar |

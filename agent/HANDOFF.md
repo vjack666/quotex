@@ -1,8 +1,64 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> Last session: 2026-08-03 — auditoría Edificio de Contratación cerrada (47/47, 4 commits)
-> **Changelog:** `docs/CHANGELOG_2026-07-16.md`
+> **ÚLTIMA SESIÓN: 2026-08-06** — Feature 38 `lab_protocolo_cientifico` = DONE y pusheada (commit `dc53c97`).
+
+---
+
+## ⭐ ESTADO ACTUAL (2026-08-06) — LEER PRIMERO
+
+### Qué se hizo
+- Se instituyó el **Laboratorio Científico Reproducible** del bot como un
+  sistema de gobierno documental (no solo código):
+  - `docs/LAB_CHARTER.md` — Constitución (Art. 1–12): objetivo, refutabilidad,
+    promoción por evidencia, datos inmutables, reproducibilidad, protocolo
+    congelado, decisiones registradas, FDR obligatorio (Art.9), **Dominio**
+    (Art.10: REAL≠OTC≠Crypto≠Índices), **Parsimonia** (Art.11), **Muerte
+    definitiva** (Art.12: refutada 3× → archivo eterno).
+  - `docs/specs.md` — manual operativo subordinado al Charter + ciclo de vida
+    científico + checklist Art.6/10/11/12 + participación del Trader-Humano en SDD.
+  - `specs/lab_protocolo_cientifico/` — SPEC feature 38 (requirements/design/
+    tasks/trader_humano_review). **Aprobado por Trader-Humano + Aprobación Final**.
+  - `docs/lab_templates/{hypothesis,risks,validation}.md` — plantillas estándar.
+  - `docs/decisions/ADR-001..004` — FDR, REAL/OTC, Dominio, Parsimonia/Muerte.
+  - `datasets/dataset_v001/manifest.json` — dataset versionado (referencia
+    SMC_ROOT, SIN copiar velas).
+  - `scripts/lab_run.py` — CLI único `lab run EXP-XXX`.
+  - `scripts/lab_ci.py` — CI científico (hash + reproducibilidad + FDR + reporte).
+  - `src/strategy_lab/experiment_runner.py` — extendido con reports inmutables
+    (seed.txt, environment.txt, dataset_hash.txt, protocol_frozen.json,
+    lifecycle.json).
+  - `.github/workflows/lab-ci.yml` — job de CI.
+
+### Decisión tomada
+- Force-push autorizado para limpiar commit vago (`226bc44` → `dc53c97`, solo
+  feature 38). Origin/main ahora limpio.
+- Las 5 observaciones del Trader-Humano fueron incorporadas (Dominio, Effect
+  Size mínimo R12, Costo operacional R13, Muerte definitiva, Parsimonia).
+
+### Próximo paso sugerido (al retomar)
+- Usar el laboratorio para diagnosticar el **embudo roto del Edificio
+  (EXP-039: 40→2→0→0)**. El cuello es FRENO (solo 2/40 pasan). El lab
+  (secuencia_libre.py + optimizer.py) debe encontrar config aceptable del
+  Edificio vía secuencias, NO ajuste manual a ojo.
+- Las 3 recomendaciones futuras del Trader-Humano (edad de hipótesis,
+  Confidence Score, registro de descartadas) quedaron ancladas en
+  `trader_humano_review.md` como evolución pendiente (no bloquean).
+
+### Archivos clave para retomar
+- `docs/LAB_CHARTER.md` (principios inquebrantables, Art.1–12)
+- `docs/specs.md` (ciclo de vida + checklist Art.6/10/11/12)
+- `specs/lab_protocolo_cientifico/` (requirements/design/tasks/trader_humano_review)
+- `scripts/lab_run.py`, `scripts/lab_ci.py`
+- `src/strategy_lab/experiment_runner.py`
+- `src/strategy_lab/secuencia_libre.py`, `optimizer.py`, `run_lab_secuencia.py`
+
+### Reglas que NO romper al retomar
+- Una feature a la vez. SDD obligatorio para features `sdd:true`.
+- No push sin OK. Commit = solo trabajo de la sesión (nunca `git add -A` ciego).
+- Bot corre PRACTICE por defecto; NUNCA REAL sin OK explícito.
+- Datos REAL (EURUSD) = descubrimiento; OTC = validación final.
+- Trader-Humano revisa specs; usuario aprueba antes de implementar.
 
 ---
 
