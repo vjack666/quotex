@@ -1,5 +1,9 @@
 # Spec Driven Development (SDD)
 
+> **Este manual operativo está SUBORDINADO a `docs/LAB_CHARTER.md`
+> (Constitución del laboratorio, Nivel 1). En caso de conflicto prevalece
+> el Charter. Todo SPEC y experimento debe cumplir los Artículos del Charter.**
+
 > Este proyecto sigue un flujo Kiro-style: requirements → design → tasks → code.
 > El código no se escribe hasta que el spec está aprobado por un humano.
 
@@ -177,6 +181,19 @@ El `implementer` documenta el mapa en `progress/impl_<name>.md`:
 - R2 → `test_momentum_detect_bearish`
 - R3 → `test_momentum_detect_no_signal`
 ```
+
+## Declaración de cumplimiento del Charter
+
+Todo SPEC y todo experimento EXP-XXX debe heredar los principios del
+`docs/LAB_CHARTER.md` (Nivel 1) sin duplicarlos.
+
+- **SPEC** (`specs/<feature>/`): su `requirements.md` debe abrir con:
+  `Este SPEC cumple el Laboratory Charter (docs/LAB_CHARTER.md). No modifica ninguno de sus principios.`
+- **EXP-XXX**: su contrato debe cerrar con:
+  `Este experimento cumple el Charter: Sí / No`
+
+Si un SPEC o experimento viola algún Artículo del Charter, se rechaza
+independientemente de su veredicto técnico.
 
 ## Cuándo NO aplica SDD
 
