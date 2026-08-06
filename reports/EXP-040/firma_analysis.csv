@@ -1,0 +1,5 @@
+firma,n,wins,wr,p_value,odds_ratio,expected_value,p_adj_fdr,promovible
+freno>separacion>extremo>cruce>martillo,169,98,0.5799,0.045179604429172356,1.38,-0.5071,0.180718,False
+extremo>freno>separacion>martillo>cruce,274,148,0.5401,0.20448018232720575,1.175,-0.5409,0.180718,False
+freno>separacion>extremo>martillo>cruce,188,97,0.516,0.7154689293504803,1.066,-0.5614,0.180718,False
+extremo>freno>separacion>cruce>martillo,492,243,0.4939,0.8216828469409905,0.976,-0.5802,0.180718,False

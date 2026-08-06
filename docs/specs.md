@@ -245,3 +245,10 @@ Antes de `Protocol Frozen` y en `Archived`, el Scientist verifica:
 
 Las features con `"sdd": false` o sin el campo `sdd` NO tienen spec.
 SDD solo se aplica hacia adelante.
+
+## Registro de experimentos del laboratorio
+
+| EXP | Dominio | Hipótesis | Veredicto | Cumple Charter | Documentación |
+|-----|---------|-----------|-----------|----------------|---------------|
+| EXP-039 | REAL (live DEMO) | Validación en vivo del embudo del Edificio | NO CUMPLE (40→2→0→0) | Sí (auditoría de secuencia) | `src/strategy_lab/results/exp039_live_validation.json` |
+| EXP-040 | REAL (EURUSD M15 hist) | ¿Existe firma de secuencia con edge neto positivo? | INCONCLUSIVE (0 firmas promovibles; EV negativo tras FDR+costo) | Sí | `specs/lab_protocolo_cientifico/{hypothesis,validation}_exp040.md`, `reports/EXP-040/` |
