@@ -7,6 +7,21 @@
 
 ---
 
+## Ámbito de aplicación
+
+Este Charter aplica a:
+
+- todo experimento (EXP-XXX);
+- todo SPEC (`specs/*`);
+- todo cambio metodológico;
+- todo pipeline de validación;
+- toda promoción de hipótesis al Edificio.
+
+No aplica a tareas puramente operativas o de ingeniería que no alteren la
+metodología científica.
+
+---
+
 ## Artículos
 
 **Artículo 1 — Objetivo**
@@ -33,6 +48,11 @@ Toda decisión metodológica queda registrada de forma permanente.
 **Artículo 8 — No excepciones**
 Ningún resultado favorable justifica romper este Charter.
 
+**Artículo 9 — Control de falsos positivos**
+El laboratorio debe controlar explícitamente el riesgo de falsos positivos al
+evaluar múltiples hipótesis (corrección FDR/Bonferroni obligatoria antes de
+promover).
+
 ---
 
 ## Cláusula de prevalencia
@@ -40,6 +60,19 @@ Ningún resultado favorable justifica romper este Charter.
 Si cualquier procedimiento, implementación o experimento entra en conflicto con
 este Charter, el Charter prevalece y el procedimiento deberá modificarse antes
 de continuar. No se admiten excepciones.
+
+Todo experimento que viole el Charter será considerado **inválido**,
+independientemente de sus resultados estadísticos.
+
+---
+
+## Reforma del Charter
+
+El Charter solo puede modificarse mediante una propuesta metodológica explícita
+(ADR o SPEC dedicado), revisión del trader-humano y aprobación humana.
+
+No puede modificarse como parte de una feature funcional ni mediante un commit
+directo a este archivo.
 
 ---
 
@@ -57,5 +90,7 @@ specs/<feature>/      (Nivel 3 — SPEC de cada feature, cumple el Charter)
       ▼
 EXP-XXX               (Nivel 4 — experimentos, declaran cumplimiento del Charter)
 ```
+
+Índice completo de documentos científicos: `docs/LAB_INDEX.md`.
 
 En caso de conflicto entre niveles, prevalece siempre el superior.

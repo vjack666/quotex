@@ -195,6 +195,36 @@ Todo SPEC y todo experimento EXP-XXX debe heredar los principios del
 Si un SPEC o experimento viola algún Artículo del Charter, se rechaza
 independientemente de su veredicto técnico.
 
+## Roles de gobierno científico
+
+Además de los roles del flujo SDD (Leader, Spec Author, Implementer, Reviewer),
+el laboratorio define dos roles de metodología:
+
+| Rol | Responsabilidad |
+|---|---|
+| **Trader-Humano** | Evalúa el sentido de mercado de la hipótesis/embudo/seguridad. Revisa los specs durante la construcción. |
+| **Scientist** | Responsable de la **metodología**: diseña la hipótesis, define H0/H1, fija α, FDR, poder y n mínimo, y congela el protocolo antes de ejecutar. No escribe código (eso es Implementer) ni revisa calidad de código (eso es Reviewer) — audita la validez estadística. |
+
+El Scientist interviene en la fase `pending → spec_ready` junto al Trader-Humano,
+y nuevamente al final para validar que la evidencia cumple el protocolo congelado.
+
+## Ciclo de vida científico (encima del SDD)
+
+El SDD gobierna features de ingeniería. Los experimentos (EXP-XXX) usan un
+ciclo de vida propio, superpuesto, que no reemplaza al SDD:
+
+```
+Hypothesis → Designed → Protocol Frozen → Running → Analyzed → Peer Reviewed → Archived
+```
+
+- **Hypothesis**: pregunta formulada, H0/H1 definidas.
+- **Designed**: `hypothesis.md` + `risks.md` + `validation.md` completos.
+- **Protocol Frozen**: α, FDR, poder, n mínimo y dataset congelados (Art. 6).
+- **Running**: ejecución sobre datos inmutables.
+- **Analyzed**: resultados con IC95%, poder, FDR, robustez.
+- **Peer Reviewed**: Scientist + Trader-Humano dictan veredicto.
+- **Archived**: expediente cerrado (PROMOVIDA / INCONCLUSIVE / REFUTADA).
+
 ## Cuándo NO aplica SDD
 
 Las features con `"sdd": false` o sin el campo `sdd` NO tienen spec.
