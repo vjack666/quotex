@@ -537,8 +537,32 @@ def interpret_broker_result(
     return None
 
 
+def _apply_demo_ssid(client: "Quotex") -> bool:
+    """Carga QUOTEX_DEMO_SSID en session_data para saltar el login HTTP (403).
+
+    pyquotex solo hace authenticate() (login por HTTP que Quotex bloquea con
+    403 Forbidden) cuando session_data["token"] esta vacio. Si cargamos el
+    SSID guardado en .env, connect() usa el token para autenticar por WS y
+    evita el 403. No pisa un token ya emitido por el servidor.
+    """
+    sess = getattr(client, "session_data", None)
+    if not isinstance(sess, dict):
+        return False
+    if sess.get("token"):
+        return True
+    ssid = os.environ.get("QUOTEX_DEMO_SSID") or os.environ.get("QUOTEX_SSID")
+    if not ssid:
+        return False
+    try:
+        sess["token"] = ssid
+        return True
+    except Exception:
+        return False
+
+
 async def connect_with_retry(client: Quotex) -> Tuple[bool, str]:
     reason = ""
+    _apply_demo_ssid(client)
     for attempt in range(1, CONNECT_RETRIES + 1):
         ok, reason = await client.connect()
         if ok:
@@ -581,6 +605,7 @@ class ConnectionManager:
                 except Exception:
                     pass
 
+                _apply_demo_ssid(self.client)
                 ok, reason = await asyncio.wait_for(
                     self.client.connect(),
                     timeout=RECONNECT_TIMEOUT_SEC,
@@ -625,6 +650,7 @@ async def create_trading_client(
     conexiones elimina la competencia por el socket y buy() confirma en <2s.
     """
     client = Quotex(email=email, password=password)
+    _apply_demo_ssid(client)
     try:
         ok, reason = await asyncio.wait_for(client.connect(), timeout=RECONNECT_TIMEOUT_SEC)
     except asyncio.TimeoutError:
