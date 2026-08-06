@@ -9,6 +9,9 @@ Solo coordina módulos especializados y consolida el informe.
 from __future__ import annotations
 
 import hashlib
+import json
+import platform
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -18,6 +21,28 @@ from strategy_lab.evidence import compute_evidence
 from strategy_lab.promotion_gate import evaluate
 from strategy_lab.registry import ExperimentRegistry
 from strategy_lab.robustness import compute_robustness
+
+
+def _env_fingerprint() -> str:
+    """Firma del entorno para reproducibilidad (Art. 5 Charter)."""
+    import importlib.metadata as md
+
+    pkgs = ["pandas", "numpy", "pyquotex"]
+    lines = [f"python={platform.python_version()}", f"platform={platform.platform()}"]
+    for p in pkgs:
+        try:
+            lines.append(f"{p}={md.version(p)}")
+        except Exception:
+            lines.append(f"{p}=unknown")
+    return "\n".join(lines)
+
+
+def _dataset_checksum(events) -> str:
+    if hasattr(events, "to_csv"):
+        data = events.to_csv(index=False).encode("utf-8")
+    else:
+        data = str(events).encode("utf-8")
+    return f"sha256:{hashlib.sha256(data).hexdigest()[:16]}"
 
 
 @dataclass(frozen=True)
@@ -30,14 +55,9 @@ class ExperimentArtifacts:
     gate_decision: Optional[Any] = None
     registry_record: Optional[Any] = None
     report_path: Optional[str] = None
-
-
-def _dataset_checksum(events) -> str:
-    if hasattr(events, "to_csv"):
-        data = events.to_csv(index=False).encode("utf-8")
-    else:
-        data = str(events).encode("utf-8")
-    return f"sha256:{hashlib.sha256(data).hexdigest()[:16]}"
+    seed: Optional[int] = None
+    dataset_hash: Optional[str] = None
+    lifecycle_path: Optional[str] = None
 
 
 def run_experiment(
@@ -53,6 +73,9 @@ def run_experiment(
     baseline_manager: Optional[BaselineManager] = None,
     report_dir: Optional[Path] = None,
     baseline_comparison: Optional[Dict[str, Any]] = None,
+    seed: Optional[int] = None,
+    dataset_manifest: Optional[Union[str, Path]] = None,
+    protocol: Optional[Dict[str, Any]] = None,
 ) -> ExperimentArtifacts:
     registry = registry or ExperimentRegistry(baseline_manager=baseline_manager or BaselineManager())
     baseline_manager = baseline_manager or registry._baseline_manager
@@ -101,9 +124,14 @@ def run_experiment(
     registry.attach_gate_decision(experiment_id, decision)
 
     report_path = None
+    lifecycle_path = None
+    dataset_hash = _dataset_checksum(events)
     if report_dir is not None:
-        report_dir.mkdir(parents=True, exist_ok=True)
-        report_path = str(report_dir / f"{experiment_id}_report.md")
+        report_dir = Path(report_dir)
+        # Reporte inmutable en reports/<experiment_id>/ (Art. 4 datos inmutables, Art. 5 reproducibilidad)
+        immut_dir = report_dir / experiment_id
+        immut_dir.mkdir(parents=True, exist_ok=True)
+        report_path = str(immut_dir / "summary.md")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"# {experiment_id}\n\n")
             f.write(f"## Tribunal\n\n- tribunal_version: {tribunal_version}\n- baseline_id: {baseline_id}\n- verdict: {decision.verdict}\n\n")
@@ -119,6 +147,31 @@ def run_experiment(
                 f.write(f"## Baseline Comparison\n\n")
                 f.write(f"- baseline_id: {baseline_id}\n")
                 f.write(f"- deltas: {baseline_comparison.get('deltas')}\n")
+        # seed.txt
+        (immut_dir / "seed.txt").write_text(str(seed), encoding="utf-8")
+        # environment.txt
+        (immut_dir / "environment.txt").write_text(_env_fingerprint(), encoding="utf-8")
+        # dataset_hash.txt
+        (immut_dir / "dataset_hash.txt").write_text(dataset_hash, encoding="utf-8")
+        # protocol_frozen.json (Art. 6 congelamiento)
+        if protocol is not None:
+            (immut_dir / "protocol_frozen.json").write_text(
+                json.dumps(protocol, indent=2, default=str), encoding="utf-8")
+        # lifecycle.json (ciclo científico: archiva el estado final)
+        lifecycle = {
+            "experiment_id": experiment_id,
+            "stage": "Archived",
+            "verdict": decision.verdict,
+            "domain": (protocol or {}).get("domain"),
+            "seed": seed,
+            "dataset_hash": dataset_hash,
+        }
+        lifecycle_path = str(immut_dir / "lifecycle.json")
+        with open(lifecycle_path, "w", encoding="utf-8") as f:
+            json.dump(lifecycle, f, indent=2, default=str)
+        if dataset_manifest is not None:
+            (immut_dir / "dataset_manifest_ref.txt").write_text(
+                str(dataset_manifest), encoding="utf-8")
 
     return ExperimentArtifacts(
         experiment_id=experiment_id,
@@ -129,6 +182,9 @@ def run_experiment(
         gate_decision=decision,
         registry_record=registry.get(experiment_id),
         report_path=report_path,
+        seed=seed,
+        dataset_hash=dataset_hash,
+        lifecycle_path=lifecycle_path,
     )
 
 

@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from strategy_lab.baseline_manager import Baseline, BaselineManager
 from strategy_lab.evidence import compute_evidence
@@ -51,7 +52,16 @@ def test_run_experiment_returns_full_artifacts(tmp_path):
     assert artifacts.robustness_report.experiment_id == "EXP-001"
     assert isinstance(artifacts.gate_decision, GateDecision)
     assert artifacts.registry_record is not None
-    assert artifacts.report_path.endswith("EXP-001_report.md")
+    # Reporte inmutable en reports/EXP-001/summary.md (formato nuevo, multiplataforma)
+    assert artifacts.report_path is not None
+    _rp = Path(artifacts.report_path)
+    assert _rp.parent.name == "EXP-001"
+    assert _rp.name == "summary.md"
+    # Nuevos campos de reproducibilidad (Fase 2 del spec lab_protocolo_cientifico)
+    assert artifacts.seed is None  # no se pasó seed
+    assert artifacts.dataset_hash.startswith("sha256:")
+    assert artifacts.lifecycle_path is not None
+    assert Path(artifacts.lifecycle_path).name == "lifecycle.json"
 
 
 def test_run_experiment_creates_registry_record(tmp_path):
@@ -80,3 +90,32 @@ def test_run_experiment_without_baseline():
     artifacts = run_experiment("EXP-003", events, registry=registry)
     assert artifacts.baseline_comparison is None
     assert artifacts.gate_decision is not None
+
+
+def test_run_experiment_immutable_reports(tmp_path):
+    """Fase 2 del spec lab_protocolo_cientifico: seed/env/dataset_hash/protocol/lifecycle."""
+    import json
+
+    events = _make_events()
+    protocol = {"domain": "REAL", "alpha": 0.05, "seed": 7}
+    artifacts = run_experiment(
+        "EXP-004", events, seed=7, protocol=protocol, report_dir=tmp_path / "reports",
+    )
+    rep_dir = Path(artifacts.report_path).parent
+    # seed.txt
+    assert (rep_dir / "seed.txt").read_text().strip() == "7"
+    # environment.txt (firma de entorno)
+    assert (rep_dir / "environment.txt").exists()
+    # dataset_hash.txt
+    assert (rep_dir / "dataset_hash.txt").read_text().startswith("sha256:")
+    # protocol_frozen.json (Art. 6 congelamiento)
+    frozen = json.loads((rep_dir / "protocol_frozen.json").read_text())
+    assert frozen["domain"] == "REAL" and frozen["alpha"] == 0.05
+    # lifecycle.json (estado Archived + dominio)
+    life = json.loads((rep_dir / "lifecycle.json").read_text())
+    assert life["stage"] == "Archived" and life["domain"] == "REAL"
+    # reproducibilidad: misma entrada + misma seed => mismo hash
+    artifacts2 = run_experiment(
+        "EXP-004-b", events, seed=7, protocol=protocol, report_dir=tmp_path / "reports",
+    )
+    assert artifacts.dataset_hash == artifacts2.dataset_hash

@@ -204,7 +204,8 @@
         "Todo elemento extiende/referencia lo existente; sin documentos redundantes",
         "pytest tests/ en verde para cualquier codigo nuevo"
       ],
-      "status": "spec_ready",
+      "status": "done",
+      "done_at": "2026-08-06",
       "sdd": true,
       "spec_path": "specs/lab_protocolo_cientifico/",
       "note": "Subordinado a docs/LAB_CHARTER.md. No duplica tribunal/marco/evidencia existentes."

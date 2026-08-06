@@ -1,0 +1,17 @@
+{
+  "dataset_version": "dataset_v001",
+  "created": "2026-08-06",
+  "description": "Cohorte EURUSD REAL para descubrimiento de hipotesis (Art. 10). Referencia SMC_ROOT; no copia velas.",
+  "domain": "REAL",
+  "asset": "EURUSD",
+  "timeframes": ["M15", "M5", "M1"],
+  "source_root": "C:\\Users\\v_jac\\Desktop\\SMC-SYSTEMS\\data\\raw",
+  "files": [
+    {"name": "EURUSD_M15.parquet", "role": "primary", "format": "parquet",
+     "columns": ["time", "open", "high", "low", "close", "tick_volume"]},
+    {"name": "EURUSD_H4.parquet", "role": "htf_context", "format": "parquet",
+     "columns": ["time", "close"]}
+  ],
+  "checksum_policy": "sha256 de cada archivo referenciado",
+  "note": "El checksum real se computa en runtime por experiment_runner._dataset_checksum y se vuelca a reports/EXP-XXX/dataset_hash.txt. Este manifest NO duplica datos: apunta a SMC_ROOT."
+}

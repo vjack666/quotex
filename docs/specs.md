@@ -225,6 +225,22 @@ Hypothesis → Designed → Protocol Frozen → Running → Analyzed → Peer Re
 - **Peer Reviewed**: Scientist + Trader-Humano dictan veredicto.
 - **Archived**: expediente cerrado (PROMOVIDA / INCONCLUSIVE / REFUTADA).
 
+### Checklist del ciclo de vida (Art. 6 / 10 / 11 / 12 del Charter)
+
+Antes de `Protocol Frozen` y en `Archived`, el Scientist verifica:
+
+- [ ] **Art. 6 (Congelamiento)**: α, FDR, poder, n mínimo y dataset declarados y
+      no modificables retroactivamente (`protocol_frozen.json` en el reporte).
+- [ ] **Art. 10 (Dominio)**: el dominio (REAL/OTC/Crypto/Índices × TF) está
+      fijo en `hypothesis.md` y la promoción solo cubre ese dominio.
+- [ ] **Art. 11 (Parsimonia)**: si hay evidencia equivalente, se prefirió la
+      hipótesis más simple.
+- [ ] **Art. 12 (Muerte definitiva)**: si fue refutada 3× en datasets
+      independientes, se archiva definitivamente y no se re-experimenta sin
+      ADR/SPEC nuevo.
+- [ ] **Effect Size (R12)** y **Costo operacional (R13)** reportados en
+      `validation.md` (plantilla en `docs/lab_templates/`).
+
 ## Cuándo NO aplica SDD
 
 Las features con `"sdd": false` o sin el campo `sdd` NO tienen spec.
