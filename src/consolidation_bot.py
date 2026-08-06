@@ -69,10 +69,10 @@ if hasattr(_stdout_handler.stream, "reconfigure"):
     except Exception:
         pass
 
-# Libro (bitácora del bot) guardado en: data/logs/runtime/consolidation_bot.log
+# Bitácora del bot (bajo pytest -> .test.log: los dobles de test no deben ensuciar el log vivo)
 _LOGS_RUNTIME_DIR = Path(__file__).resolve().parent.parent / "data" / "logs" / "runtime"
 _LOGS_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-_CONSOLIDATION_LOG_PATH = _LOGS_RUNTIME_DIR / "consolidation_bot.log"
+_CONSOLIDATION_LOG_PATH = _LOGS_RUNTIME_DIR / ("consolidation_bot.test.log" if "pytest" in sys.modules else "consolidation_bot.log")
 
 
 # RotatingFileHandler que NO crashea cuando 2 procesos (server + trader)
@@ -485,8 +485,8 @@ async def main(
         bot.continuous = None
 
     # Register live bot with web BotRunner (if this process is the runner task).
-    if _runner.state in ("starting", "running"):
-        _runner.bind_bot(bot)
+    if _get_runner().state in ("starting", "running"):
+        _get_runner().bind_bot(bot)
 
     # ── Carga de pesos calibrados del entry_scorer ──────────────────────────
     try:
@@ -1355,7 +1355,23 @@ class BotRunner:
             self._client = None
 
 
-_runner = BotRunner()
+_runner_instance: "BotRunner | None" = None
+
+
+def _get_runner() -> "BotRunner":
+    """BotRunner perezoso: su __init__ lee la config del hub del disco y pisa
+    globals de config (DURATION_SEC). Crearlo al importar contaminaba a todo el
+    que importara este módulo (tests, scripts del lab). Nace al primer uso."""
+    global _runner_instance
+    if _runner_instance is None:
+        _runner_instance = BotRunner()
+    return _runner_instance
+
+
+def __getattr__(name: str):  # PEP 562: `from consolidation_bot import _runner`
+    if name == "_runner":
+        return _get_runner()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _extract_candidates_for_hub(bot: Any) -> list[dict]:

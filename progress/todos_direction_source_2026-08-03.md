@@ -10,6 +10,10 @@
 >   valen si van a favor de la dirección (scanner.py:1500-1502).
 > - Destinada a **Hermes (otra ventana)**. Tanda anterior archivada en
 >   `progress/plan_completado/todos_auditoria_edificio_2026-08-03.md`.
+> - **CORRECCIÓN 03-08 (orden correcto)**: el WR NO se evalúa por piezas. La
+>   decisión M1 vs M15 (Fase C) usa WR de dirección, pero el WR recién se mide
+>   cuando TODA la estrategia esté completa (freno = alerta, cruce = condición,
+>   señal final). La Fase C de esta tanda queda **en espera** hasta eso.
 
 ---
 
@@ -76,6 +80,11 @@ incluido `_feed_edificio` scanner.py:3015-3048 si aplica).
 ---
 
 ## Fase C — Análisis y decisión (read-only → aprobación del usuario)
+
+> **⏸ EN ESPERA (corrección 03-08)**: el WR se evalúa cuando TODA la estrategia
+> esté completa. Esta Fase C (decisión M1 vs M15 por WR) NO se ejecuta hasta
+> que el edificio esté completo. La Fase A (telemetría) sí sigue adelante: sirve
+> para juntar datos mientras tanto.
 
 ### [ ] C1. Query de WR por origen
 - SQL a `scan_candidates` (strategy EDIFICIO, `direction_source NOT NULL`):

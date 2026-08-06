@@ -207,6 +207,7 @@ class BlackBoxRecorder:
                 "session_id", "stoch_m15", "stoch_contradicts",
                 "loss_reason", "improvement_hint", "duration_sec",
                 "stoch_m5", "filter_funnel", "extreme_read",
+                "direction_source",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
@@ -326,18 +327,40 @@ class BlackBoxRecorder:
         order_id = data.get("order_id", None)  # ← Use None instead of ""
         
         # Detalles específicos por estrategia (JSON)
-        strategy_details = json.dumps(data.get("strategy_details", {}), ensure_ascii=False)
-        
+        strategy_details_raw = data.get("strategy_details") if isinstance(data.get("strategy_details"), dict) else {}
+        if not strategy_details_raw:
+            strategy_details_raw = {}
+        strategy_details = json.dumps(strategy_details_raw, ensure_ascii=False)
+
         # Velas (JSON). Cero NULL: si no hay velas se guarda "[]", no NULL.
         candles_1m = json.dumps(data.get("candles_1m", []) or [], ensure_ascii=False)
         candles_5m = json.dumps(data.get("candles_5m", []) or [], ensure_ascii=False)
         candles_15m = json.dumps(data.get("candles_15m", []) or [], ensure_ascii=False)
         session_id = data.get("session_id", None)
-        # Stoch (JSON). Cero NULL: compute_stoch siempre devuelve dict (neutro si
-        # faltan velas); si no llega nada, se guarda "{}" en vez de NULL.
-        stoch_m15 = json.dumps(data.get("stoch_m15", {}) or {}, ensure_ascii=False)
-        stoch_m5 = json.dumps(data.get("stoch_m5", {}) or {}, ensure_ascii=False)
-        stoch_m1 = json.dumps(data.get("stoch_m1", {}) or {}, ensure_ascii=False)
+
+        # Stoch / velas de respaldo: si no vinieron en el payload, usar strategy_details.
+        _raw_stoch_m15 = data.get("stoch_m15")
+        stoch_m15 = json.dumps(_raw_stoch_m15 if isinstance(_raw_stoch_m15, dict) else (strategy_details_raw.get("stoch_m15") or {}), ensure_ascii=False)
+
+        _raw_stoch_m5 = data.get("stoch_m5")
+        stoch_m5 = json.dumps(_raw_stoch_m5 if isinstance(_raw_stoch_m5, dict) else (strategy_details_raw.get("stoch_m5") or {}), ensure_ascii=False)
+
+        _raw_stoch_m1 = data.get("stoch_m1")
+        stoch_m1 = json.dumps(_raw_stoch_m1 if isinstance(_raw_stoch_m1, dict) else (strategy_details_raw.get("stoch_m1") or {}), ensure_ascii=False)
+
+        def _to_candle_list(value):
+            if isinstance(value, list):
+                return value or []
+            if isinstance(value, dict) and value:
+                return [value]
+            return []
+
+        fallback_candles_15m = _to_candle_list(strategy_details_raw.get("candle_15m_prev"))
+        fallback_candles_5m = _to_candle_list(strategy_details_raw.get("candle_5m_prev"))
+        if not candles_15m or candles_15m == "[]":
+            candles_15m = json.dumps(fallback_candles_15m, ensure_ascii=False)
+        if not candles_5m or candles_5m == "[]":
+            candles_5m = json.dumps(fallback_candles_5m, ensure_ascii=False)
         filter_funnel = json.dumps(data.get("filter_funnel", []) or [], ensure_ascii=False)
         duration_sec = data.get("duration_sec", None)
         if duration_sec is not None:
@@ -373,6 +396,8 @@ class BlackBoxRecorder:
             "brake_ref_range": "REAL",
             "brake_witness_ts": "REAL",
             "brake_rule_version": "TEXT",
+            # Telemetría Fase A: origen de la dirección (M1 o M15).
+            "direction_source": "TEXT",
         }
         for _col, _ctype in _EXTRA_COLS.items():
             try:
@@ -428,6 +453,7 @@ class BlackBoxRecorder:
             except (TypeError, ValueError):
                 brake_witness_ts = None
         brake_rule_version = data.get("brake_rule_version", None)
+        direction_source = data.get("direction_source", None)
 
         cur.execute('''
             INSERT INTO scan_candidates 
@@ -435,15 +461,15 @@ class BlackBoxRecorder:
              decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
              candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
              extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
-             brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version)
+             brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version, direction_source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?)
         ''', (
             scan_id, ts, strategy, asset, direction, score, confidence, payout,
             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
             candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
             extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
-            brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version
+            brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version, direction_source
         ))
         candidate_id = int(cur.lastrowid or 0)
         con.commit()

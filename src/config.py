@@ -77,7 +77,7 @@ EDIFICIO_HAMMER_MIN_TAIL_RATIO = 2.0
 # próxima vela M15 y exige que la vela CERRADA mantenga compresión
 # range(nueva cerrada) < este ratio × range(vela cerrada de referencia).
 EDIFICIO_BRAKE_CONFIRM_RATIO = 0.7
-EDIFICIO_RULE_VERSION = "2026-08-02e"   # versión de reglas EDIFICIO para backtest/auditoría
+EDIFICIO_RULE_VERSION = "2026-08-03a"   # versión de reglas EDIFICIO para backtest/auditoría
 # Espera post-freno matemática (body/range de la 1ª vela M15 post-freno).
 # 0.0 = medición activa sin veto; subir cuando el experimento defina el corte.
 EDIFICIO_POST_BRAKE_MIN_RATIO = 0.0

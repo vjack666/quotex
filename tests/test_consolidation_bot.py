@@ -10,6 +10,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _restore_config_globals():
+    """main() muta DURATION_SEC global (900→300) y no lo revierte; si no se
+    aísla, contamina a los tests siguientes de la suite (p.ej. scanner_strat_a).
+    Snapshot + restore por test."""
+    import config as cfg
+    saved = {k: getattr(cfg, k) for k in dir(cfg) if k.isupper()}
+    yield
+    for k, v in saved.items():
+        setattr(cfg, k, v)
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:

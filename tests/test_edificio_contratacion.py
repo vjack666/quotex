@@ -12,6 +12,7 @@ from edificio_contratacion import (  # noqa: E402
     PISO_1,
     PISO_2,
     PISO_3,
+    PISO_FUERA,
     BuildingCard,
     EdificioContratacion,
 )
@@ -23,6 +24,16 @@ def _subir_a_p3(edificio: EdificioContratacion, asset: str = "A_otc", direction:
     Usa la confirmación del freno por vela M15 cerrada y la ventana de
     separación K/D limpia cumplida para la puerta P2→P3.
     """
+    # Semilla mínima para la secuencia: kd_distance debe existir antes de
+    # cualquier sincronización con SequenceEngine.
+    card = BuildingCard(
+        asset=asset,
+        direction=direction,
+        payout=90,
+        piso=PISO_FUERA,
+        kd_distance=2.1,
+    )
+    edificio._cards[asset] = card
     assert edificio.evaluate(asset=asset, direction=direction, payout=90, payout_ok=True) == "subio"
     # Primer scan: detecta freno, queda en P1 esperando confirmación.
     assert edificio.evaluate(
@@ -39,6 +50,7 @@ def _subir_a_p3(edificio: EdificioContratacion, asset: str = "A_otc", direction:
     card.brake_witness_ts = 2.0
     card.piso = PISO_2
     card.p2_at = 2.0
+    card.kd_distance = 2.1
     # Tercer scan: en P2, cruce limpio → inicia la espera de separación.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
@@ -68,6 +80,8 @@ def _llegar_a_contratado(edificio: EdificioContratacion, asset: str = "A_otc", d
     card = edificio.get_card(asset)
     assert card is not None
     card.pending_since = _time.time() - 301
+    # Sincronizar secuencia para que pase el gate antes de CONTRATADO.
+    edificio._sync_sequence_card(asset, now_ts="2026-08-05T12:00:00Z")
     # Segundo evaluate: delay cumplido → CONTRATADO.
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
@@ -87,6 +101,7 @@ def test_activo_sube_hasta_contratado_y_encola_evento():
     card = edificio.get_card("A_otc")
     assert card is not None
     card.pending_since = time.time() - 301
+    edificio._sync_sequence_card("A_otc", now_ts="2026-08-05T12:00:00Z")
     assert edificio.evaluate(
         asset="A_otc", direction="PUT", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
@@ -477,7 +492,7 @@ def test_p3_entry_pending_reset_al_bajar_a_p2_y_reingreso_despues():
     assert result3 == "stay"
     assert edificio.get_card("A_otc").piso == PISO_2
     assert edificio.get_card("A_otc").entry_pending is False
-    # Cumple separación y promueve a P3: debe re-marcar entrada con delay nuevo.
+    # Simular separación cumplida → promueve a P3.
     card3 = edificio.get_card("A_otc")
     assert card3 is not None
     card3.cross_separation_since = time.time() - 901
@@ -486,21 +501,12 @@ def test_p3_entry_pending_reset_al_bajar_a_p2_y_reingreso_despues():
         brake_ok=True, extreme_ok=True, cross_ok=True,
     )
     assert result4 == "subio"
-    # Reingreso a P3: la 5m gate debe marcar entrada pendiente nuevamente.
-    vela_grande2 = {
-        "name": "bullish_engulfing",
-        "side": "bull",
-        "body": 0.037,
-        "total_range": 0.042,
-        "body_pct": 0.881,
-        "open": 290.942,
-        "close": 290.979,
-        "ts": 1785597900,
-    }
+    # Reingreso a P3: en este ciclo NO marca entrada pendiente;
+    # la 5m gate se evalúa en el próximo scan.
     result5 = edificio.evaluate(
         asset="A_otc", direction="CALL", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
-        close_candle_5m=vela_grande2,
+        close_candle_5m=vela_grande,
     )
     assert result5 == "stay"
     assert edificio.get_card("A_otc").entry_pending is True
@@ -524,6 +530,10 @@ def test_p2_pierde_brake_extremo_y_vuelve_a_p1():
     )
     assert result == "bajo"
     card = edificio.get_card("A_otc")
+    assert card is not None
+    assert card.piso == PISO_1
+    assert card.entry_pending is False
+    assert card.pending_since is None
     assert card.piso == PISO_1
     assert card.brake_at is None
     assert card.brake_confirmed_at is None
@@ -531,4 +541,61 @@ def test_p2_pierde_brake_extremo_y_vuelve_a_p1():
     assert card.cross_separation_since is None
     assert card.entry_pending is False
     assert card.pending_since is None
+
+
+def test_freno_es_tarjeta_de_acceso_a_p2_sin_extremo():
+    """El freno (candidato + CONFIRMED con vela M15 cerrada) es la tarjeta de
+    acceso a P2: el extremo NO es requisito de la puerta, se espera dentro de P2."""
+    edificio = EdificioContratacion()
+    assert edificio.evaluate(asset="A_otc", direction="PUT", payout=90, payout_ok=True) == "subio"
+    # Candidato de freno arranca con SOLO brake_ok (sin extremo).
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=False,
+    ) == "stay"
+    card = edificio.get_card("A_otc")
+    assert card is not None
+    assert card.piso == PISO_1
+    assert card.brake_at is not None
+    # Confirmar el freno con vela M15 cerrada (ratio 0.5 < 0.7) → la tarjeta
+    # de acceso se emite y la card queda en P2.
+    card.brake_at = 1.0
+    card.brake_confirmed_at = 2.0
+    card.brake_verdict = "CONFIRMED"
+    card.brake_ratio = 0.50
+    card.brake_witness_ts = 2.0
+    card.piso = PISO_2
+    card.p2_at = 2.0
+    # La permanencia en P2 exige extremo vigente: sin extremo baja a P1.
+    assert edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=True, extreme_ok=False,
+    ) == "bajo"
+    assert edificio.get_card("A_otc").piso == PISO_1
+
+
+def test_p2_estadia_se_sostiene_con_tarjeta_y_extremo_vigente():
+    """La estadía en P2 se sostiene con freno CONFIRMED + extremo vigente.
+    El brake_ok instantáneo (vela en formación) NO revoca la tarjeta."""
+    edificio = EdificioContratacion()
+    _subir_a_p3(edificio)
+    edificio.pop_contratados()
+    # Bajar manualmente a P2 con la tarjeta emitida.
+    edificio._cards["A_otc"].piso = PISO_2
+    edificio._cards["A_otc"].p2_at = 1.0
+    # brake_ok instantáneo False (vela en formación abrió amplia) pero
+    # tarjeta CONFIRMED + extremo vigente → se queda en P2.
+    result = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=False, extreme_ok=True, cross_ok=False,
+    )
+    assert result == "stay"
+    assert edificio.get_card("A_otc").piso == PISO_2
+    # Pierde el extremo (contexto del cruce) → baja a P1.
+    result2 = edificio.evaluate(
+        asset="A_otc", direction="PUT", payout=90, payout_ok=True,
+        brake_ok=False, extreme_ok=False, cross_ok=False,
+    )
+    assert result2 == "bajo"
+    assert edificio.get_card("A_otc").piso == PISO_1
 

@@ -28,3 +28,4 @@ test_exact_target.py
 
 # Flutter calculator project (build artifacts)
 calculadora_nuevo/
+data/logs/runtime/consolidation_bot.test.log

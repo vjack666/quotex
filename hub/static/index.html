@@ -953,10 +953,13 @@ function dirPill(d){
 function setText(id, v){ const e=document.getElementById(id); if(e) e.textContent = (v===null||v===undefined||v==="")?"–":v; }
 function p2Lights(c){
   if(c.piso !== 2) return '';
-  const ok = (typeof c.brake_ok === 'boolean' && typeof c.extreme_ok === 'boolean') ? (c.brake_ok && c.extreme_ok) : false;
+  // Estadía en P2: tarjeta (freno CONFIRMED con vela M15 cerrada) + extremo vigente.
+  // El brake_ok instantáneo de la vela en formación NO cuenta para la estadía.
+  const tarjeta = c.brake_verdict === "CONFIRMED";
+  const ok = tarjeta && !!c.extreme_ok;
   const stick = (typeof c.cross_sticky !== 'undefined') ? (!!c.cross_sticky) : false;
   const color = (ok) ? ((stick) ? 'var(--orange)' : 'var(--emerald)') : 'var(--faint)';
-  const title = (stick) ? 'P2 · cruce pegajoso' : ((ok) ? 'P2 listo' : 'P2 pendiente de freno/extremo');
+  const title = (stick) ? 'P2 · cruce pegajoso' : ((ok) ? 'P2 listo' : (tarjeta ? 'P2 · esperando extremo' : 'P2 · sin tarjeta (freno no confirmado)'));
   const tooltip = ` title="${title}"`;
   return `<span${tooltip} style="width:8px;height:8px;border-radius:50%;background:${color};box-shadow:0 0 6px ${color};flex-shrink:0;"></span>`;
 }
@@ -1153,6 +1156,11 @@ function renderEdificio(ed){
         if(c.has_poi_p1) html += `<span style="font-size:9px;color:var(--emerald);">✓P1</span>`;
         if(c.has_poi_p2) html += `<span style="font-size:9px;color:var(--emerald);">✓P2</span>`;
         if(c.has_poi_p3) html += `<span style="font-size:9px;color:var(--emerald);">✓P3</span>`;
+        // Tarjeta de acceso a P2: freno CONFIRMED (subió a P2 porque frenó)
+        if(c.brake_verdict === "CONFIRMED"){
+          const r = (c.brake_ratio != null) ? ` · ratio ${c.brake_ratio.toFixed(2)}` : '';
+          html += `<span style="font-size:9px;color:var(--orange);background:rgba(251,146,60,.15);border-radius:999px;padding:1px 6px;font-weight:510;" title="Tarjeta de acceso a P2: freno confirmado${r}">freno ✓${r}</span>`;
+        }
         // Estado de la orden (solo CONTRATADO)
         if(c.order_status === "won"){
           html += `<span style="font-size:9px;color:var(--emerald);background:rgba(16,185,129,.18);border-radius:999px;padding:1px 6px;font-weight:510;">WIN ✓</span>`;

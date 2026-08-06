@@ -25,6 +25,7 @@ from config import (
     EDIFICIO_POST_BRAKE_MIN_RATIO,
     EDIFICIO_SEPARATION_WAIT_SEC,
 )
+from sequence_engine import SequenceEngine, SequenceCard
 
 log = logging.getLogger("edificio_contratacion")
 
@@ -98,6 +99,9 @@ class BuildingCard:
     candle_5m_prev: Optional[dict] = None      # forma de la última vela 5m cerrada
     candles_15m_snap: list = field(default_factory=list)  # velas 15m crudas (últimas N)
     candles_5m_snap: list = field(default_factory=list)   # velas 5m crudas (últimas N)
+
+    # Telemetría Fase A: origen de la dirección del trade en el scanner.
+    direction_source: Optional[str] = None     # "M1" | "M15" | ""
 
     # Metadatos
     payout: int = 0
@@ -175,6 +179,32 @@ class ContratadoEvent:
     order_status: str = ""  # pending | sent | won | lost | failed
 
 
+def _as_dict_candles(candles) -> list[dict]:
+    """Normaliza velas a dicts: el Edificio siempre las lee con .get().
+
+    Acepta dicts ya serializados o dataclasses Candle (models.Candle), que es
+    lo que entrega el scanner. Sin esto, `'Candle' object has no attribute
+    'get'` rompe la evaluación del activo.
+    """
+    out: list[dict] = []
+    for c in candles or []:
+        if isinstance(c, dict):
+            out.append(c)
+            continue
+        o, h, l, cl = (
+            float(getattr(c, "open", 0.0)),
+            float(getattr(c, "high", 0.0)),
+            float(getattr(c, "low", 0.0)),
+            float(getattr(c, "close", 0.0)),
+        )
+        out.append({
+            "ts": int(getattr(c, "ts", 0) or 0),
+            "open": o, "high": h, "low": l, "close": cl,
+            "body": abs(cl - o), "range": h - l,
+        })
+    return out
+
+
 def _detect_hammer_pattern(
     candle: Optional[dict],
     direction: str,
@@ -229,10 +259,57 @@ class EdificioContratacion:
         self._cards: Dict[str, BuildingCard] = {}
         self._contratados: List[ContratadoEvent] = []
         self._cycle_count: int = 0
-        # Órdenes confirmadas por el broker, pendientes de resolución WIN/LOSS.
-        # key = order_id; value = {asset, direction, amount, payout, order_ref,
-        # sent_at, duration_sec, resolved, attempts}
         self._sent_orders: Dict[str, Dict[str, Any]] = {}
+        self._sequence_engine = SequenceEngine(
+            min_dwell_ticks={"RECEPCION": 1, "CEREBRO": 1, "ENTRADA": 0},
+            min_kd_distance=2.0,
+        )
+        self._sequence_cards: Dict[str, SequenceCard] = {}
+
+    def _get_sequence_card(self, asset: str, direction: str, payout: int) -> SequenceCard:
+        if asset not in self._sequence_cards:
+            self._sequence_cards[asset] = SequenceCard(
+                hypothesis_id=asset,
+                asset=asset,
+                direction=direction,
+            )
+        seq_card = self._sequence_cards[asset]
+        if direction and not seq_card.direction:
+            seq_card.direction = direction
+        if payout:
+            seq_card.hypothesis_id = f"{asset}:{payout}%"
+        return seq_card
+
+    def _sync_sequence_card(self, asset: str, now_ts: str) -> SequenceCard:
+        """Adapta el estado del Edificio a la secuencia, vela a vela (Ley 1/2/5/12).
+
+        No fuerza `current_floor` por fuera (Ley 5/3): el motor decide el
+        avance según sus propias condiciones. El piso real del Edificio se pasa
+        como feature `edificio_floor` para que el motor lo use como contexto, no
+        como comando. Una sola evaluación por llamada (Ley 2/12): quien llama
+        itera vela a vela; nunca un while que empuja la secuencia a ENTRADA.
+        """
+        card = self._cards.get(asset)
+        seq_card = self._get_sequence_card(
+            asset=asset,
+            direction=getattr(card, "direction", "") or "",
+            payout=int(getattr(card, "payout", 0) or 0),
+        )
+        features = {
+            "payout": float(getattr(card, "payout", 0) or 0),
+            "brake_ok": bool(getattr(card, "brake_ok", False)),
+            "extreme_ok": bool(getattr(card, "extreme_ok", False)),
+            "cross_ok": bool(getattr(card, "cross_ok", False)),
+            "cross_limpieza_ok": not bool(getattr(card, "cross_sticky", False)),
+            "kd_distance": float(getattr(card, "kd_distance", 0) or 0) if getattr(card, "kd_distance", None) is not None else None,
+            "edificio_floor": getattr(card, "piso", PISO_FUERA),
+        }
+        # Una sola evaluación de la vela actual (Ley 2/12). El motor recibe el
+        # piso REAL del Edificio como hecho observado y valida que la secuencia
+        # se construyó legalmente (Ley 5/3/4); el llamador repite por cada vela.
+        edificio_floor = getattr(card, "piso", PISO_FUERA)
+        self._sequence_engine.observe_floor(seq_card, edificio_floor, features, timestamp=now_ts)
+        return seq_card
 
     # ── API pública ────────────────────────────────────────────────
 
@@ -288,8 +365,6 @@ class EdificioContratacion:
         card.stoch_d = stoch_d
         if stoch_k is not None and stoch_d is not None:
             card.kd_distance = abs(float(stoch_k) - float(stoch_d))
-        else:
-            card.kd_distance = None
         card.score = score
         card.last_updated = now
         if not card.direction and direction:
@@ -305,9 +380,9 @@ class EdificioContratacion:
         if candle_5m_prev is not None:
             card.candle_5m_prev = candle_5m_prev
         if candles_15m:
-            card.candles_15m_snap = list(candles_15m)[-24:]
+            card.candles_15m_snap = _as_dict_candles(candles_15m)[-24:]
         if candles_5m:
-            card.candles_5m_snap = list(candles_5m)[-24:]
+            card.candles_5m_snap = _as_dict_candles(candles_5m)[-24:]
 
         # Patrón de la vela 5m cerrada (para caja negra / martillo M5).
         _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else candle_5m_prev
@@ -341,7 +416,10 @@ class EdificioContratacion:
         if card.piso == PISO_1:
             if not payout_ok:
                 return self._expulsar(asset)
-            if brake_ok and extreme_ok:
+            # Tarjeta de acceso al P2: el FRENO. El extremo se espera DENTRO de
+            # P2 (Prueba B), no es requisito de la puerta. El freno es una
+            # ALERTA de preparación: el par quedó listo para esperar el cruce.
+            if brake_ok:
                 # Nuevo candidato: capturar la vela 15m cerrada de referencia.
                 if card.brake_at is None:
                     card.brake_at = now
@@ -369,9 +447,9 @@ class EdificioContratacion:
                     card.brake_verdict = "CONFIRMED"
                     card.piso = PISO_2
                     card.p2_at = now
-                    card.reason = f"P2 OK — freno confirmado con vela M15 cerrada + extremo ({payout}%)"
+                    card.reason = f"P2 OK — tarjeta de acceso: freno CONFIRMED con vela M15 cerrada ({payout}%)"
                     log.info(
-                        "[EDIFICIO] %s → P2 (freno CONFIRMED ratio=%.2f, payout=%d%%)",
+                        "[EDIFICIO] %s → P2 (tarjeta de acceso: freno CONFIRMED ratio=%.2f, payout=%d%%)",
                         asset, ratio, payout,
                     )
                     # Experimento: medir body/ratio de la primera vela M15 post-freno
@@ -388,14 +466,14 @@ class EdificioContratacion:
                     asset, ratio, EDIFICIO_BRAKE_CONFIRM_RATIO,
                 )
                 return "stay"
-            # Se perdió brake o extremo antes del cierre de la vela: cancelar.
+            # Se perdió el freno antes del cierre de la vela: cancelar la candidatura.
             if card.brake_at is not None:
                 card.brake_verdict = "CANCELLED"
-                log.info("[EDIFICIO] %s: freno CANCELLED (se perdió brake/extremo)", asset)
+                log.info("[EDIFICIO] %s: freno CANCELLED (se perdió el brake)", asset)
             card.brake_at = None
             card.brake_confirmed_at = None
             self._brake_clear_reference(card)
-            card.reason = f"P1 OK — esperando brake+extremo ({payout}%)"
+            card.reason = f"P1 OK — esperando freno (tarjeta de acceso a P2) ({payout}%)"
             return "stay"
 
         if card.piso == PISO_2:
@@ -427,10 +505,18 @@ class EdificioContratacion:
                 card.reason = f"P2 OK — sticky: esperar separación K/D ({payout}%)"
                 log.info("[EDIFICIO] %s: sticky en P2, quedando en espera", asset)
                 return "stay"
-            if brake_ok and extreme_ok:
+            # Estadía en P2: se sostiene con la tarjeta (freno CONFIRMED con vela
+            # cerrada) + extremo vigente como contexto del cruce. El brake_ok
+            # instantáneo (vela en formación) NO revoca la tarjeta — es ruidoso.
+            if card.brake_verdict == "CONFIRMED" and extreme_ok:
                 card.reason = f"P2 OK — esperando cruce K/D ({payout}%)"
                 return "stay"
-            card.reason = f"P2 pendiente — brake+extremo ({payout}%)"
+            if card.brake_verdict != "CONFIRMED":
+                card.reason = f"P2 pendiente — sin tarjeta de acceso ({payout}%)"
+                log.info("[EDIFICIO] %s: baja a P1 (sin freno CONFIRMED)", asset)
+            else:
+                card.reason = f"P2 pendiente — extremo perdido ({payout}%)"
+                log.info("[EDIFICIO] %s: baja a P1 (extremo perdido)", asset)
             card.piso = PISO_1
             card.cross_separation_since = None
             card.entry_pending = False
@@ -441,7 +527,6 @@ class EdificioContratacion:
             card.brake_ratio = None
             card.brake_witness_ts = None
             card.p2_at = None
-            log.info("[EDIFICIO] %s: baja a P1 (perdió brake+extremo)", asset)
             return "bajo"
 
         if card.piso == PISO_3:
@@ -461,7 +546,7 @@ class EdificioContratacion:
                 card.entry_pending = False
                 card.pending_since = None
                 return "bajo"
-            if not cross_ok:
+            if not cross_ok or cross_sticky:
                 card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
                 return "stay"
             # Gate vela 5m: body fuerte O martillo M5 en dirección del trade.
@@ -479,6 +564,36 @@ class EdificioContratacion:
                 if card.pending_since is None:
                     card.pending_since = now
                 if card.pending_since + 300 < now:  # 5 min = inicio próxima vela 15m
+                    _next = self._cards.get(asset)
+                    if _next is None or _next.piso != PISO_3:
+                        card.entry_pending = False
+                        card.pending_since = None
+                        card.reason = (
+                            f"P3 OK — asset no vigente al contratar "
+                            f"({('ausente' if _next is None else f'piso={_next.piso}')}) ({payout}%)"
+                        )
+                        log.info("[EDIFICIO] %s: descartado CONTRATADO — asset no vigente", asset)
+                        return "stay"
+                    from datetime import datetime, timezone
+                    _ts = datetime.now(timezone.utc).isoformat() + "Z"
+                    seq_card = self._sync_sequence_card(asset, now_ts=_ts)
+                    if not self._sequence_engine.is_contratado_valido(seq_card):
+                        reject_reason = getattr(seq_card, "reject_reason", None)
+                        if hasattr(seq_card, "history") and seq_card.history:
+                            last = seq_card.history[-1]
+                            reject_reason = last.reject_reason if hasattr(last, "reject_reason") else reject_reason
+                        card.entry_pending = False
+                        card.pending_since = None
+                        card.reason = (
+                            f"CONTRATADO bloqueado por secuencia "
+                            f"({reject_reason or 'secuencia_no_valida'}) ({payout}%)"
+                        )
+                        log.info(
+                            "[EDIFICIO] %s: CONTRATADO bloqueado por secuencia (%s)",
+                            asset,
+                            reject_reason or "secuencia_no_valida",
+                        )
+                        return "stay"
                     card.piso = CONTRATADO
                     card.contratado_at = now
                     card.order_status = "pending"

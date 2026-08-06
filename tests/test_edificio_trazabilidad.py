@@ -82,6 +82,7 @@ async def test_f1_envio_confirmado_registra_caja_negra_y_ticket(monkeypatch):
     card.brake_witness_ts = 2.0
     card.piso = PISO_2
     card.p2_at = 2.0
+    card.kd_distance = 2.1
     # Cruce limpio en P2 → espera de separación K/D.
     assert edificio.evaluate(asset="USDNGN_otc", direction="CALL", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"
@@ -151,6 +152,7 @@ async def test_f1_fallo_caja_negra_no_rompe_envio(monkeypatch):
     card.brake_witness_ts = 2.0
     card.piso = PISO_2
     card.p2_at = 2.0
+    card.kd_distance = 2.1
     # Cruce limpio en P2 → espera de separación K/D.
     assert edificio.evaluate(asset="XAGUSD_otc", direction="PUT", payout=90, payout_ok=True,
                              brake_ok=True, extreme_ok=True, cross_ok=True) == "stay"

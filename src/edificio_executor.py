@@ -359,9 +359,11 @@ def _record_sent_to_black_box(
                 "extreme_ok": bool(getattr(card, "extreme_ok", False)),
                 "cross_ok": bool(getattr(card, "cross_ok", False)),
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
-                "cross_limpieza_ok": _cross_limpieza_ok,
-                "kd_distance": _kd_distance,
-                "pattern_5m": _pattern_5m,
+                "kd_distance": float(getattr(card, "kd_distance", 0) or 0) if getattr(card, "kd_distance", None) is not None else None,
+                "cross_limpieza_ok": bool(getattr(card, "cross_ok", False) and not getattr(card, "cross_sticky", False)),
+                "stoch_m15": getattr(card, "stoch_m15_full", None)
+                or {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)},
+                "stoch_m5": getattr(card, "stoch_m5_full", None) or {},
                 "body_5m": getattr(card, "body_5m", None),
                 "piso_previa": getattr(card, "piso", None),
                 "rule_version": EDIFICIO_RULE_VERSION,
@@ -413,10 +415,17 @@ def _record_failed_send_to_black_box(
             "strategy_details": {
                 "amount": float(amount),
                 "order_ref": ev.order_ref,
+                "candle_15m_prev": getattr(card, "candle_15m_prev", None),
+                "candle_5m_prev": getattr(card, "candle_5m_prev", None),
                 "brake_ok": bool(getattr(card, "brake_ok", False)),
                 "extreme_ok": bool(getattr(card, "extreme_ok", False)),
                 "cross_ok": bool(getattr(card, "cross_ok", False)),
                 "cross_sticky": bool(getattr(card, "cross_sticky", False)),
+                "kd_distance": float(getattr(card, "kd_distance", 0) or 0) if getattr(card, "kd_distance", None) is not None else None,
+                "cross_limpieza_ok": bool(getattr(card, "cross_ok", False) and not getattr(card, "cross_sticky", False)),
+                "stoch_m15": getattr(card, "stoch_m15_full", None)
+                or {"k": getattr(card, "stoch_k", None), "d": getattr(card, "stoch_d", None)},
+                "stoch_m5": getattr(card, "stoch_m5_full", None) or {},
                 "body_5m": getattr(card, "body_5m", None),
                 "piso_previa": getattr(card, "piso", None),
                 "rule_version": EDIFICIO_RULE_VERSION,
@@ -427,6 +436,9 @@ def _record_failed_send_to_black_box(
                     "body_5m>0.03|martillo_M5",
                 ],
                 "send_error": broker_error,
+                "post_brake_body_ratio": float(getattr(card, "post_brake_body_ratio", 0) or 0) if getattr(card, "post_brake_body_ratio", None) is not None else None,
+                "post_brake_would_pass": bool(getattr(card, "post_brake_would_pass", False)) if getattr(card, "post_brake_would_pass", None) is not None else None,
+                "post_brake_measured_at": float(getattr(card, "post_brake_measured_at", 0) or 0) if getattr(card, "post_brake_measured_at", None) is not None else None,
             },
         })
     except Exception as exc:

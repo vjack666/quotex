@@ -1531,8 +1531,8 @@ class AssetScanner:
                     "extreme_read": int(_extreme_ok),
                     "candle_15m_prev": _candle_15m_prev,
                     "candle_5m_prev": _candle_5m_prev,
-                    "candles_15m": list(_candles_15m)[-24:],
-                    "candles_5m": list(_candles_5m)[-24:],
+                    "candles_15m": self._serialize_candles(list(_candles_15m)[-24:]),
+                    "candles_5m": self._serialize_candles(list(_candles_5m)[-24:]),
                 }
             except Exception:
                 flags_by_asset[_sym] = {

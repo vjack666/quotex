@@ -6,6 +6,24 @@ El scanner deja de revisar todo de golpe cada 60 segundos. Cada activo entra en 
 
 ---
 
+## ⚠ El orden correcto (IMPORTANTE — leelo antes de tocar código)
+
+**El freno NO genera entradas. El freno es una ALERTA.**
+
+1. **Freno (fase 1)** — El freno confirma que el par está **preparado** para
+   esperar el cruce de líneas del estocástico. Es una condición de preparación,
+   NO un disparador de orden. Que un par frene NO significa "entrar": significa
+   "empezar a esperar el cruce".
+2. **Cruce de líneas K/D (fase 2)** — El cruce limpio del estocástico M15 es
+   OTRA condición. Tampoco envía señal de compra/venta por sí solo.
+3. **La señal final** — Se compone de esperar el cruce de velas + detectar
+   separación entre líneas, y recién con la estrategia **completa** se evalúa
+   el win rate.
+
+**Regla de oro:** mientras la estrategia no esté completa, el edificio NO debe
+llegar a enviar órdenes por el freno ni por el cruce solos. El win rate se mide
+cuando TODA la estrategia esté montada, no por piezas sueltas.
+
 ## Regla N°1 — La única puerta de salida
 
 **Si el activo deja de pagar lo que el usuario pide → se va del edificio. Pierde todo.**
@@ -56,7 +74,7 @@ El activo **sube piso por piso obligatoriamente**. No puede pasar de P1 a P3 dir
 
 ```
 P1 (paga bien) → POI ✅ → sube a P2
-P2 (freno OK + extremo OK) → POI ✅ → sube a P3
+P2 (tarjeta de acceso: freno CONFIRMED) → estadía con extremo vigente → POI ✅ (cruce limpio + separación) → sube a P3
 P3 (cruce K/D en extremo) → POI ✅ → CONTRATADO 🎯
 ```
 
@@ -70,20 +88,31 @@ P3 (cruce K/D en extremo) → POI ✅ → CONTRATADO 🎯
 
 ### PISO 2 — El cerebro (pruebas)
 
-El activo ya pasó recepción. Ahora tiene que pasar **2 pruebas**. NO se exigen las dos en el mismo segundo — el activo puede estar en este piso el tiempo que necesite hasta cumplirlas.
+**La tarjeta de acceso a este piso es el FRENO.** Cuando el freno se confirma con
+vela M15 cerrada (compresión vs la vela de referencia), el activo sube de P1 a P2.
+El extremo NO es requisito de la puerta: se espera DENTRO de P2.
 
-**Prueba A — ¿El impulso está muerto?**
+Una vez en P2, la estadía se sostiene con la **tarjeta (freno CONFIRMED) + extremo vigente**:
+- El `brake_ok` instantáneo de la vela en formación NO revoca la tarjeta (es ruidoso).
+- Si se pierde el extremo (contexto del cruce) → el activo baja a P1 y pierde la tarjeta.
+
+**Prueba A — ¿El impulso está muerto? (ALERTA de preparación)**
 Usa el brake_eval (M15). Mide si después de una extensión clara, el movimiento se está frenando. Si el impulso sigue vivo → no pasa.
+
+**⚠ El freno es una ALERTA, NO una orden.** Confirmar el freno significa que el
+par está preparado para ESPERAR el cruce de líneas del estocástico. No se envía
+ninguna orden por haber frenado. El freno CONFIRMED es la tarjeta que permite
+acceder a P2, donde se espera el cruce.
 
 **⚠ Regla práctica:** No ser quiquilloso. Si el freno está parcialmente confirmado (el movimiento se está desacelerando aunque no haya muerto del todo), considerar que pasa. El objetivo es filtrar impulsos CLARAMENTE vivos, no buscar la confirmación perfecta.
 
-**Prueba B — ¿Está en extremo?**
-El estocástico M15 tiene que estar en zona de sobrecompra (≥80 para PUT) o sobreventa (≤20 para CALL). Si está en el medio → no está listo para el cruce.
+**Prueba B — ¿Está en extremo? (contexto de la estadía)**
+El estocástico M15 tiene que estar en zona de sobrecompra (≥80 para PUT) o sobreventa (≤20 para CALL). Si está en el medio → no está listo para el cruce; la estadía en P2 no se sostiene sin extremo.
 
 **Contexto adicional — Zona relevante (opcional, suma puntos)**
 Si hay un nivel de soporte/resistencia HTF cerca del precio actual, es contexto a favor. No obliga, pero si no hay tampoco bloquea.
 
-→ Cuando pasa Prueba A + Prueba B → sube al piso 3
+→ Cuando el cruce K/D limpio se mantiene una vela M15 (separación) con tarjeta + extremo vigentes → sube al piso 3
 
 ### PISO 3 — Sala de espera del cruce
 
@@ -99,7 +128,7 @@ El activo puede esperar horas aquí. En cada scan:
 1. ¿Sigue pagando bien? No → Fuera (Regla 1)
 2. ¿Sigue frenado? No → Vuelve al piso 2
 3. ¿Sigue en extremo? No → Vuelve al piso 2
-4. **¿Ya hubo cruce limpio K/D (no sticky)?** Sí → **CONTRATADO** (entra al trade)
+4. **¿Ya hubo cruce limpio K/D (no sticky)?** → el cruce es OTRA condición de preparación: tampoco envía señal de compra/venta. La entrada final espera el cruce de velas y la separación entre líneas (estrategia completa).
 
 ---
 
@@ -113,7 +142,7 @@ El activo puede esperar horas aquí. En cada scan:
 | Separación K/D | Piso 2, Ley 3 | Piso 3 (para filtrar sticky) |
 | Zona HTF | Piso 2, Ley 4 | Piso 2, contexto opcional |
 | Rechazo M1 | Piso 2, Ley 5 | ❌ Eliminada (ruido) |
-| Cruce K/D | No existe como sala | Piso 3 (evento que dispara entrada) |
+| Cruce K/D | No existe como sala | Piso 3 (condición de preparación, no disparador) |
 
 ---
 
@@ -123,8 +152,8 @@ El activo puede esperar horas aquí. En cada scan:
 
 **Mañana:** cada 60 segundos solo chequea:
 
-1. **Piso 3** — los que esperan cruce: ¿siguen pagando? ¿siguen frenados? ¿siguen en extremo? ¿ya cruzó limpio? → si cruzó, entrada.
-2. **Piso 2** — los que están en pruebas: ¿ya se frenó? ¿ya está en extremo? → si ambas OK, suben al piso 3.
+1. **Piso 3** — los que esperan cruce: ¿siguen pagando? ¿siguen frenados? ¿siguen en extremo? ¿ya cruzó limpio? → si cruzó, se registra la condición de cruce (NO envía orden: el cruce es preparación, la entrada final espera la estrategia completa).
+2. **Piso 2** — los que están en pruebas: ¿tienen la tarjeta (freno CONFIRMED)? ¿sigue vigente el extremo? → si el cruce K/D limpio se mantiene una vela M15 (separación) con tarjeta + extremo, suben al piso 3.
 3. **Piso 1** — los de afuera: ¿algún OTC nuevo ahora paga bien? → entra al piso 2 directo (después pasa al 2).
 
 ---
@@ -144,7 +173,7 @@ NO se eliminan las leyes. Se redistribuyen:
 - Piso 3 se queda con: separación K/D (filtro sticky) + espera del cruce + POI tracker
 
 ### Fase 2 — Construir el edificio
-Implementar el sistema de 3 pisos. Cada activo tiene un carnet: piso actual, desde cuándo, POIs obtenidos y qué tarjetas tiene. El ingreso solo se produce cuando los 3 POIs están presentes.
+Implementar el sistema de 3 pisos. Cada activo tiene un carnet: piso actual, desde cuándo, POIs obtenidos y qué tarjetas tiene. Los POIs certifican condiciones de preparación (pago, freno, cruce) — el ingreso NO se produce con un solo POI: la entrada final requiere la estrategia COMPLETA (freno = alerta, cruce = condición, señal = cuando todo esté cerrado).
 
 ### Fase 3 — El vigilante
 Modificar el scanner para que en cada ronda solo revise el piso actual de cada activo, no todo desde cero. Flujo: Piso 3 → Piso 2 → Piso 1 (orden inverso, para no demorar a los que están por entrar).

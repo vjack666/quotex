@@ -37,6 +37,7 @@ def _edificio_con_contratado(asset: str = "NZCADC_otc", direction: str = "PUT") 
     card.brake_witness_ts = 2.0
     card.piso = PISO_2
     card.p2_at = 2.0
+    card.kd_distance = 2.1
     # Cruce limpio en P2: inicia la espera de separación (ventana 60s).
     assert edificio.evaluate(
         asset=asset, direction=direction, payout=90, payout_ok=True,
