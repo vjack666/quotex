@@ -1,0 +1,3 @@
+cluster,duration,n_osc,n_cross,time_to_break,max_kd_sep,mean_kd_sep,amp_trend,amp_std,entropy,mean_slope_K,vol_mean,vol_trend,atr_mean,atr_trend,body_mean,body_trend,efficiency,absorb,move
+0,11.0,2.0,1.0,11.0,14.528,6.51,0.0,4.46,0.0,-2.789,154.357,0.0,0.001,-0.0,0.0,-0.0,0.0,112317.412,0.001
+1,32.0,8.0,7.0,32.0,15.394,5.046,0.471,4.35,0.954,0.213,0.0,0.0,0.001,-0.0,0.0,0.0,120000.0,0.0,0.001
