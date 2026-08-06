@@ -37,7 +37,68 @@ Solo entonces el `leader` transiciona `spec_ready → in_progress` y lanza
 el `implementer`.
 
 ```
-pending → [spec_author] → spec_ready → ⏸ HUMANO → in_progress → [implementer → reviewer] → done
+pending → [spec_author] → 🧑‍💼 trader_humano revisa specs → spec_ready → ⏸ HUMANO → in_progress → [implementer → reviewer] → done
+```
+
+> **Nota:** el agente trader-humano (`docs/agente-trader_humano.md`) no solo revisa
+> el código final — participa en la **construcción** del spec. Ver sección
+> siguiente.
+
+## Participación del agente trader-humano en el SDD
+
+El agente trader-humano (`docs/agente-trader_humano.md`) participa en la
+**construcción** de los specs, no solo en la revisión del código terminado.
+Su veredicto sobre los requirements/design/tasks es una puerta de calidad
+adicional antes de marcar la feature como `spec_ready`.
+
+### Cuándo interviene
+
+Durante la fase `pending → spec_ready`, el `spec_author` NO marca
+`spec_ready` hasta que el agente trader-humano haya revisado los tres
+archivos del spec y emitido su dictamen. Esto evita que el laboratorio
+búsque configuraciones a ciegas sobre un spec que el trader considera
+conceptualmente mal planteado.
+
+### Qué revisa el trader-humano
+
+- **requirements.md**: ¿la hipótesis tiene sentido de trader? ¿la métrica de
+  éxito (p.ej. EXP-039: `entrada_count>0` Y `noise_count=0`) es la correcta
+  o está midiendo ruido en lugar de edge?
+- **design.md**: ¿el embudo (funnel) de eventos planteado coincide con la
+  realidad del mercado? ¿la secuencia de eventos propuesta es coherente?
+- **tasks.md**: ¿los pasos del laboratorio realmente aislan la variable que
+  el trader sospecha, o están mezclando cohortes (REAL vs OTC)?
+
+### Dónde deja su dictamen
+
+El trader-humano escribe su revisión en `specs/<feature>/trader_humano_review.md`
+con esta estructura mínima:
+
+```markdown
+## Revisión trader-humano — <feature>
+
+### Veredicto
+APROBADO | CAMBIOS | RECHAZADO
+
+### Dictamen (lenguaje trader)
+<por qué la hipótesis/embudo/seguridad tiene o no sentido de mercado>
+
+### Faltantes que exige el trader
+<qué debe agregar el spec antes de aprobar>
+```
+
+El `spec_author` solo transiciona a `spec_ready` si el veredicto es
+`APROBADO` (o si el humano genérico lo override explícitamente).
+
+### Flujo resultante
+
+```
+pending
+  → [spec_author redacta requirements/design/tasks]
+  → 🧑‍💼 trader_humano revisa y dicta (trader_humano_review.md)
+  → spec_ready  (solo si trader_humano = APROBADO)
+  → ⏸ HUMANO (aprobación final)
+  → in_progress → [implementer → reviewer] → done
 ```
 
 ## requirements.md — EARS estricto
