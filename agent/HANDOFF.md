@@ -77,6 +77,13 @@
       volumen). MEJORA la validez de EW al dar volumen centralizado. **Aprobado conceptualmente;
       pendiente autorización del Trader-Humano para la ADQUISICIÓN de datos (elegir proveedor) antes
       de descargar/modificar pipeline/congela EW-1.** NO se ejecutó EW-1/2/3.
+    - **2026-08-07 (AUTORIZADO) — Databento / CME 6E, adquisición pequeña OHLCV 1m (NO MBO)**: proveedor
+      Databento, dataset `GLBX.MDP3`, símbolo continuous `6E.v.0` (volume roll), `volume`=contratos
+      reales, UTC, período 2022-2026. **BLOQUEO DE ACCESO: cliente `databento` 0.83.0 instalado PERO
+      SIN API key** (ni env, ni .env) → aún NO se descargó nada. Scripts `scripts/lab_ew_acquire_cme.py`
+      (descarga 1m) y `scripts/lab_ew_verify_cme.py` (checklist + inspección de rollovers) listos sin
+      ejecutar. EW pasa a ser hipótesis sobre **EUR/USD Futures 6E** (no spot); resultados NO comparables
+      1:1 con EXP-071..075. **Falta la API key para correr acquire→verify.** NO se ejecutó EW-1/2/3.
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

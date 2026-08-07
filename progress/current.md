@@ -67,6 +67,15 @@
   - **VEREDICTO de factibilidad: CANDIDATO PASA** puntos 1–5 y 7 (salvedad coste); punto 6 = cambio de
     instrumento a documentar, no bloqueo. **Pendiente tu autorización de ADQUISICIÓN de datos (elegir
     proveedor) antes de descargar/modificar pipeline/congela EW-1.** Documentado en DATA_REQUIREMENTS_EW.md §2b.
+- **AUTORIZADO (2026-08-07) — Databento / CME 6E**: proveedor Databento, dataset `GLBX.MDP3`, símbolo
+  continuous `6E.v.0` (volume roll), schema `ohlcv-1m` (NO MBO, adquisición pequeña), `volume`=contratos
+  reales, UTC, período 2022-01-01..2026-08-01. EW pasa a hipótesis sobre **EUR/USD Futures 6E** (no spot).
+  - **BLOQUEO DE ACCESO:** cliente `databento` 0.83.0 instalado, PERO **SIN API key** (ni env, ni .env).
+    Aún NO se descargó nada. Scripts listos SIN ejecutar: `scripts/lab_ew_acquire_cme.py` (descarga 1m)
+    y `scripts/lab_ew_verify_cme.py` (checklist completo + inspección de rollovers: comparar contratos
+    del contrato individual vs volumen de la serie continua alrededor de cada roll). **Falta la API key
+    para correr acquire→verify.** Si pasa: presentar para autorizar congelación EW-1. Si falla: documentar
+    y detener (sin imputar ni filtrar). NO se ejecutó EW-1/2/3.
 - NO se buscó dataset por cuenta propia más allá de inspeccionar el candidato ya presente. NO EW-1/2/3.
 
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)

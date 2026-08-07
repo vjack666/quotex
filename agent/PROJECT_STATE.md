@@ -30,13 +30,14 @@ estocástico M15 describe ESTADO, no CONTROL ni transición. No se promueve nada
 porque el null de shuffle de columnas es "fuerte" (geometría favorable); el veredicto se
 apoya en la OOS (colapso total) y el %minoritario en el borde del null.
 
-**Siguiente (PENDIENTE autorización ADQUISICIÓN datos CME, decisión A1):** Energía Wyckoff
-BLOQUEADA por instrumento en spot (NO resultado negativo). Dukascopy M1 rechazado (99.7% ceros).
-Candidato CME 6E EVALUADO por factibilidad/semántica (SIN descarga) → **PASA**: `volume` = REAL
-traded volume de contratos en CME Globex (no tick, no proxy); cubre M15 histórico; pasa split OOS.
-Cambio de instrumento spot→futuros debe documentarse (rollover afecta precio, no volumen). MEJORA
-EW. Pendiente tu OK para adquirir datos (Databento vs Polygon vs CME) antes de descargar/modificar
-pipeline/congela EW-1. NO ejecutar EW-1/2/3; NO descargar. (A2 alternativo: aceptar bloqueo.)
+**Siguiente (PENDIENTE API KEY Databento — adquisición autorizada A1):** Energía Wyckoff BLOQUEADA
+por instrumento en spot (NO resultado negativo). Dukascopy M1 rechazado (99.7% ceros). Candidato CME
+6E EVALUADO (SIN descarga) → PASA; `volume` = REAL traded volume de contratos en CME Globex. Trader-
+Humano AUTORIZÓ Databento (GLBX.MDP3, `6E.v.0`, OHLCV 1m, NO MBO, 2022-2026). **BLOQUEO DE ACCESO:**
+cliente `databento` 0.83.0 instalado PERO SIN API key → aún NO se descargó nada. Scripts acquire+verify
+listos sin ejecutar. Falta la key para correr acquire→verify (checklist completo + prueba crítica de
+rollovers). Si pasa: presentar para autorizar congelación EW-1. Si falla: documentar y detener. NO
+ejecutar EW-1/2/3; NO descargar sin key. EW ahora = hipótesis sobre EUR/USD Futures 6E (no spot).
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).

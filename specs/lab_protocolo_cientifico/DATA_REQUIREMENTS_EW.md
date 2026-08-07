@@ -82,6 +82,27 @@ explícitamente** y que, de hecho, mejora la validez de EW al dar volumen centra
 **Pendiente autorización del Trader-Humano para la ADQUISICIÓN de datos (elegir proveedor: Databento
 vs Polygon vs CME) antes de cualquier descarga, modificación de pipeline o congelación de EW-1.**
 
+## 2c. ADQUISICIÓN AUTORIZADA (2026-08-07) — Databento / CME 6E — PENDIENTE DE API KEY
+**Proveedor elegido por el Trader-Humano: Databento.** Instrumento: CME Euro FX Futures `6E`.
+Objetivo: adquirir ÚNICAMENTE lo necesario para validar EW (todavía sin ejecutar EW-1).
+- dataset `GLBX.MDP3`; símbolo continuous **`6E.v.0`** (volume roll, front month; mapea a 6Exxxx
+  individuales según fecha); schema **`ohlcv-1m`** (OHLCV intradía 1m, NO MBO — adquisición pequeña).
+- `volume` = nº de contratos negociados (REAL traded volume, CME Globex central limit order book).
+- timestamps ns epoch **UTC** (ts_event). Rollover: Databento volume roll, **NO back-adjusta precios**
+  (mantiene propiedades originales del contrato) → el volumen es continuo; el precio puede tener un
+  salto discreto en el roll (base), que se inspecciona en la verificación.
+- Período: 2022-01-01 .. 2026-08-01 (cubre TRAIN 2022-2024 / TEST 2025-2026).
+- **BLOQUEO DE ACCESO (estado actual):** cliente `databento` 0.83.0 instalado, PERO NO hay API key
+  (ni env var `DATABENTO_KEY`, ni en `.env`). No se puede adquirir sin la credencial. **No se ha
+  descargado nada.** Scripts listos (sin ejecutar): `scripts/lab_ew_acquire_cme.py` (descarga 1m) y
+  `scripts/lab_ew_verify_cme.py` (checklist + inspección de rollovers). Falta la key para correrlos.
+- Una vez con la key: correr acquire -> verify (checklist completo + prueba crítica de rollovers:
+  comparar contratos del contrato INDIVIDUAL vs volumen de la serie CONTINUA alrededor de cada roll,
+  para asegurar que la continuidad no fabrica anomalías de volumen). Si pasa: presentar para autorizar
+  congelación de EW-1. Si falla cualquier criterio: documentar y DETENER (sin imputar ni filtrar).
+- **NOTA DE INSTRUMENTO:** EW pasa a ser hipótesis sobre **EUR/USD Futures 6E**, NO sobre el spot de
+  EXP-071..075. Cualquier resultado EW NO se compara 1:1 con esos experimentos previos.
+
 ## 3. Qué significa "volumen adecuado" para NUESTRO propósito (redefinido)
 No basta con que una columna se llame `volume`. Para Wyckoff effort/result necesitamos volumen que
 sea **(a) continuo (sin ceros masivos), (b) con definición documentada y representativa**, incluso

@@ -26,6 +26,12 @@
 > experimental a EUR/USD futures (no spot); rollover introduce saltos en PRECIO (no en volumen).
 > MEJORA la validez de EW al dar volumen centralizado. **Aprobado conceptualmente; pendiente tu
 > autorización de ADQUISICIÓN de datos (elegir proveedor) antes de descargar/modificar/congelar.**
+>
+> **2026-08-07 (AUTORIZADO) — Databento / CME 6E, adquisición pequeña en OHLCV 1m (NO MBO):** proveedor
+> Databento, dataset `GLBX.MDP3`, símbolo continuous `6E.v.0` (volume roll), `volume`=contratos reales,
+> UTC, período 2022-2026. **BLOQUEO DE ACCESO:** cliente instalado pero SIN API key → aún NO se ha
+> descargado nada. Scripts `lab_ew_acquire_cme.py` + `lab_ew_verify_cme.py` listos (sin ejecutar). EW
+> es ahora hipótesis sobre EUR/USD Futures 6E (no spot). Falta la key para correr acquire→verify.
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)
