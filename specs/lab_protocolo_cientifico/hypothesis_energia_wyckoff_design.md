@@ -1,8 +1,16 @@
-# Hypothesis — DISEÑO ENERGÍA WYCKOFF (NO EJECUTADO)
+# Hypothesis — DISEÑO ENERGÍA WYCKOFF (NO EJECUTADO — BLOQUEADO POR CALIDAD DE DATOS)
 
 > Experimentos pendientes de aprobación. Solo DISEÑO (la orden exige hipótesis antes de experimentar).
 > Cumple docs/LAB_CHARTER.md (Art. 6 congelar antes de correr; Art. 13 REAL=descubrimiento).
 > NO se ha corrido ningún código de esta sección.
+
+> ## ⛔ BLOCKED — DATA QUALITY (decisión Trader-Humano 2026-08-07)
+> El EURUSD M15 disponible contiene `tick_volume` en lugar de volumen real y ~55% de sus
+> observaciones tienen valor cero. El dataset NO se considera apto para validar hipótesis de
+> esfuerzo/resultado Wyckoff. Esto es un **BLOQUEO DE INSTRUMENTO**, NO un resultado negativo
+> de la hipótesis. Conclusión correcta: **"Hipótesis no evaluada por insuficiencia del
+> instrumento de medición."** No se ejecuta EW-1 con este dataset (ni filtrando tick_volume>0:
+> introduciría sesgo de selección). Ver `DATA_REQUIREMENTS_EW.md`.
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)
@@ -63,10 +71,17 @@ descarta también esta vía. Solo si hay memoria, se justifica un experimento de
 - NO usar el estocástico como feature de energía (es el lado que ya falló).
 
 ## Datos necesarios
-- EURUSD_M15 (SMC_ROOT) ya tiene `volume`/`tick_volume`, `open`/`high`/`low`/`close`, `atr`.
-- Revisar si `volume` es real o tick_volume (afecta la interpretación de `esfuerzo`).
-- Sin datasets/ externos (patrón establecido: SMC_ROOT directo).
+- EURUSD_M15 (SMC_ROOT): revisado 2026-08-07 → **NO APTO**. Columna disponible es
+  `tick_volume` (no `volume` real), con ~55% de observaciones en cero (62912/114237 velas,
+  rango 2022-01-02 → 2026-08-06). Las variables `esfuerzo`/`eficiencia`/`absorción` quedan
+  indefinidas o artificiales sobre esa base → **BLOQUEO DE INSTRUMENTO** (no resultado negativo).
+- Requisitos del feed correcto: ver `DATA_REQUIREMENTS_EW.md` (definido 2026-08-07, pendiente
+  de decisión A/B del Trader-Humano antes de buscar/usar cualquier fuente).
+- Sin datasets/ externos hasta que el DATA REQUIREMENTS esté aprobado y el feed verificado.
 
 ## Próximo paso
-Esperar OK del Trader-Humano para (1) verificar columna de volumen en el parquet y
-(2) correr EXP-EW-1 (autocorrelación de energía vs estocástico). Hasta entonces, diseño congelado.
+- **BLOQUEADO por instrumento** (no por hipótesis). No ejecutar EW-1/2/3 con el dataset actual.
+- Pendiente: Trader-Humano decide (A) buscar feed adecuado tras aprobar `DATA_REQUIREMENTS_EW.md`
+  y continuar EW-1, o (B) abandonar Energía Wyckoff por falta de datos adecuados.
+- La hipótesis de energía Wyckoff QUEDA VIVA como hipótesis científica; solo está bloqueado el
+  instrumento de medición actual. No convertir el bloqueo en resultado negativo.

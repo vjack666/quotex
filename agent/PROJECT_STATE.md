@@ -30,9 +30,14 @@ estocástico M15 describe ESTADO, no CONTROL ni transición. No se promueve nada
 porque el null de shuffle de columnas es "fuerte" (geometría favorable); el veredicto se
 apoya en la OOS (colapso total) y el %minoritario en el borde del null.
 
-**Siguiente (PENDIENTE OK Trader-Humano):** DISEÑO Energía Wyckoff ya escrito (no ejecutado)
-en `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md`. Paso 1 = EXP-EW-1
-(autocorrelación de energía vs estocástico). Si no hay memoria, descartar también esa vía.
+**Siguiente (PENDIENTE decisión A/B Trader-Humano):** Energía Wyckoff BLOQUEADA por instrumento
+(NO resultado negativo). EURUSD M15 = `tick_volume` con 55% ceros → effort/efficiency/absorption
+artificiales. Diseño vivo en `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md`
+(marcado BLOCKED). Definido `DATA_REQUIREMENTS_EW.md` (volumen real vs tick volume, campos mínimos,
+umbral ≤2% ceros, cobertura ≥3a M15, checklist 6 pasos antes de congelar EW-1). Conclusión:
+"Hipótesis NO EVALUADA por insuficiencia del instrumento de medición". NO ejecutar EW-1/2/3;
+NO buscar feed por cuenta propia hasta OK. (A) buscar feed adeacuado y verificar → EW-1;
+(B) abandonar vía (hipótesis no falseada).
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).

@@ -32,14 +32,22 @@
 - Secuencia de Grok/ChatGPT validada por el Trader-Humano: 074→074b→074b-NULL→[RECHAZO]→sin 075.
 - Hilo CERRADO. No se promueve nada al Edificio.
 
-### 4. DISEÑO (NO EJECUTADO) — Energía Wyckoff
-- `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md` escrito (solo diseño).
-- Variables: esfuerzo=vol/|move|, resultado=move/rango, eficiencia=move/vol, absorción=vol alto/poco
-  resultado, climax=vol/rango anómalos, compresión=resultado decreciente c/esfuerzo sostenido.
-- Pregunta inicial: ¿estas variables contienen MEMORIA/estructura de transición que el K-D M15 NO?
-- Pasos propuestos (no corridos): EXP-EW-1 autocorrelación energía vs estocástico; si hay memoria →
-  EXP-EW-2 separación de transición; si hay edge → EXP-EW-3. Si EW-1 no hay memoria → descartar vía.
-- Pendiente OK del Trader-Humano para correr EXP-EW-1.
+### 4. DISEÑO (NO EJECUTADO) — Energía Wyckoff — ⛔ BLOCKED POR INSTRUMENTO (no resultado negativo)
+- `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md` escrito (solo diseño),
+  marcado BLOCKED — DATA QUALITY (decisión Trader-Humano opción C, 2026-08-07).
+- Verificación de datos (Paso 2): EURUSD M15 (SMC_ROOT) trae `tick_volume`, NO `volume` real;
+  62912/114237 velas (55%) con `tick_volume=0`. → effort/efficiency/absorption artificiales/indefinidas.
+- **NO se ejecuta EW-1 con este dataset** (ni A: filtrar tick_volume>0 → sesgo de selección; ni B:
+  tratar ceros como esfuerzo nulo → masa en cero espuria). La hipótesis QUEDA VIVA como hipótesis
+  científica; solo se cierra el uso de ESTE dataset.
+- Conclusión correcta: **"Hipótesis NO EVALUADA por insuficiencia del instrumento de medición."**
+- `specs/lab_protocolo_cientifico/DATA_REQUIREMENTS_EW.md` definido (no ejecutado): qué es volumen
+  real (traded) vs tick volume, campos mínimos (OHLC + volume traded + atr), umbral ≤2% ceros,
+  cobertura ≥3a M15, frecuencia M15, y checklist de 6 pasos de verificación ANTES de congelar EW-1.
+  Distingue explícitamente real/traded volume, tick volume, calidad/continuidad del feed y
+  representatividad del instrumento (MT5 "volume" NO implica automáticamente volumen Wyckoff).
+- Pendiente decisión A/B del Trader-Humano: (A) buscar feed adecuado y verificar → EW-1;
+  (B) abandonar vía (hipótesis no falseada). NO se buscó dataset por cuenta propia. NO EW-1/2/3.
 
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py
@@ -48,11 +56,13 @@
 - specs/lab_protocolo_cientifico/{hypothesis,risks,validation}_exp074b_null.md
 - specs/lab_protocolo_cientifico/exp075_index.md
 - specs/lab_protocolo_cientifico/exp074b_null_index.md
-- specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md
+- specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md  (marcado BLOCKED)
+- specs/lab_protocolo_cientifico/DATA_REQUIREMENTS_EW.md  (nuevo, no ejecutado)
+- specs/lab_protocolo_cientifico/ew_data_requirements_index.md
 - reports/EXP-075/{summary.txt, protocol_frozen.json}
 - reports/EXP-074b_NULL/{summary.txt, protocol_frozen.json}
-- data/strategy_lab/exp075_phaseA_features.parquet
-- data/strategy_lab/exp074b_null_curves.parquet
+- data/strategy_lab/exp075_phaseA_features.parquet  (gitignored data/, regenerable)
+- data/strategy_lab/exp074b_null_curves.parquet     (gitignored data/, regenerable)
 - agent/HANDOFF.md, agent/PROJECT_STATE.md, progress/current.md (estado real)
 
 ### Reglas que NO romper
@@ -61,3 +71,5 @@
 - Bot corre PRACTICE por defecto; NUNCA REAL sin OK explícito.
 - Datos REAL = descubrimiento; OTC = validación final (Art. 13).
 - NO buscar más edge en clusters (orden Trader-Humano). NO ejecutar EXP-076.
+- Energía Wyckoff: BLOQUEADA por instrumento (NO resultado negativo). NO ejecutar EW-1/2/3.
+  NO buscar feed por cuenta propia. Bloqueo = insuficiencia del instrumento de medición.

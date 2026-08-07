@@ -54,6 +54,15 @@
       Variables esfuerzo/resultado/eficiencia/absorción/climax/compresión. Pregunta inicial:
       ¿contienen memoria/estructura de transición que el K-D M15 no contiene? Aprobación
       pendiente para correr EXP-EW-1 (autocorrelación de energía vs estocástico).
+    - **2026-08-07 (tarde) — BLOCKED por instrumento (NO resultado negativo)**: el EURUSD M15
+      disponible trae `tick_volume` (no volumen real) con ~55% de ceros (62912/114237 velas).
+      Eso hace `effort`/`efficiency`/`absorption` artificiales/indefinidas → NO se ejecuta EW-1
+      (ni filtrando tick_volume>0: sesgo de selección). Decisión Trader-Humano = opción C:
+      cerrar SOLO el uso de este dataset, NO la hipótesis. Se escribió `DATA_REQUIREMENTS_EW.md`
+      (qué es volumen real, campos mínimos, umbral ≤2% ceros, cobertura ≥3a M15, checklist de
+      6 pasos de verificación antes de congelar EW-1). Conclusión: "Hipótesis NO EVALUADA por
+      insuficiencia del instrumento de medición". Pendiente decisión A/B del Trader-Humano.
+      NO se buscó otro dataset por cuenta propia. NO se ejecutó EW-1/2/3.
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)
@@ -69,13 +78,13 @@
   no CONTROL ni transición. No se promueve nada al Edificio (Art. 13).
 
 ### Próximo paso sugerido (al retomar)
-- **PENDIENTE APROBACIÓN del Trader-Humano**: correr EXP-EW-1 (autocorrelación de
-  variables de ENERGÍA WYCKOFF vs estocástico M15) para testear si el VOLUMEN/RESULTADO
-  contiene memoria que el estocástico no ve. Diseño en
-  `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md` (NO ejecutado).
-  - Si EXP-EW-1: NO hay memoria → descartar también la vía energía (resultado negativo).
-  - Si SÍ hay memoria → justifica EXP-EW-2 (separación de transición) y EXP-EW-3 (edge).
-- NO correr EXP-EW hasta OK. NO buscar más edge en clusters (orden Trader-Humano).
+- **PENDIENTE APROBACIÓN del Trader-Humano (opción A/B)**: el dataset EURUSD M15 actual está
+  BLOQUEADO por instrumento (tick_volume, 55% ceros) — NO es resultado negativo. El diseño de
+  Energía Wyckoff sigue VIVO como hipótesis. Definido `DATA_REQUIREMENTS_EW.md` (qué es volumen
+  real vs tick volume, campos mínimos, umbral ≤2% ceros, cobertura ≥3a M15, checklist 6 pasos).
+  - (A) Si el Trader-Humano aprueba buscar feed adecuado y pasa el checklist → congelar EW-1.
+  - (B) Si no hay datos adecuados → abandonar la vía (hipótesis no falseada, solo no evaluada).
+  - NO buscar dataset por cuenta propia hasta decisión. NO ejecutar EW-1/2/3.
 
 ### Archivos clave para retomar
 - `docs/LAB_CHARTER.md` (principios inquebrantables, Art.1–12)
