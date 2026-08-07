@@ -10,3 +10,7 @@
 | Ejecución EW-1/2/3 | NO ejecutada. Pendiente decisión A/B del Trader-Humano |
 | Conclusión correcta | "Hipótesis no evaluada por insuficiencia del instrumento de medición" |
 | Checklist de usabilidad | §5 de DATA_REQUIREMENTS_EW (6 pasos antes de congelar EW-1) |
+| Candidato local rechazado (A) | Dukascopy M1 (SMC-SYSTEMS) — 99.7% ceros M15 |
+| Candidato CME 6E EVALUADO (A1) | REAL traded volume (contratos CME Globex); pasa factibilidad §2b |
+| Veredicto A1 | PASA; pendiente autorización de ADQUISICIÓN (elegir proveedor) |
+| Ejecución EW-1/2/3 | NO ejecutada. Pendiente adquisición + OK del Trader-Humano |

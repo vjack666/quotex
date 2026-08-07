@@ -69,6 +69,14 @@
       cualquier feed individual es disperso/cero. NO se descargó nada nuevo, NO se congeló EW-1.
       Pendiente decisión A1 (evaluar futuros CME, volumen de bolsa real) o A2 (aceptar bloqueo).
       NO se ejecutó EW-1/2/3.
+    - **2026-08-07 (decisión A1) — CME 6E EVALUADO por factibilidad/semántica (SIN descarga)**: el
+      candidato CME Euro FX Futures `6E` (125k EUR/contrato) da `volume` = nº de contratos en central
+      limit order book CME = **REAL traded volume** (no tick, no proxy). Cubre M15 histórico vía
+      Databento/Polygon/CME; pasa split OOS 2022-2024/2025-2026. Limitación spot→futuros: cambia el
+      instrumento experimental a EUR/USD futures (no spot); rollover introduce saltos en PRECIO (no en
+      volumen). MEJORA la validez de EW al dar volumen centralizado. **Aprobado conceptualmente;
+      pendiente autorización del Trader-Humano para la ADQUISICIÓN de datos (elegir proveedor) antes
+      de descargar/modificar pipeline/congela EW-1.** NO se ejecutó EW-1/2/3.
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

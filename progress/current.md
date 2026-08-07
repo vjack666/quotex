@@ -49,12 +49,24 @@
   ticks). Resultado: **99.7% de ceros en volumen M15** (tick volume del banco), peor que HistData 55%.
   FX spot OTC: el tick volume de cualquier feed individual es disperso/cero — inherente, no defecto
   de Dukascopy. NO se descargó nada nuevo, NO se congeló EW-1.
-- **Pendiente decisión del Trader-Humano**:
-  - (A1) Evaluar SEGUNDO candidato: **futuros CME EURUSD** (volumen de bolsa real, traded volume
-    genuino, aunque sea futuro no spot) — única fuente que daría volumen válido. Requiere investigar
-    acceso (sin descargar aún).
-  - (A2) Aceptar el bloqueo de la vía Energía Wyckoff por insuficiencia de instrumento (hipótesis
-    NO falseada, solo NO EVALUADA).
+- **DECISIÓN A1 (2026-08-07) — CME 6E EVALUADO por factibilidad/semántica, SIN descarga**:
+  - Contrato: CME Euro FX Futures, código **`6E`** (125,000 EUR/contrato; micro `M6E` 1/10).
+  - `volume` = **nº de contratos negociados en CME Globex (central limit order book)** = REAL traded
+    volume, NO tick, NO proxy de broker. Esto es exactamente lo que faltaba en FX spot.
+  - Cubre M15 histórico vía Databento (`GLBX.MDP3`), Polygon.io, o CME directo; pasa split OOS
+    2022-2024 / 2025-2026. Un solo proveedor da continuous contract 6E (roll por volumen).
+  - **Limitación spot→futuros (documentar explícitamente):** cambia el instrumento experimental de
+    EURUSD spot a **EUR/USD futures (6E)**. El precio rastrea al spot (correlación alta vía cost-of-
+    carry) pero NO idéntico; hay base y rollovers. El rollover introduce **saltos artificiales en
+    PRECIO** (afecta `move`/`rango`) pero el **VOLUMEN queda continuo y limpio**. Para EW (effort/result)
+    el volumen centralizado es una MEJORA enorme; NO invalida EW. Resultados EW NO se comparan 1:1
+    con EXP-071..075 (spot). Fase A de EW se define sobre 6E.
+  - **Coste/acceso (cuello real):** Databento de pago (~$5/GB, crédito bienvenida, API `databento`);
+    Polygon free limitado (~2a hist, 5 calls/min); CME directo de pago. NINGUNO gratis como HistData →
+    el lab pasaría a datos de pago (requiere presupuesto/cuenta).
+  - **VEREDICTO de factibilidad: CANDIDATO PASA** puntos 1–5 y 7 (salvedad coste); punto 6 = cambio de
+    instrumento a documentar, no bloqueo. **Pendiente tu autorización de ADQUISICIÓN de datos (elegir
+    proveedor) antes de descargar/modificar pipeline/congela EW-1.** Documentado en DATA_REQUIREMENTS_EW.md §2b.
 - NO se buscó dataset por cuenta propia más allá de inspeccionar el candidato ya presente. NO EW-1/2/3.
 
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)

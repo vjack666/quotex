@@ -35,6 +35,53 @@ ofrece "traded volume del mercado global" en FX spot. Las opciones reales:
 que el HistData actual (55%). No resuelve el bloqueo; lo empeora. Esto es inherente al tick volume
 OTC (cualquier feed individual es disperso/cero-en-gran-parte), no un defecto de Dukascopy.
 
+## 2b. Candidato SECUNDARIO evaluado (decisión A1, 2026-08-07 — factibilidad y semántica, SIN descarga)
+**Fuente candidata:** CME Euro FX Futures, **producto Globex `6E`** (ClearPort/IC `EC`; micro `M6E`).
+Evaluación puramente conceptual (no se descargó nada, no se modificó pipeline, no se congeló EW-1).
+
+**1. Contrato exacto:** CME Euro FX Futures, código **`6E`**, tamaño 125,000 EUR, cotización USD/EUR,
+tick 0.00005 (= $6.25/contrato), expira mensual y trimestral. Micro `M6E` = 1/10 (12,500 EUR).
+
+**2. Campo de volumen y qué representa:** en barras agregadas de CME, `volume` = **nº de contratos
+negociados** en el intervalo, registrado por el **central limit order book centralizado (CME Globex)**.
+Es volumen de exchange genuino, NO tick volume ni proxy de un broker.
+
+**3. ¿Real o proxy?:** **REAL traded volume de contratos** (no proxy). Esto es exactamente lo que faltaba
+en FX spot OTC. Cumple el requisito ideal del DATA REQUIREMENTS (jerarquía §3 nivel 1).
+
+**4. Histórico M15 y fecha:** Databento (`GLBX.MDP3`, símbolo 6E) y Polygon.io dan aggregates M15 con
+`volume`=contratos desde años atrás (Databento MBO/MDP3 desde ~2010). Cumple split TRAIN 2022-2024 /
+TEST 2025-2026 sobradamente. El propio CME vende histórico de mercado.
+
+**5. Fuente/proveedor único:** SÍ mantenible — Databento y Polygon ofrecen **continuous contract 6E**
+con roll por volumen documentado (un solo proveedor cubre todo el período, sin pegar fuentes).
+
+**6. Limitaciones spot → futuros (DEBE QUEDAR EXPLÍCITO — ver nota del Trader-Humano):**
+- **CAMBIO DE INSTRUMENTO EXPERIMENTAL:** ya NO es EURUSD spot, es **EUR/USD futures (6E)**. El precio
+  rastrea al spot (correlación alta vía cost-of-carry) pero NO es idéntico: hay base (contango/back),
+  rollovers y divergencias menores de horario/liquidez.
+- **Rollover:** los futuros expiran → se usa **continuous contract con back-adjustment**. Eso introduce
+  **saltos artificiales en PRECIO** en fechas de roll (afecta `move`/`rango` de las barras cercanas al
+  roll). El VOLUMEN, en cambio, es continuo y limpio.
+- **Para EW (effort/result):** el volumen AHORA es válido (centralizado) → MEJORA enorme sobre spot; NO
+  invalida EW, lo fortalece. Pero hay que documentar que el universo es "EUR/USD futures CME (6E)",
+  NO "EURUSD spot", y que CUALQUIER resultado EW NO se compara 1:1 con EXP-071..075 (que usaron spot).
+- La Fase A de EW se define sobre 6E, no sobre EURUSD spot (coherente internamente; cambia el labeled universe).
+
+**7. Coste / acceso / restricciones:**
+- Databento: histórico por descarga, de pago (~$5/GB en CME; crédito de bienvenida). API Python `databento`;
+  requiere cuenta + API key.
+- Polygon.io: free limitado (5 calls/min, histórico ~2a en free; paid amplía). Campo `volume`=contratos.
+- CME directo: Market Data Platform, coste según distribuidor.
+- **CUELLO REAL:** NINGUNO es gratis/completo como HistData lo fue para spot. Hay coste y registro → el
+  lab pasaría de datos gratuitos a datos de pago. Requiere presupuesto/cuenta (fuera del patrón actual).
+
+**VEREDICTO DE FACTIBILIDAD (conceptual, 7 puntos): CANDIDATO PASA** los puntos 1–5 y 7 (con salvedad de
+coste). El punto 6 (spot→futuros) NO es bloqueo sino **cambio de instrumento que debe documentarse
+explícitamente** y que, de hecho, mejora la validez de EW al dar volumen centralizado real.
+**Pendiente autorización del Trader-Humano para la ADQUISICIÓN de datos (elegir proveedor: Databento
+vs Polygon vs CME) antes de cualquier descarga, modificación de pipeline o congelación de EW-1.**
+
 ## 3. Qué significa "volumen adecuado" para NUESTRO propósito (redefinido)
 No basta con que una columna se llame `volume`. Para Wyckoff effort/result necesitamos volumen que
 sea **(a) continuo (sin ceros masivos), (b) con definición documentada y representativa**, incluso
@@ -76,14 +123,14 @@ volume solo se activa si el broker lo provee; para FX por defecto es tick volume
 6. Split OOS: cubre ≥ 2022-01 y ≥ 2025-2026.
 Solo si los 6 pasan → se congela EXP-EW-1. Si falla alguno → NO se ejecuta; se reporta el fallo.
 
-## 7. Estado y próximo paso (2026-08-07 tarde)
+## 7. Estado y próximo paso (2026-08-07, decisión A1 completada — factibilidad)
 - Candidato local (Dukascopy M1 prestado) **RECHAZADO** (99.7% ceros M15).
-- NO se descargó nada nuevo, NO se congeló EW-1, NO se ejecutó experimento (cumpliendo instrucción A).
-- **Pendiente decisión del Trader-Humano:**
-  - (A1) Evaluar un SEGUNDO candidato: **volumen de bolsa de futuros CME EURUSD** (traded volume
-    real de bolsa, aunque sea futuro no spot) — única fuente que daría volumen genuino. Requiere
-    investigar acceso (sin descargar aún).
-  - (A2) Aceptar el bloqueo de la vía Energía Wyckoff por insuficiencia de instrumento (hipótesis
-    NO falseada, solo NO EVALUADA).
+- Candidato SECUNDARIO CME 6E **EVALUADO por factibilidad y SEMÁNTICA (SIN descarga)** → PASA los
+  puntos 1–5 y 7 (salvedad coste); el punto 6 (spot→futuros) es cambio de instrumento que debe
+  documentarse explícitamente y mejora la validez de EW al dar volumen centralizado real (§2b).
+- **PENDIENTE AUTORIZACIÓN DEL TRADER-HUMANO para la ADQUISICIÓN de datos CME** (elegir proveedor:
+  Databento vs Polygon vs CME directo). Hasta entonces: NO se descarga, NO se modifica pipeline,
+  NO se congela EW-1, NO se ejecuta experimento.
+- (A2 alternativo) Aceptar el bloqueo de la vía por insuficiencia de instrumento (hipótesis NO falseada).
 - Regla firme: NO convertir el bloqueo en resultado negativo. Conclusión: "Hipótesis NO EVALUADA
-  por insuficiencia del instrumento de medición."
+  por insuficiencia del instrumento de medición" (en spot); con CME 6E el instrumento cambia a futuros.

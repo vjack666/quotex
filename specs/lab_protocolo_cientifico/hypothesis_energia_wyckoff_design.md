@@ -18,6 +18,14 @@
 > tiene volumen centralizado; el tick volume de cualquier feed individual es disperso/cero. NO se
 > descargó nada nuevo, NO se congeló EW-1. Pendiente decisión A1 (evaluar futuros CME, volumen de
 > bolsa real) o A2 (aceptar bloqueo). Ver `DATA_REQUIREMENTS_EW.md` §2 y §7.
+>
+> **2026-08-07 (decisión A1) — CME 6E EVALUADO por factibilidad/semántica (SIN descarga):** el
+> candidato CME Euro FX Futures (`6E`, 125k EUR/contrato) da `volume` = nº de contratos negociados
+> en central limit order book CME = **REAL traded volume** (no tick, no proxy). Cubre M15 desde años
+> atrás (Databento/Polygon/CME), pasa split OOS. Limitación spot→futuros: cambia el instrumento
+> experimental a EUR/USD futures (no spot); rollover introduce saltos en PRECIO (no en volumen).
+> MEJORA la validez de EW al dar volumen centralizado. **Aprobado conceptualmente; pendiente tu
+> autorización de ADQUISICIÓN de datos (elegir proveedor) antes de descargar/modificar/congelar.**
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)

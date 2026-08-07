@@ -30,14 +30,13 @@ estocástico M15 describe ESTADO, no CONTROL ni transición. No se promueve nada
 porque el null de shuffle de columnas es "fuerte" (geometría favorable); el veredicto se
 apoya en la OOS (colapso total) y el %minoritario en el borde del null.
 
-**Siguiente (PENDIENTE decisión A1/A2 Trader-Humano):** Energía Wyckoff BLOQUEADA por instrumento
-(NO resultado negativo). EURUSD M15 = `tick_volume` 55% ceros. Candidato local Dukascopy M1
-EVALUADO y RECHAZADO (99.7% ceros M15). FX spot OTC no tiene volumen centralizado; tick volume
-de cualquier feed es disperso/cero. Diseño vivo en `hypothesis_energia_wyckoff_design.md` (BLOCKED).
-`DATA_REQUIREMENTS_EW.md` actualizado con realidad FX y candidato rechazado. Conclusión: "Hipótesis
-NO EVALUADA por insuficiencia del instrumento de medición". NO ejecutar EW-1/2/3; NO descargar.
-- (A1) Evaluar SEGUNDO candidato: futuros CME EURUSD (volumen de bolsa real, aunque sea futuro no spot).
-- (A2) Aceptar bloqueo de la vía (hipótesis no falseada). Sin OK no busco ni congelo nada.
+**Siguiente (PENDIENTE autorización ADQUISICIÓN datos CME, decisión A1):** Energía Wyckoff
+BLOQUEADA por instrumento en spot (NO resultado negativo). Dukascopy M1 rechazado (99.7% ceros).
+Candidato CME 6E EVALUADO por factibilidad/semántica (SIN descarga) → **PASA**: `volume` = REAL
+traded volume de contratos en CME Globex (no tick, no proxy); cubre M15 histórico; pasa split OOS.
+Cambio de instrumento spot→futuros debe documentarse (rollover afecta precio, no volumen). MEJORA
+EW. Pendiente tu OK para adquirir datos (Databento vs Polygon vs CME) antes de descargar/modificar
+pipeline/congela EW-1. NO ejecutar EW-1/2/3; NO descargar. (A2 alternativo: aceptar bloqueo.)
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).
