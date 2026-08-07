@@ -1,0 +1,4 @@
+H1 patron completo (POI calidad + kd saludable 5-18 + no sticky)
+baseline clean8 TRAIN=0.309 TEST=0.297
+TRAIN: n_grp=3684 rate=0.309 | rest n=6304 rate=0.308 | diff=+0.001 OR=1.00 p=0.9335 chi2=0.01
+TEST: n_grp=1296 rate=0.414 | rest n=2985 rate=0.246 | diff=+0.168 OR=2.17 p=0.0000 chi2=122.84

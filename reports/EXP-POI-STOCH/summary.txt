@@ -1,0 +1,18 @@
+============================================================
+EXP-POI-STOCH — RESUMEN (hands-free)
+============================================================
+par: EURUSD_otc | tf M15 | velas=5122 | eventos=14269
+TRAIN=9988 TEST=4281 (split temporal 60%%)
+baseline clean8: TRAIN=0.309 TEST=0.297
+
+H1 (patron completo edge): REFUTADA
+  TRAIN: n_grp=3684 rate=0.309 | rest n=6304 rate=0.308 | diff=+0.001 OR=1.00 p=0.9335 chi2=0.01
+  TEST: n_grp=1296 rate=0.414 | rest n=2985 rate=0.246 | diff=+0.168 OR=2.17 p=0.0000 chi2=122.84
+H2 (sep excesiva -> retrace): INCONCLUSA
+  TRAIN: n_grp=76 rate=0.908 | rest n=9912 rate=0.536 | diff=+0.372 OR=8.54 p=0.0000 chi2=42.00
+  TEST: n_grp=1 rate=0.000 | rest n=4280 rate=0.483 | diff=-0.483 OR=0.00 p=0.3341 chi2=0.93
+H3 (NN refine): REFUTADA
+  auc_oos=0.459 baseline=0.585 gap=-0.126
+
+Nota datos: EURCHF_otc NO disponible (Token rejected servidor Quotex). Solo EURUSD_otc (M1->M15).
+No se uso volumen. POI vía swing_levels_causal + compute_support_efficacy (zone_strength).

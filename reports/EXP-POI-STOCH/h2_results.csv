@@ -1,0 +1,3 @@
+H2 separacion excesiva |K-D|>=25.0 predice retrace next candle
+TRAIN: n_grp=76 rate=0.908 | rest n=9912 rate=0.536 | diff=+0.372 OR=8.54 p=0.0000 chi2=42.00
+TEST: n_grp=1 rate=0.000 | rest n=4280 rate=0.483 | diff=-0.483 OR=0.00 p=0.3341 chi2=0.93

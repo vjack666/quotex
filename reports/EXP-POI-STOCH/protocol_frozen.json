@@ -1,0 +1,25 @@
+{
+  "seed": 42,
+  "alpha": 0.05,
+  "fdr_method": "fdr_bh",
+  "domain": "REAL_price_stoch_M15",
+  "pair": "EURUSD_otc",
+  "tf": "M15",
+  "oos_split": "temporal",
+  "poi_min_efficacy": 0.35,
+  "kd_healthy_low": 5.0,
+  "kd_healthy_high": 18.0,
+  "kd_excessive": 25.0,
+  "n_forward_clean": [
+    4,
+    8
+  ],
+  "min_events_for_nn": 300,
+  "effect_size_min_diff": 0.05,
+  "effect_size_min_or": 1.25,
+  "stoch_k": 14,
+  "stoch_d": 3,
+  "stoch_s": 3,
+  "sticky_extreme": 20.0,
+  "sticky_max_bars": 2
+}

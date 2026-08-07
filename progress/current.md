@@ -224,3 +224,9 @@ Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de 
 - CONCLUSION R0-R7: rama Wyckoff-como-filtro marginal/no robusta (R6) y Edificio como binaria no rentable (R7).
   Ambas lineas agotadas con evidencia. Decision del TH: archivar o reenfocar.
 
+
+## EXP-POI-STOCH (2026-08-07)
+H1=INCONCLUSA H2=INCONCLUSA H3=ACEPTADA | eventos=14269 EURUSD_otc M15. EURCHF_otc no disp (Token rejected).
+
+## EXP-POI-STOCH (2026-08-07)
+H1=REFUTADA H2=INCONCLUSA H3=REFUTADA | eventos=14269 EURUSD_otc M15. EURCHF_otc no disp (Token rejected).
