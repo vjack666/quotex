@@ -175,3 +175,21 @@ Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de 
 - REGLA DE ORO cumplida: volumen NUNCA requisito; Edificio caja negra intacta; solo datos en disco.
 - Reporte inmutable: `data/strategy_lab/ew_reports/PHASEA-R4/`. Commit pendiente de OK.
 
+### R5 EJECUTADO (2026-08-07) — Estructura INDEPENDIENTE del Edificio (sin Edificio/win/volumen)
+- Script `scripts/lab_phaseA_r5_independent.py`. 108.657 ventanas M15 (step 5, ventana 20).
+- R5-A: Phase_A_Score sobre TODO el mercado (solo OHLC+tiempo, rank global).
+- R5-B (trayectoria): autocorrelacion score lag1=**0.505**, lag2=0.22, lag3=0.16 -> score PERSISTENTE
+  (es proceso/clúster, no vela aislada) -> coherente con Wyckoff como secuencia.
+- R5-C (consecuencia sin Edificio): ret_3 por tercil de score ~**0** en todos
+  (bajo +2.5e-6, medio -1.9e-6, alto -8.7e-6); OOS 2a mitad tambien ~0.
+  => la estructura NO predice direccion ni expansion del mercado por si sola.
+- Ablation: quitar compression/overlap/break_fail cambia corr con break_3 ~0.04-0.05;
+  NINGUN componente domina -> senal repartida y DEBIL, no hay 2-3 piezas magicas.
+- VERDICTO HONESTO (falsacion util): el Phase_A_Score tiene comportamiento propio
+  (persistencia temporal) PERO NO genera edge direccional propio. Lo que R4 vio fue
+  correlacion con CUANDO EL EDIFICIO ACIERTA, no con el movimiento del mercado.
+  => Refuerza la arquitectura del TH: Wyckoff = CONTEXTO/FILTRO, no gatillo ni
+  generador de direccion. R6 (cruzar contexto + Edificio) es el siguiente paso real.
+- Regla de oro: sin volumen, sin Edificio, sin win/loss. Caja negra intacta.
+- Reporte inmutable: `data/strategy_lab/ew_reports/PHASEA-R5/`. Commit pendiente de OK.
+

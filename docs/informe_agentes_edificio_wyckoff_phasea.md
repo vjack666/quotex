@@ -126,10 +126,35 @@ Rol: Scientist + Engineer (reporte `data/strategy_lab/ew_reports/PHASEA-R4/`).
   tampoco se coronó. Esto protege contra el sobre-ajuste conceptual.
 - Regla de oro cumplida: volumen NUNCA requisito; Edificio (src/) intacto; solo datos en disco.
 
-## Próximos pasos (requieren OK del Trader-Humano)
+---
 
-- **R4** — ✅ HECHO (ver Addendum R6 arriba). Mapeo explícito + Phase_A_Score + comp WIN/LOSS.
-- **R5** — Construir `Phase_A_Score` como detector estructural INDEPENDIENTE del Edificio
-- **R6** — Confirmación: Phase A context + señal Edificio.
+## 7. Addendum R5 — Estructura independiente del Edificio (ejecutado)
+
+Rol: Scientist (reporte `data/strategy_lab/ew_reports/PHASEA-R5/`). Diseño autorizado
+por Trader-Humano: **NO mirar WIN/LOSS ni señal del Edificio**.
+
+- **R5-A**: `Phase_A_Score` sobre **todo el mercado M15** (108.657 ventanas, solo OHLC+tiempo).
+- **R5-B (trayectoria)**: autocorrelación del score lag1=**0.505**, lag2=0.22, lag3=0.16.
+  El score es **persistente en el tiempo** → es un proceso/clúster, no vela aislada.
+  Coherente con Wyckoff como secuencia (tendencia→agotamiento→lucha→compresión), no como
+  "vela rara".
+- **R5-C (consecuencia sin Edificio)**: retorno a 3 velas por tercil de score ≈ **0** en
+  todos (bajo +2.5e-6, medio −1.9e-6, alto −8.7e-6); OOS (2ª mitad) también ≈0. La
+  estructura **NO predice dirección ni expansión del mercado por sí sola**.
+- **Ablation**: al quitar compression/overlap/break_fail la correlación con ruptura cae
+  ~0.04–0.05; **ningún componente domina** → señal repartida y débil, no hay 2–3 piezas
+  mágicas.
+- **Veredicto (falsación útil)**: el `Phase_A_Score` tiene comportamiento propio
+  (persistencia temporal) pero **NO genera edge direccional propio**. Lo que R4 vio fue
+  correlación con *cuándo el Edificio acierta*, no con el movimiento del mercado. Esto
+  confirma la arquitectura del Trader-Humano: **Wyckoff = contexto/filtro**, no gatillo ni
+  generador de dirección. El siguiente paso real es R6 (cruzar contexto + Edificio).
+- Regla de oro cumplida: sin volumen, sin Edificio, sin win/loss; caja negra intacta.
+
+- **R4** — ✅ HECHO. Mapeo explícito + Phase_A_Score + comp WIN/LOSS.
+- **R5** — ✅ HECHO (ver Addendum R7 arriba). Estructura independiente: persistente en el
+  tiempo pero SIN edge direccional propio → Wyckoff = contexto/filtro, no gatillo.
+- **R6** — Cruzar contexto (Phase_A_Score) + Edificio: matriz Fase A baja/media/alta × dispara →
+  ¿mejora la probabilidad de la operación? (tu matriz 52/56/63%). Requiere OK.
 - **R7** — Binarias: dirección + expiración (horizonte natural del Edificio).
 - **R8–R10** — OOS/walk-forward, robustez (pares/sesiones), producción.

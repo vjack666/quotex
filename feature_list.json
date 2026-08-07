@@ -230,7 +230,7 @@
       "status": "in_progress",
       "sdd": true,
       "spec_path": "specs/edificio_wyckoff_phasea/",
-      "note": "R0-R3 DONE (radiografia WIN/LOSS, commit f7f13fe). R4 DONE (PHASEA-R4: mapa evento->Wyckoff + Phase_A_Score solo precio + comp. WIN/LOSS). Resultado honesto: separacion MODESTA (test d=0.27, train d=0.37) -> estructura Fase A presente en WIN pero debil, NO mecanismo dominante. Edificio caja negra intacta. EW-1 investigacion auxiliar. Sig: R5 (construir Phase_A_Score como detector independiente) tras OK."
+      "note": "R0-R3 DONE. R4 DONE (separacion modesta d=0.27-0.37). R5 DONE (estructura INDEPENDIENTE: persistente en el tiempo ac1=0.505 PERO sin edge direccional propio ret_3~0; ablation sin componente dominante -> Wyckoff=CONTEXTO/FILTRO, no gatillo). Edificio caja negra intacta, sin volumen. Sig: R6 (cruzar contexto + Edificio, matriz 52/56/63) tras OK."
     }
   ]
 }
