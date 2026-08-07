@@ -1,0 +1,11 @@
+{
+  "alpha": 0.05,
+  "fdr": "BH",
+  "seed": 42,
+  "domain": "REAL",
+  "null_method": "independent_column_shuffle_preserves_marginals",
+  "B": 200,
+  "criterion_reject_H0": "sil_REAL>p95_null AND ss_REAL>p95_null",
+  "oos_split": "TRAIN<2025-01-01 / TEST>=2025-01-01",
+  "effect_size_or_min": 1.15
+}

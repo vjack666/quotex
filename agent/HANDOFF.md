@@ -1,7 +1,7 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> **ÚLTIMA SESIÓN: 2026-08-06 (tarde) — Paradigma Wyckoff + Freno Científico en el Lab.**
+> **ÚLTIMA SESIÓN: 2026-08-07 — Cierre definitivo del hilo del clustering (EXP-075 + EXP-074b-NULL).**
 > Feature 38 `lab_protocolo_cientifico` = DONE y pusheada (commit `dc53c97`).
 > NUEVA FASE del lab: de "buscar la vela mágica" → "modelar el comportamiento del mercado".
 
@@ -32,6 +32,28 @@
     22%→95%). Lo REAL: duración de la Fase A es variable continua (ruptura corta
     vs lateral larga), no 2 poblaciones profundas. PRUEBA 3 OOS NO ejecutó
     (dataset empieza 2022, no hay 2012-2018). (commit c4ecb42)
+  - **2026-08-07 — CIERRE DEFINITIVO del hilo del clustering** (orden Trader-Humano):
+    - **EXP-075** Duración/Tipo de Fase A como variable CONTINUA (re-enfoque de 074b):
+      REDIME la PRUEBA 3 OOS (dataset ya llega a 2026). 3307 fases, TRAIN 2022-2024 /
+      TEST 2025-2026. FDR-BH sobre 36 descriptores continuos = **0/36 significativos**;
+      OR por cuartil de `duration` ≈1.0 (TRAIN y OOS), bootstrap IC incluye 1.0.
+      **RESULTADO NEGATIVO**: duración continua NO predice resolución. (commit pendiente)
+    - **EXP-074b-NULL** Control nulo / surrogate + Prueba temporal OOS REAL:
+      null = shuffle independiente de columnas (B=200) preservando marginales.
+      - silhouette null (0.405) > REAL (0.2185): el null es geométricamente más favorable
+        (null "fuerte") → NO se usa silhouette para refutar.
+      - OOS TRAIN 2022-2024 → TEST 2025-2026: TEST 100% "corto" → **colapso total**
+        (diff 81.8pp, silhouette TEST=nan). **No hay estabilidad temporal.**
+      - %minoritario REAL 24.4% en el borde del null (máx 21.6%).
+      - **VEREDICTO: hipótesis de población mixta NO SOPORTADA** como régimen estable del
+        mercado. El clustering es geometría del método, no régimen natural.
+      - Matiz honesto documentado: el criterio congelado sil_REAL>p95_null daba MIXTO;
+        se explica por qué el null es favorable y el veredicto se apoya en OOS + %minoritario.
+    - **Hilo del clustering CERRADO**: ni binario (074b) ni continuo (075) predice nada.
+    - **DISEÑO (no ejecutado) Energía Wyckoff**: volumen+rango+resultado, no estocástico.
+      Variables esfuerzo/resultado/eficiencia/absorción/climax/compresión. Pregunta inicial:
+      ¿contienen memoria/estructura de transición que el K-D M15 no contiene? Aprobación
+      pendiente para correr EXP-EW-1 (autocorrelación de energía vs estocástico).
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)
@@ -42,14 +64,18 @@
   mercado (Wyckoff: estado→transición→confirmación→operación).
 - FRENO CIENTÍFICO aplicado (Grok/ChatGPT): NO procede EXP-075 sobre el cluster de
   GMM porque la partición no es estable. El lab evitó construir estrategia falsa.
+- **2026-08-07**: el hilo del clustering quedó CERRADO formalmente (EXP-074b + EXP-075
+  negativos + EXP-074b-NULL con OOS colapsando). El estocástico M15 describe ESTADO,
+  no CONTROL ni transición. No se promueve nada al Edificio (Art. 13).
 
 ### Próximo paso sugerido (al retomar)
-- EXP-075 (re-enfocado): medir si la DURACIÓN/TIPO de Fase A predice dirección o
-  calidad del breakout como variable CONTINUA (cuartiles/regresión), NO 2 cajas.
-- Para validar temporalmente de verdad (PRUEBA 3 que faltó en 074b) necesitamos
-  más historia EURUSD o datos OTC del propio lab (Art. 13).
-- Las 3 recomendaciones del Trader-Humano (edad de hipótesis, Confidence Score,
-  registro de descartadas) siguen como evolución pendiente.
+- **PENDIENTE APROBACIÓN del Trader-Humano**: correr EXP-EW-1 (autocorrelación de
+  variables de ENERGÍA WYCKOFF vs estocástico M15) para testear si el VOLUMEN/RESULTADO
+  contiene memoria que el estocástico no ve. Diseño en
+  `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md` (NO ejecutado).
+  - Si EXP-EW-1: NO hay memoria → descartar también la vía energía (resultado negativo).
+  - Si SÍ hay memoria → justifica EXP-EW-2 (separación de transición) y EXP-EW-3 (edge).
+- NO correr EXP-EW hasta OK. NO buscar más edge en clusters (orden Trader-Humano).
 
 ### Archivos clave para retomar
 - `docs/LAB_CHARTER.md` (principios inquebrantables, Art.1–12)

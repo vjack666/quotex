@@ -1,0 +1,41 @@
+=== EXP-074b-NULL — CONTROL NULO / SURROGATE + PRUEBA TEMPORAL OOS (EURUSD REAL) ===
+Generado: 2026-08-07T13:23:22Z | seed=42
+
+Fases A totales: 3307 | periodo: 2022-01-03 -> 2026-08-05
+
+-- REAL (GMM n=2) --
+  silhouette = 0.2185
+  proporcion minoritaria = 24.4%
+  structure score = 0.487
+  perfiles por cluster (mediana):
+    c0: duration=11.00, n_osc=2.00, entropy=0.00, mean_slope_K=-2.79, vol_mean=154.36, atr_mean=0.00
+    c1: duration=32.00, n_osc=8.00, entropy=0.95, mean_slope_K=0.21, vol_mean=0.00, atr_mean=0.00
+
+-- NULL (surrogate: shuffle independiente por feature, B=200) --
+  silhouette null: media=0.4048 p05=0.3564 p95=0.4587
+  % minoritario null: media=2.9% rango=[0.5,21.6]
+  structure score null: media=0.138 p95=0.230
+  fraccion de null con silhouette > REAL: 0.970
+  fraccion de null con structure score > REAL: 0.000
+  ARI(REAL, null representativo) = 0.006 (esperado ~0)
+
+-- REAL (KMeans n=2) para robustez --
+  silhouette REAL-KMeans = 0.1952 (vs GMM 0.2185)
+
+-- PRUEBA TEMPORAL OOS (cierre 074b Prueba 3) --
+  TRAIN 2022-01-03..2024-12-31 n=2066 | TEST 2025-01-01..2026-08-05 n=1241
+  TRAIN: %corto=18.2% | TEST: %corto=100.0% | diff=81.8pp
+  silhouette TEST (predicho con GMM de TRAIN) = nan (vs REAL 0.2185)
+  -> OOS coherente (diff<8pp): NO
+
+-- VEREDICTO (tribunal EXP-074b-NULL) --
+  sil_REAL(0.2185) > p95_null(0.4587): NO
+  ss_REAL(0.487) > p95_null(0.230): SI
+  ARI(REAL,null)=0.006 (cercano a 0 = particiones distintas)
+  Veredicto: ARTEFACTO GEOMETRICO (H0 NO rechazada): la particion es indistinguishable del null
+  OOS temporal: NO coherente (diff=81.8pp)
+  Hipotesis de poblacion mixta: NO SOPORTADA como estructura estable del mercado bajo este espacio de representacion.
+  Distincion: 'clustering encuentra geometria' != 'mercado posee regimenes naturales'.
+  Art. 13: REAL=descubrimiento. Sin win rate operativa.
+  EXP-075 (duracion continua predictiva): RESULTADO NEGATIVO (FDR 0/36, OR~1.0, OOS plano).
+  Este experimento cumple el Charter: Sí

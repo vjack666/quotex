@@ -1,0 +1,1 @@
+{"alpha":0.05,"fdr":"bh","bonferroni":true,"n_min":100,"max_phase":120,"h_resolve":8,"seed":42,"domain":"REAL","asset":"EURUSD","tf":"M15","oos_split":"2025-01-01","effect_size_or_min":1.15}

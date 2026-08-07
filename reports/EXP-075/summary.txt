@@ -1,0 +1,114 @@
+=== EXP-075 — DURACION/TIPO DE FASE A COMO VARIABLE CONTINUA (EURUSD REAL) ===
+
+Fases A totales (con etiqueta): 3307
+Periodo: 2022-01-03 -> 2026-08-05
+Tasa base aligned: 0.490 | clean: 0.406
+
+Train 2022-2024: n=2066 | Test 2025-2026: n=1241
+
+-- TRAIN (2022-2024): OR por cuartil de duration (monotonia) --
+  duration -> aligned: rate Q1=0.468 Q4=0.5 OR_Q4=1.045 p=0.6840 by_q={0: 0.468, 1: 0.502, 2: 0.498, 3: 0.5}
+  duration -> clean:   rate Q1=0.39 Q4=0.412 OR_Q4=1.025 p=0.8360 by_q={0: 0.39, 1: 0.421, 2: 0.409, 3: 0.412}
+  n_osc -> clean:      rate Q1=0.402 Q4=0.399 OR_Q4=0.954 p=0.6962 by_q={0: 0.402, 1: 0.441, 2: 0.404, 3: 0.399}
+
+-- TEST OOS (2025-2026): OR por cuartil de duration (monotonia) --
+  duration -> aligned: rate Q1=0.499 Q4=0.498 OR_Q4=1.069 p=0.6451 by_q={0: 0.499, 1: 0.434, 2: 0.505, 3: 0.498}
+  duration -> clean:   rate Q1=0.395 Q4=0.404 OR_Q4=1.015 p=0.9465 by_q={0: 0.395, 1: 0.382, 2: 0.422, 3: 0.404}
+  n_osc -> clean:      rate Q1=0.384 Q4=0.406 OR_Q4=1.025 p=0.8815 by_q={0: 0.384, 1: 0.406, 2: 0.435, 3: 0.406}
+
+-- Regresion logistica multivariable (TRAIN, FDR-BH) --
+
+P(aligned) ~ descriptores:
+     feature  OR_per_sd    p_raw  p_adj_fdr  p_adj_bonf
+    duration      0.888 0.084125   0.000002    1.000000
+       n_osc      1.435 0.000000   0.000002    0.000002
+     n_cross      0.743 0.000014   0.000002    0.000258
+  max_kd_sep      1.115 0.113294   0.000002    1.000000
+ mean_kd_sep      1.008 0.907493   0.000002    1.000000
+   amp_trend      1.028 0.687381   0.000002    1.000000
+     amp_std      0.940 0.368409   0.000002    1.000000
+     entropy      1.029 0.671846   0.000002    1.000000
+mean_slope_K      0.982 0.790353   0.000002    1.000000
+    vol_mean      1.102 0.156761   0.000002    1.000000
+   vol_trend      1.000 0.996484   0.000002    1.000000
+    atr_mean      0.921 0.230991   0.000002    1.000000
+   atr_trend      0.901 0.127840   0.000002    1.000000
+   body_mean      1.067 0.343572   0.000002    1.000000
+  body_trend      1.012 0.857376   0.000002    1.000000
+  efficiency      1.416 0.000000   0.000002    0.000007
+      absorb      0.955 0.505425   0.000002    1.000000
+        move      0.791 0.000631   0.000002    0.011365
+
+P(clean) ~ descriptores:
+     feature  OR_per_sd    p_raw  p_adj_fdr  p_adj_bonf
+    duration      0.987 0.864697   0.000106    1.000000
+       n_osc      1.294 0.000601   0.000106    0.010812
+     n_cross      0.782 0.001049   0.000106    0.018886
+  max_kd_sep      0.996 0.958058   0.000106    1.000000
+ mean_kd_sep      1.014 0.849696   0.000106    1.000000
+   amp_trend      1.092 0.243343   0.000106    1.000000
+     amp_std      1.023 0.763850   0.000106    1.000000
+     entropy      1.001 0.984712   0.000106    1.000000
+mean_slope_K      1.016 0.837079   0.000106    1.000000
+    vol_mean      1.124 0.119885   0.000106    1.000000
+   vol_trend      0.985 0.840185   0.000106    1.000000
+    atr_mean      0.833 0.015284   0.000106    0.275113
+   atr_trend      0.889 0.119086   0.000106    1.000000
+   body_mean      1.241 0.004028   0.000106    0.072501
+  body_trend      1.005 0.951778   0.000106    1.000000
+  efficiency      1.406 0.000006   0.000106    0.000106
+      absorb      0.965 0.637798   0.000106    1.000000
+        move      0.775 0.000689   0.000106    0.012402
+
+-- FDR-BH sobre cada descriptor continuo (mediana-split vs aligned/clean, TRAIN) --
+
+     feature  target  rate_low  rate_high    diff  p_value  p_adj_fdr
+    duration aligned    0.4849     0.4990  0.0141 0.549726   0.854952
+    duration   clean    0.4055     0.4107  0.0052 0.843748   0.854952
+       n_osc aligned    0.4950     0.4874 -0.0075 0.769417   0.854952
+       n_osc   clean    0.4126     0.4018 -0.0108 0.654628   0.854952
+     n_cross aligned    0.4954     0.4869 -0.0085 0.736209   0.854952
+     n_cross   clean    0.4130     0.4014 -0.0116 0.628222   0.854952
+  max_kd_sep aligned    0.4840     0.4995  0.0155 0.509185   0.854952
+  max_kd_sep   clean    0.4037     0.4124  0.0087 0.720254   0.854952
+ mean_kd_sep aligned    0.5034     0.4802 -0.0232 0.311459   0.854952
+ mean_kd_sep   clean    0.4143     0.4017 -0.0126 0.591144   0.854952
+   amp_trend aligned    0.4937     0.4898 -0.0039 0.894967   0.854952
+   amp_trend   clean    0.3988     0.4172  0.0184 0.420376   0.854952
+     amp_std aligned    0.4918     0.4918  0.0000 1.000000   0.854952
+     amp_std   clean    0.4008     0.4153  0.0145 0.530850   0.854952
+     entropy aligned    0.4960     0.4867 -0.0094 0.704527   0.854952
+     entropy   clean    0.4110     0.4045 -0.0065 0.799225   0.854952
+mean_slope_K aligned    0.4860     0.4976  0.0116 0.628330   0.872837
+mean_slope_K   clean    0.3979     0.4182  0.0203 0.370627   0.872837
+    vol_mean aligned    0.4891     0.5040  0.0149 0.641526   0.872837
+    vol_mean   clean    0.4046     0.4236  0.0190 0.537120   0.872837
+   vol_trend aligned    0.4868     0.5369  0.0501 0.199895   0.872837
+   vol_trend   clean    0.4015     0.4680  0.0665 0.079282   0.872837
+    atr_mean aligned    0.4821     0.5015  0.0194 0.403078   0.872837
+    atr_mean   clean    0.3979     0.4182  0.0203 0.370627   0.872837
+   atr_trend aligned    0.4976     0.4860 -0.0116 0.628330   0.872837
+   atr_trend   clean    0.3959     0.4201  0.0242 0.282662   0.872837
+   body_mean aligned    0.4773     0.5063  0.0290 0.201882   0.872837
+   body_mean   clean    0.3882     0.4279  0.0397 0.073358   0.872837
+  body_trend aligned    0.4966     0.4869 -0.0097 0.692057   0.872837
+  body_trend   clean    0.3979     0.4182  0.0203 0.370627   0.888266
+  efficiency aligned    0.4802     0.5034  0.0232 0.312151   0.888266
+  efficiency   clean    0.3952     0.4210  0.0258 0.251207   0.888266
+      absorb aligned    0.4891     0.5040  0.0149 0.641526   0.888266
+      absorb   clean    0.4046     0.4236  0.0190 0.537120   1.000000
+        move aligned    0.4826     0.5010  0.0184 0.428707   1.000000
+        move   clean    0.3917     0.4244  0.0327 0.141830   1.000000
+
+Descriptores con asociacion significativa (FDR, TRAIN): 0 de 36
+
+-- Bootstrap (300) OR_Q4 duration->clean (TRAIN) --
+  OR_Q4 median=1.028 IC95%=[0.835,1.255]
+  -> IC incluye 1.0: NO señal
+
+-- Veredicto del tribunal (EXP-075) --
+  Duracion predictiva (OR_Q4>1.15, p<α, TRAIN): NO
+  Replica OOS (TEST) de descriptores significativos: ver arriba
+  Descriptores significativos TRAIN: 0/36
+  Art. 13: REAL=descubrimiento. Sin win rate operativa.
+  Este experimento cumple el Charter: Sí

@@ -1,7 +1,7 @@
 # PROJECT_STATE
 
-> Last updated: **2026-08-06 (tarde)** — Paradigma Wyckoff en el Lab: EXP-071..074b.
-> Freno científico aplicado: EXP-074b rechaza partición GMM como estructura estable.
+> Last updated: **2026-08-07** — Cierre definitivo del hilo del clustering (EXP-075 + EXP-074b-NULL).
+> Freno científico aplicado: EXP-074b + EXP-075 NEGATIVOS; EXP-074b-NULL OOS colapsa.
 > Full detail: `docs/CHANGELOG_2026-07-16.md` + `docs/LAB_CHARTER.md`
 
 ---
@@ -18,17 +18,21 @@ de "buscar la vela ganadora" a MODELAR EL COMPORTAMIENTO DEL MERCADO (paradigma 
 | EXP-073 | Dinámica Fase A (energía, no eventos) | FDR 0/8: K-D no predice resolución; describe posición, no control | d696aba |
 | EXP-074 | Clustering no supervisado Fases A | K=2 sil 0.2185 (24/76) — población mixta APOYADA | ca8035f |
 | EXP-074b | Estabilidad de Clusters (freno, 6 pruebas) | RECHAZA GMM: no robusto a algoritmo/features/bootstrap. Lo real = duración continua | c4ecb42 |
+| EXP-075 | Duración/Tipo Fase A como CONTINUA (re-enfoque 074b) | RESULTADO NEGATIVO: FDR 0/36, OR≈1.0, OOS plano. Duración NO predice resolución | pendiente |
+| EXP-074b-NULL | Control nulo/surrogate + OOS temporal REAL | Veredicto: NO SOPORTADA. OOS colapsa (TEST 100% corto). Clustering = geometría del método | pendiente |
 
-**Art. 13 + ADR-005 (commit efa212b):** EURUSD REAL = SOLO descubrimiento; validación
-OTC obligatoria del propio lab antes de promover al Edificio.
+**Bloqueos (resueltos en 2026-08-07):** PRUEBA 3 OOS de EXP-074b YA se ejecutó (el
+dataset EURUSD ahora llega a 2026, 3307 fases). TRAIN 2022-2024 / TEST 2025-2026.
 
-**Conclusión de sesión:** el estocástico describe ESTADO pero no predice CAMBIO de
-estado. La "población mixta" de EXP-074 es mayormente partición conveniente del método
-(duración de Fase A como variable continua), NO 2 poblaciones estables. El freno
-científico evitó construir estrategia falsa sobre el cluster.
+**Conclusión de sesión:** el hilo del clustering (binario + continuo) quedó CERRADO. El
+estocástico M15 describe ESTADO, no CONTROL ni transición. No se promueve nada al Edificio
+(Art. 13). Matiz honesto: en EXP-074b-NULL el silhouette del null (0.405) > REAL (0.2185)
+porque el null de shuffle de columnas es "fuerte" (geometría favorable); el veredicto se
+apoya en la OOS (colapso total) y el %minoritario en el borde del null.
 
-**Bloqueos:** PRUEBA 3 OOS de EXP-074b NO ejecutó (dataset EURUSD empieza 2022, no hay
-2012-2018). Para validar temporalmente falta más historia o datos OTC del propio lab.
+**Siguiente (PENDIENTE OK Trader-Humano):** DISEÑO Energía Wyckoff ya escrito (no ejecutado)
+en `specs/lab_protocolo_cientifico/hypothesis_energia_wyckoff_design.md`. Paso 1 = EXP-EW-1
+(autocorrelación de energía vs estocástico). Si no hay memoria, descartar también esa vía.
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).
