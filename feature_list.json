@@ -227,10 +227,10 @@
         "Reporte inmutable + declaracion Charter",
         "Solo datasets en disco (EURUSD_M15, edificio_events)"
       ],
-      "status": "spec_ready",
+      "status": "in_progress",
       "sdd": true,
       "spec_path": "specs/edificio_wyckoff_phasea/",
-      "note": "Trader-humano APROBADO. Reglas de oro: (1) Edificio no se modifica para encajar en Wyckoff; (2) volumen nunca requisito. EW-1 baja a investigacion auxiliar (lab_ew_brake_link.py paralelo)."
+      "note": "R0-R3 DONE (radiografia WIN/LOSS, commit f7f13fe). R4 DONE (PHASEA-R4: mapa evento->Wyckoff + Phase_A_Score solo precio + comp. WIN/LOSS). Resultado honesto: separacion MODESTA (test d=0.27, train d=0.37) -> estructura Fase A presente en WIN pero debil, NO mecanismo dominante. Edificio caja negra intacta. EW-1 investigacion auxiliar. Sig: R5 (construir Phase_A_Score como detector independiente) tras OK."
     }
   ]
 }

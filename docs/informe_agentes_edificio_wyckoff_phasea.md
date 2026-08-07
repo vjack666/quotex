@@ -106,10 +106,30 @@ Rol: coordinación y cierre.
 
 ---
 
+## 6. Addendum R4 — Mapeo estructural explícito a Fase A (ejecutado)
+
+Rol: Scientist + Engineer (reporte `data/strategy_lab/ew_reports/PHASEA-R4/`).
+
+- **Entregable 1 — Mapa evento→Wyckoff en OHLC puro** (`wyckoff_map.json`):
+  PS=agotamiento inicial; SC=clímax+rechazo; AR=expansión contraria; ST=retorno+menor
+  continuación; Spring/UT=falsa ruptura=fallo de ruptura+cierre adentro. Nada de volumen.
+- **Entregable 2 — Phase_A_Score (0..7)** por señal, solo precio: agotamiento +
+  compresión + solapamiento + fallos_ruptura + rechazo_extremos + reducción_continuación
+  + cambio_régimen. Normalizado por **rank dentro de cada split** (sin look-ahead OOS).
+- **Entregable 3 — Comparación WIN vs LOSS del Edificio** con ese score:
+  - TEST/OOS: WIN=3.60 vs LOSS=3.46, **d=0.27**; %>4 WIN 6.5% vs LOSS 3.7%.
+  - TRAIN: WIN=3.68 vs LOSS=3.40, **d=0.37**; %>4 WIN 32.8% vs LOSS 21.5%.
+- **Veredicto honesto (falsación parcial)**: la estructura de Fase A SÍ está presente
+  en los WIN (señal real, aparece en OOS y en ambos lados), pero la separación es
+  **MODESTA** (d 0.27–0.37). El Edificio no es un detector limpio de Fase A; pesca algo
+  de esa transición, pero no es su mecanismo dominante. No se descarta la hipótesis, pero
+  tampoco se coronó. Esto protege contra el sobre-ajuste conceptual.
+- Regla de oro cumplida: volumen NUNCA requisito; Edificio (src/) intacto; solo datos en disco.
+
 ## Próximos pasos (requieren OK del Trader-Humano)
 
-- **R4** — Mapeo explícito de esas features a Fase A de Wyckoff.
-- **R5** — Phase A Score (pesos por evidencia, no inventados).
+- **R4** — ✅ HECHO (ver Addendum R6 arriba). Mapeo explícito + Phase_A_Score + comp WIN/LOSS.
+- **R5** — Construir `Phase_A_Score` como detector estructural INDEPENDIENTE del Edificio
 - **R6** — Confirmación: Phase A context + señal Edificio.
 - **R7** — Binarias: dirección + expiración (horizonte natural del Edificio).
 - **R8–R10** — OOS/walk-forward, robustez (pares/sesiones), producción.

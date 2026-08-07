@@ -162,3 +162,16 @@ Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de 
   TH pide aviso "cuando consigas la estructura adecuada".
 - Next: implementer ejecuta T1-T8 (script `lab_phaseA_radiografia.py`) sin tocar src/. Sin descargas.
 
+### R4 EJECUTADO (2026-08-07) — Phase_A_Score solo precio + mapa Wyckoff + comp WIN/LOSS
+- Script `scripts/lab_phaseA_r4_score.py` (standalone, sin imports del Edificio). 946 señales.
+- Entregables: (1) `wyckoff_map.json` (PS/SC/AR/ST/Spring/UT -> evento OHLC puro);
+  (2) `Phase_A_Score` 0..7 (rank/split de 7 componentes: agotamiento+compresion+solapamiento+
+  fallos_ruptura+rechazo+reduc_continuacion+cambio_regimen); (3) comp WIN vs LOSS.
+- RESULTADO HONESTO: separacion MODESTA. TEST/OOS d=0.27 (WIN 3.60 vs LOSS 3.46; %>4 WIN 6.5% vs LOSS 3.7%).
+  TRAIN d=0.37 (WIN 3.68 vs LOSS 3.40; %>4 WIN 32.8% vs LOSS 21.5%).
+- INTERPRETACION: estructura Fase A SI esta en los WIN (senal real, aparece OOS y en ambos lados),
+  pero DEBIL — NO es el mecanismo dominante del Edificio. Falsacion parcial de la hipotesis fuerte
+  ("Edificio = detector limpio de Fase A"): confirmada debilmente, no descartada, no triunfal.
+- REGLA DE ORO cumplida: volumen NUNCA requisito; Edificio caja negra intacta; solo datos en disco.
+- Reporte inmutable: `data/strategy_lab/ew_reports/PHASEA-R4/`. Commit pendiente de OK.
+
