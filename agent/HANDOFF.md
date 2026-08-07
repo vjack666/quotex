@@ -1,49 +1,55 @@
 # HANDOFF — Session Transfer Document
 
 > **Read this first** after `PROJECT_STATE.md` when resuming work.
-> **ÚLTIMA SESIÓN: 2026-08-06** — Feature 38 `lab_protocolo_cientifico` = DONE y pusheada (commit `dc53c97`).
+> **ÚLTIMA SESIÓN: 2026-08-06 (tarde) — Paradigma Wyckoff + Freno Científico en el Lab.**
+> Feature 38 `lab_protocolo_cientifico` = DONE y pusheada (commit `dc53c97`).
+> NUEVA FASE del lab: de "buscar la vela mágica" → "modelar el comportamiento del mercado".
 
 ---
 
 ## ⭐ ESTADO ACTUAL (2026-08-06) — LEER PRIMERO
 
-### Qué se hizo
-- Se instituyó el **Laboratorio Científico Reproducible** del bot como un
-  sistema de gobierno documental (no solo código):
-  - `docs/LAB_CHARTER.md` — Constitución (Art. 1–12): objetivo, refutabilidad,
-    promoción por evidencia, datos inmutables, reproducibilidad, protocolo
-    congelado, decisiones registradas, FDR obligatorio (Art.9), **Dominio**
-    (Art.10: REAL≠OTC≠Crypto≠Índices), **Parsimonia** (Art.11), **Muerte
-    definitiva** (Art.12: refutada 3× → archivo eterno).
-  - `docs/specs.md` — manual operativo subordinado al Charter + ciclo de vida
-    científico + checklist Art.6/10/11/12 + participación del Trader-Humano en SDD.
-  - `specs/lab_protocolo_cientifico/` — SPEC feature 38 (requirements/design/
-    tasks/trader_humano_review). **Aprobado por Trader-Humano + Aprobación Final**.
-  - `docs/lab_templates/{hypothesis,risks,validation}.md` — plantillas estándar.
-  - `docs/decisions/ADR-001..004` — FDR, REAL/OTC, Dominio, Parsimonia/Muerte.
-  - `datasets/dataset_v001/manifest.json` — dataset versionado (referencia
-    SMC_ROOT, SIN copiar velas).
-  - `scripts/lab_run.py` — CLI único `lab run EXP-XXX`.
-  - `scripts/lab_ci.py` — CI científico (hash + reproducibilidad + FDR + reporte).
-  - `src/strategy_lab/experiment_runner.py` — extendido con reports inmutables
-    (seed.txt, environment.txt, dataset_hash.txt, protocol_frozen.json,
-    lifecycle.json).
-  - `.github/workflows/lab-ci.yml` — job de CI.
+### Qué se hizo (sesión 2026-08-06 tarde — paradigma Wyckoff + freno científico)
+- El laboratorio EVOLUCIONÓ de "buscar la vela ganadora" a "modelar el
+  comportamiento del mercado" (paradigma Wyckoff del Trader-Humano):
+  - **EXP-071** Zona de Descubrimiento: contexto [extremo>freno>cruce] vive ~45
+    velas; tras filtrar n≥100 solo pinbar/continuacion sobreviven, ambos EV neg,
+    FDR 0.018. NINGÚN confirmador tiene edge. (commit efa212b)
+  - **EXP-072** Mapa de Transiciones (Markov sobre estados régimen×pendiente×
+    impulso): mercado mean-reverting (auto-bucle 0.50-0.54), el impulso del
+    estocástico SE REVIERTE (rate 0.28-0.30), 0 estados con favorable>0.55.
+    Fase A: dur mediana 25, 1er freno 6, 1er cruce 2, 5 oscilaciones, sep K-D 15.2.
+    (commit 76d467b)
+  - **EXP-073** Dinámica de la Fase A (energía, no eventos): 3308 fases, ninguna
+    variable dinámica de K-D predice la resolución (FDR 0/8). El estocástico
+    describe POSICIÓN, no ENERGÍA/control. (commit d696aba)
+  - **EXP-074** Clustering no supervisado de Fases A (19 features + energía
+    Wyckoff): K=2 (sil 0.2185), 807/2500 (24% explosivo / 76% lateral).
+    Hipótesis de población mixta APOYADA. (commit ca8035f)
+  - **EXP-074b** Estabilidad de Clusters (freno científico, 6 pruebas de
+    Grok/ChatGPT): RECHAZA la partición GMM como robusta — NO sobrevive a cambio
+    de algoritmo (ARI ~0), ablación de features (9.7%→48.1%), ni bootstrap (rango
+    22%→95%). Lo REAL: duración de la Fase A es variable continua (ruptura corta
+    vs lateral larga), no 2 poblaciones profundas. PRUEBA 3 OOS NO ejecutó
+    (dataset empieza 2022, no hay 2012-2018). (commit c4ecb42)
+  - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
+    validación OTC obligatoria del propio lab antes de promover al Edificio.
+    (commit efa212b)
 
 ### Decisión tomada
-- Force-push autorizado para limpiar commit vago (`226bc44` → `dc53c97`, solo
-  feature 38). Origin/main ahora limpio.
-- Las 5 observaciones del Trader-Humano fueron incorporadas (Dominio, Effect
-  Size mínimo R12, Costo operacional R13, Muerte definitiva, Parsimonia).
+- Paradigma cambiado por el Trader-Humano: el lab ya no busca "la estrategia" ni
+  "el confirmador mágico"; construye un MAPA PROBABILÍSTICO de evolución del
+  mercado (Wyckoff: estado→transición→confirmación→operación).
+- FRENO CIENTÍFICO aplicado (Grok/ChatGPT): NO procede EXP-075 sobre el cluster de
+  GMM porque la partición no es estable. El lab evitó construir estrategia falsa.
 
 ### Próximo paso sugerido (al retomar)
-- Usar el laboratorio para diagnosticar el **embudo roto del Edificio
-  (EXP-039: 40→2→0→0)**. El cuello es FRENO (solo 2/40 pasan). El lab
-  (secuencia_libre.py + optimizer.py) debe encontrar config aceptable del
-  Edificio vía secuencias, NO ajuste manual a ojo.
-- Las 3 recomendaciones futuras del Trader-Humano (edad de hipótesis,
-  Confidence Score, registro de descartadas) quedaron ancladas en
-  `trader_humano_review.md` como evolución pendiente (no bloquean).
+- EXP-075 (re-enfocado): medir si la DURACIÓN/TIPO de Fase A predice dirección o
+  calidad del breakout como variable CONTINUA (cuartiles/regresión), NO 2 cajas.
+- Para validar temporalmente de verdad (PRUEBA 3 que faltó en 074b) necesitamos
+  más historia EURUSD o datos OTC del propio lab (Art. 13).
+- Las 3 recomendaciones del Trader-Humano (edad de hipótesis, Confidence Score,
+  registro de descartadas) siguen como evolución pendiente.
 
 ### Archivos clave para retomar
 - `docs/LAB_CHARTER.md` (principios inquebrantables, Art.1–12)

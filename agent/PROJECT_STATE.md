@@ -1,13 +1,43 @@
 # PROJECT_STATE
 
-> Last updated: **2026-08-06** — Laboratorio Científico Reproducible instituido (Feature 38 DONE, commit `dc53c97`).
+> Last updated: **2026-08-06 (tarde)** — Paradigma Wyckoff en el Lab: EXP-071..074b.
+> Freno científico aplicado: EXP-074b rechaza partición GMM como estructura estable.
 > Full detail: `docs/CHANGELOG_2026-07-16.md` + `docs/LAB_CHARTER.md`
 
 ---
 
-## 🔬 Laboratorio Científico (2026-08-06) — LEER PRIMERO al retomar
+## 🔬 Laboratorio Científico (2026-08-06 tarde) — LEER PRIMERO al retomar
 
-**Milestone actual:** Feature 38 `lab_protocolo_cientifico` = DONE y pusheada.
+**Milestone actual:** Feature 38 `lab_protocolo_cientifico` = DONE. El lab evolucionó
+de "buscar la vela ganadora" a MODELAR EL COMPORTAMIENTO DEL MERCADO (paradigma Wyckoff).
+
+| Exp | Qué | Resultado | Commit |
+|-----|-----|-----------|--------|
+| EXP-071 | Zona Descubrimiento (contexto→confirmadores) | NINGÚN confirmador edge (FDR 0.018, EV neg) | efa212b |
+| EXP-072 | Mapa de Transiciones (Markov estados) | mean-reverting; impulso se revierte (0.28-0.30); 0 estados favorable>0.55 | 76d467b |
+| EXP-073 | Dinámica Fase A (energía, no eventos) | FDR 0/8: K-D no predice resolución; describe posición, no control | d696aba |
+| EXP-074 | Clustering no supervisado Fases A | K=2 sil 0.2185 (24/76) — población mixta APOYADA | ca8035f |
+| EXP-074b | Estabilidad de Clusters (freno, 6 pruebas) | RECHAZA GMM: no robusto a algoritmo/features/bootstrap. Lo real = duración continua | c4ecb42 |
+
+**Art. 13 + ADR-005 (commit efa212b):** EURUSD REAL = SOLO descubrimiento; validación
+OTC obligatoria del propio lab antes de promover al Edificio.
+
+**Conclusión de sesión:** el estocástico describe ESTADO pero no predice CAMBIO de
+estado. La "población mixta" de EXP-074 es mayormente partición conveniente del método
+(duración de Fase A como variable continua), NO 2 poblaciones estables. El freno
+científico evitó construir estrategia falsa sobre el cluster.
+
+**Bloqueos:** PRUEBA 3 OOS de EXP-074b NO ejecutó (dataset EURUSD empieza 2022, no hay
+2012-2018). Para validar temporalmente falta más historia o datos OTC del propio lab.
+
+**Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
+(pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).
+
+---
+
+## 🔬 Laboratorio Científico (2026-08-06 mañana) — Feature 38 base
+
+**Milestone anterior:** Feature 38 `lab_protocolo_cientifico` = DONE y pusheada.
 El bot ahora tiene un sistema de gobierno de hipótesis (Charter → spec → EXP).
 
 | Capa | Archivo | Rol |

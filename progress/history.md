@@ -780,3 +780,41 @@ Visualización de estocástico en vivo en dashboard del hub.
 - 41 fallos de tests restantes: PRE-EXISTENTES (verificado con git stash: id�nticos con y sin la purga; deuda de cambios ajenos sin commitear en scanner/executor).
 
 **Estado final:** solo el Edificio operativo, respaldo a salvo en Desktop, repo limpio.
+
+---
+
+## 2026-08-06 (tarde) — Paradigma Wyckoff + Freno Científico en el Lab [CERRADA]
+
+Cambio de paradigma dictado por el Trader-Humano: el laboratorio dejó de buscar
+"la vela ganadora" y pasó a MODELAR EL COMPORTAMIENTO DEL MERCADO (Wyckoff).
+
+- EXP-071 Zona de Descubrimiento (efa212b): contexto [extremo>freno>cruce] vive ~45
+  velas; tras n≥100 solo pinbar/continuacion sobreviven, ambos EV neg, FDR 0.018.
+  CONCLUSIÓN: el contexto funciona, la entrada no. NINGÚN confirmador edge.
+- EXP-072 Mapa de Transiciones (76d467b): Markov sobre estados régimen×pendiente×
+  impulso. Mercado mean-reverting (auto-bucle 0.50-0.54); el impulso del
+  estocástico SE REVIERTE (rate 0.28-0.30); 0 estados favorable>0.55. Fase A
+  medida: dur 25, 1er freno 6, 1er cruce 2, 5 oscilaciones, sep K-D 15.2.
+- EXP-073 Dinámica Fase A (d696aba): 3308 fases, FDR 0/8 — ninguna variable
+  dinámica de K-D predice la resolución. El estocástico describe POSICIÓN, no
+  ENERGÍA/control.
+- EXP-074 Clustering no supervisado (ca8035f): K=2 sil 0.2185, 807/2500 (24%
+  explosivo / 76% lateral). Población mixta APOYADA.
+- EXP-074b Estabilidad (c4ecb42): 6 pruebas (Grok/ChatGPT). RECHAZA la partición
+  GMM como robusta: NO sobrevive a cambio de algoritmo (KMeans ARI -0.059, Spectral
+  colapsa, HDBSCAN 3 grupos), ablación de features (9.7%→48.1%), ni bootstrap
+  (22%→95%). Interpretable (90% acuerdo con reglas simples por duración) PERO no
+  estable como estructura de mercado. Lo REAL: duración de Fase A = variable
+  continua (ruptura corta vs lateral larga), no 2 poblaciones profundas.
+- Art. 13 + ADR-005 (efa212b): EURUSD REAL = SOLO descubrimiento; validación OTC
+  obligatoria del propio lab antes de promover al Edificio.
+
+DECISIÓN: Freno científico aplicado — NO procede EXP-075 sobre el cluster GMM.
+El lab evitó construir estrategia falsa sobre partición conveniente.
+
+PENDIENTE: PRUEBA 3 OOS de 074b no ejecutó (dataset EURUSD empieza 2022). Falta
+más historia o datos OTC para validación temporal.
+
+Commits de la sesión: efa212b, 76d467b, d696aba, ca8035f, c4ecb42, d4a8a2b (fix).
+Todo pusheado. Estado final: repo limpio (solo archivos ajenos sin commitear de
+sesiones previas, fuera de alcance).

@@ -1,43 +1,32 @@
-# Progress — 2026-08-06
+# Progress — 2026-08-06 (tarde) — CLAUSURA
 
-## ⭐ Sesión actual: Laboratorio Científico Reproducible
+## ⭐ Sesión actual: Paradigma Wyckoff en el Laboratorio + Freno Científico
 
-**Feature 38 `lab_protocolo_cientifico` = DONE y pusheada (commit `dc53c97`).**
+**Estado: CERRADA (usuario dijo "listo por hoy"). Todo commiteado y pusheado.**
 
 ### Qué se hizo
-- Charter científico (`docs/LAB_CHARTER.md`, Art.1–12): FDR (Art.9), Dominio
-  REAL≠OTC (Art.10), Parsimonia (Art.11), Muerte definitiva (Art.12).
-- Manual SDD (`docs/specs.md`): ciclo de vida científico + checklist
-  Art.6/10/11/12 + Trader-Humano en SDD.
-- SPEC feature 38 aprobado (Trader-Humano + Aprobación Final) con 5 observaciones
-  incorporadas: Dominio, Effect Size (R12), Costo operacional (R13), Muerte
-  definitiva, Parsimonia.
-- Plantillas `docs/lab_templates/{hypothesis,risks,validation}.md`.
-- ADR `docs/decisions/ADR-001..004`.
-- Dataset versionado `datasets/dataset_v001/manifest.json` (ref SMC_ROOT, sin copiar).
-- `scripts/lab_run.py` (CLI `lab run EXP-XXX`) + `scripts/lab_ci.py` (CI) +
-  `.github/workflows/lab-ci.yml`.
-- `src/strategy_lab/experiment_runner.py` extendido con reports inmutables
-  (seed.txt, environment.txt, dataset_hash.txt, protocol_frozen.json, lifecycle.json).
-- Protocolo de cierre `agent/CLOSE.md` cableado en AGENTS.md (trigger "listo
-  por hoy" / "voy a apagar").
-
-### Verificación
-- pytest test_experiment_runner + test_promotion_gate + test_registry = 19 passed.
-- `lab run EXP-CLI-TEST` → rc=0, reports inmutables generados.
-- `lab ci` → VERDICT GREEN (hash / FDR / reproducibilidad / reporte PASS).
+- EXP-071 Zona de Descubrimiento: NINGÚN confirmador con edge (FDR 0.018, EV neg). → el contexto funciona, la entrada no. (efa212b)
+- EXP-072 Mapa de Transiciones (Markov): mercado mean-reverting; impulso estocástico se revierte (0.28-0.30); 0 estados favorable>0.55. (76d467b)
+- EXP-073 Dinámica Fase A (energía): FDR 0/8 — K-D describe posición, no predice resolución. (d696aba)
+- EXP-074 Clustering no supervisado: K=2 (sil 0.2185), 24% explosivo / 76% lateral. Población mixta APOYADA. (ca8035f)
+- EXP-074b Estabilidad (freno, 6 pruebas Grok/ChatGPT): RECHAZA GMM como robusta — no sobrevive a algoritmo (ARI~0), features (9.7%→48.1%), bootstrap (22%→95%). Lo real = duración de Fase A como variable continua. (c4ecb42)
+- Art. 13 + ADR-005 (commit efa212b): EURUSD REAL = SOLO descubrimiento; validación OTC obligatoria antes de promover.
 
 ### Decisión
-- Force-push autorizado para limpiar commit vago `226bc44` → `dc53c97` (solo
-  feature 38). Origin/main limpio.
+- Paradigma cambiado: el lab ya no busca "la estrategia"; modela el comportamiento del mercado (Wyckoff).
+- Freno científico aplicado: NO procede EXP-075 sobre el cluster GMM (partición no estable). El lab evitó estrategia falsa.
 
-### Próximo paso sugerido
-- Aplicar el laboratorio al embudo roto del Edificio (EXP-039: 40→2→0→0; cuello
-  = FRENO, solo 2/40 pasan). El lab (secuencia_libre.py + optimizer.py) debe
-  encontrar config aceptable vía secuencias, no ajuste manual.
+### Próximo paso sugerido (al retomar con `start`)
+- EXP-075 (re-enfocado): duración/tipo de Fase A como variable CONTINUA predictiva del breakout (cuartiles/regresión), no 2 cajas.
+- Para PRUEBA 3 OOS faltante en 074b: necesitamos más historia EURUSD o datos OTC del propio lab.
+
+### Archivos de la sesión (ya commiteados)
+- scripts/lab_exp071_discovery.py, lab_exp072_state_graph.py, lab_exp073_phaseA_dynamics.py, lab_exp074_phaseA_clusters.py, lab_exp074b_cluster_stability.py
+- reports/EXP-07{1,2,3,4}_*.csv, reports/EXP-074b_stability.txt
+- specs/lab_protocolo_cientifico/exp-07{1,2,3,4}b_validation.md, exp07{1,2,3,4}b_index.md
+- docs/LAB_CHARTER.md (Art.13), docs/decisions/ADR-005.md
 
 ### Notas
-- Las 3 recomendaciones futuras del Trader-Humano (edad de hipótesis, Confidence
-  Score, registro de descartadas) quedaron ancladas en
-  `specs/lab_protocolo_cientifico/trader_humano_review.md` (evolución, no bloquean).
+- Los scripts lab_exp0XX NO están en la suite pytest (se verifican por ejecución real, no pytest).
+- Archivos sin commitear en el repo son de SESIONES PREVIAS (no tocados): ver `git status`.
 - NO operar REAL sin OK. Bot corre PRACTICE por defecto.
