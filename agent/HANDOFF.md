@@ -91,15 +91,18 @@
       COMPLETO con volumen real (0.52% ceros). Única vía gratuita completa = **EW en DIARIO con `6E=F`**
       (desvía spec M15→D, requiere aprobación). Barchart 1 descarga/día inviable; CME solo diario (validación).
       Alternativas presentadas: (A-gratis) diario Yahoo; (C-pago) Databento M15; (B) M15 60d insuficiente.
-    - **2026-08-07 (FASE 1 GRATIS AUTORIZADA + EJECUTADA — Opción 2):** el Trader-Humano dijo "hagamos A:
-      diario gratis con 6E=F". EW-1 adaptado formalmente M15→**D1**. Adquisición real: `lab_ew_acquire_daily.py`
-      descargó Yahoo `6E=F` DIARIO 2022-2026 → **1,150 barras** (raw intacto en
-      `data/strategy_lab/ew_6e_daily.parquet`). `volume` = contratos reales CME. Verificación: 6/7 OK; único
-      desvío = 2025 con 2.38% missing de volumen (6 barras con precio real → laguna de reporte Yahoo). **Opción
-      2 del Trader-Humano:** `volume==0` = MISSING (NO imputar, NO borrar del raw); EW-1 usa solo las 1,144
-      barras válidas (`valid_volume=volume>0`); raw intacto para trazabilidad. Veredicto: APTO CON EXCLUSIÓN
-      DOCUMENTADA. **GATE DE CONGELACIÓN PENDIENTE:** Hermes confirmó modificación documentada y SIN imputación;
-      falta OK explícito del Trader-Humano para CONGELAR EW-1 (solo entonces se ejecuta). **NO se ejecutó EW-1.**
+    - **2026-08-07 (EW-1 EJECUTADO + AUDIT + RETRACCIÓN):** congelado y ejecutado `scripts/lab_ew1_autocorrelacion.py`
+      (autocorrelación Ljung-Box de eficiencia/absorción, D1, 1,144 barras válidas, Opción 2). **Primer pase
+      FALSO:** reportó "20 lags significativos en TRAIN y TEST" → Hermes declaró "SEÑAL OOS justifica M15".
+      AUDIT descubrió defecto metodológico: `eficiencia` no estacionaria (Ljung-Box arrastraba tendencia) y
+      `absorcion` binaria mal especificada. **RETRACCIÓN 1:** ese veredicto era falsa alarma. Tras corregir
+      (Δeficiencia estacionaria, absorción centrada), seguía saliendo "20 lags"; segundo AUDIT (temp
+      hermes-verify-ew1-diag.py, ya borrado) ancló: Ljung-Box correcto (12/200 rechazos en ruido blanco),
+      Δeficiencia ACF lag-1 = **-0.52** en TRAIN y TEST, lags 2-5 ≈0. O sea MA(1) de REVERSIÓN de 1 paso, no
+      memoria de energía direccional. **RETRACCIÓN 2:** "justifica M15" también era falsa alarma. Veredicto
+      final honesto: `reversion_ma1_mecanica` — efecto mecánico del ratio move/vol, NO esfuerzo/resultado
+      Wyckoff. **EW (como memoria direccional) NO halla lo que buscaba → NO justifica pagar Databento M15.**
+      Reporte inmutable: `data/strategy_lab/ew_reports/EW-1/`. **NO se pagó Databento. NO se ejecutó EW-2.**
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

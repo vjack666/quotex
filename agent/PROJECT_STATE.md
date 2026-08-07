@@ -39,12 +39,15 @@ gratuita con M15/1-min 6E + cobertura 2022-2026. Única gratuita COMPLETA = Yaho
 aprobar desviación M15→D]; (C-pago) Databento M15 2022-2026; (B) M15 60d insuficiente. NO se compró
 nada, NO se ejecutó EW-1. EW = hipótesis sobre EUR/USD Futures 6E.
 
- **Siguiente (PENDIENTE GATE DE CONGELACIÓN EW-1 — autorización explícita del Trader-Humano):** la
- Fase 1 gratis (Yahoo `6E=F` DIARIO 2022-2026) está ADQUIRIDA y VERIFICADA (1,150 barras, raw intacto;
- Opción 2: 6 barras missing de volumen 2025 excluidas de cálculos EW, sin imputar, raw preservado;
- EW-1 usa 1,144 barras válidas). El diseño EW-1 quedó adaptado M15→D1. **Falta tu OK explícito para
- CONGELAR EW-1** (solo entonces lo ejecuto). Tras la ejecución: puerta de evidencia OOS — sin señal →
- matar EW (no pagar Databento); con señal → justifica pagar M15. **NO se ejecutó EW-1.**
+ **ESTADO EW (2026-08-07, cerrado con retractación):** EW-1 EJECUTADO tras tu OK de congelación.
+ `scripts/lab_ew1_autocorrelacion.py` (Ljung-Box eficiencia/absorción, D1, 1,144 válidas, Opción 2). Dos
+ falsas alarmas RETRACTADAS por auditoría: (1) "20 lags significativos / justifica M15" por no estacionarizar
+ eficiencia; (2) tras corregir, el segundo audit ancló que Δeficiencia ACF lag-1 = **-0.52** (TRAIN y TEST),
+ lags>1≈0 → MA(1) de REVERSIÓN de 1 paso, efecto mecánico del ratio move/vol, NO memoria de energía
+ direccional de Wyckoff. Veredicto final: `reversion_ma1_mecanica` → EW NO halla lo que buscaba → **NO
+ justifica pagar Databento M15**. Reporte inmutable en `data/strategy_lab/ew_reports/EW-1/`. **NO se pagó
+ Databento. NO se ejecutó EW-2.** Siguiente: decidir si archivar EW o reformular (p.ej. eficiencia ya
+ estacionaria con otro def, o absorption bien especificada) — pendiente decisión del Trader-Humano.
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).

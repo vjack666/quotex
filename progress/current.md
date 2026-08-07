@@ -112,6 +112,18 @@
     EXCLUSIÓN DOCUMENTADA. **GATE DE CONGELACIÓN PENDIENTE:** Hermes confirmó modificación documentada y SIN
     imputación; falta OK explícito del Trader-Humano para CONGELAR EW-1 (solo entonces se ejecuta). NO ejecutado.
 
+  - **EW-1 EJECUTADO + AUDIT + RETRACCIÓN (2026-08-07):** TH dijo "congela y ejecuta EW-1". Corrí
+    `scripts/lab_ew1_autocorrelacion.py` (Ljung-Box eficiencia/absorción, D1, 1,144 válidas, Opción 2).
+    **FALSA ALARMA 1:** primer pase reportó "20 lags significativos TRAIN+TEST" → declaré "SEÑAL OOS
+    justifica M15". AUDIT: `eficiencia` no estacionaria (Ljung-Box arrastraba tendencia) y `absorcion`
+    binaria mal especificada. **RETRACCIÓN 1.** Tras corregir (Δeficiencia estacionaria, absorción
+    centrada) seguía "20 lags". **FALSA ALARMA 2 / RETRACCIÓN 2:** segundo AUDIT (temp ya borrado) ancló
+    que Ljung-Box está BIEN (12/200 rechazos ruido blanco) y Δeficiencia ACF lag-1 = **-0.52** en TRAIN
+    y TEST, lags 2-5 ≈0 → MA(1) de REVERSIÓN de 1 paso (efecto mecánico ratio move/vol), NO memoria de
+    energía direccional Wyckoff. Veredicto final: `reversion_ma1_mecanica` → EW NO halla lo que buscaba
+    → **NO justifica pagar Databento M15**. Reporte inmutable: `data/strategy_lab/ew_reports/EW-1/`.
+    **NO se pagó Databento. NO se ejecutó EW-2.** Siguiente: archivar EW o reformular (pendiente TH).
+
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py
 - scripts/lab_exp074b_null.py

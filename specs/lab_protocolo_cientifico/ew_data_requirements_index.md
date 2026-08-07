@@ -19,4 +19,7 @@
 | Adquisición Fase1 | EJECUTADA: Yahoo 6E=F DIARIO 2022-26 -> 1,150 barras raw intactas (parquet gitignored) |
 | Verificación | 6/7 OK; 2025 2.38% missing vol (6 barras, precio real). Opcion2: MISSING, no imputar, no borrar |
 | EW-1 escala | adaptado M15 -> D1 en diseno |
-| Ejecución EW-1 | NO ejecutada. PENDIENTE GATE DE CONGELACION (OK explicito del Trader-Humano) |
+| Ejecución EW-1 | EJECUTADA (OK congelacion). Veredicto FINAL: reversion_ma1_mecanica (lag-1=-0.52, OOS) |
+| Retractaciones | 2 falsas alarmas (no estacionarizar; "justifica M15") auditadas y retractadas |
+| Databento M15 | NO comprado (EW no hallo memoria direccional; no justificado) |
+| EW-2 | NO ejecutada. Siguiente: archivar EW o reformular (pendiente decision TH) |
