@@ -230,7 +230,7 @@
       "status": "in_progress",
       "sdd": true,
       "spec_path": "specs/edificio_wyckoff_phasea/",
-      "note": "R0-R3 DONE. R4 DONE (separacion modesta d=0.27-0.37). R5 DONE (estructura INDEPENDIENTE: persistente en el tiempo ac1=0.505 PERO sin edge direccional propio ret_3~0; ablation sin componente dominante -> Wyckoff=CONTEXTO/FILTRO, no gatillo). Edificio caja negra intacta, sin volumen. Sig: R6 (cruzar contexto + Edificio, matriz 52/56/63) tras OK."
+      "note": "R0-R3 DONE. R4 DONE (d=0.27-0.37). R5 DONE (persistente ac1=0.505, sin edge dir propio). R6 DONE: contexto x Edificio filtra en TRAIN (27/34/48%, chi2 p~0) PERO se degrada en TEST/OOS (32/43/43%, p~0.54 no sig) -> filtro MARGINAL y no robusto. NO meter score en Edificio. Wyckoff=contexto marginal. Sig: R7 (direccion+expiracion) o archivar rama Wyckoff-filtro, tras OK."
     }
   ]
 }

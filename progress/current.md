@@ -193,3 +193,18 @@ Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de 
 - Regla de oro: sin volumen, sin Edificio, sin win/loss. Caja negra intacta.
 - Reporte inmutable: `data/strategy_lab/ew_reports/PHASEA-R5/`. Commit pendiente de OK.
 
+### R6 EJECUTADO (2026-08-07) — Contexto (Fase A) x Edificio (matriz)
+- Script `scripts/lab_phaseA_r6_cross.py`. 946 senales. Score M15 previo al brake_time
+  (solo OHLC+tiempo, rank POR SPLIT) -> terciles Fase A baja/media/alta -> cruce con win Edificio.
+- MATRIZ RESULTADO:
+  - TRAIN: baja=27.0% media=33.8% alta=47.6% | chi2=21.46 p≈0.000 (SIGNIFICATIVO, pendiente creciente)
+  - TEST/OOS: baja=32.2% media=43.3% alta=43.3% | chi2=3.10 p≈0.54 (NO significativo, pendiente se aplana)
+- VERDICTO HONESTO (falsacion parcial): en TRAIN el contexto Fase A SÍ filtra el timing del
+  Edificio (27->34->48%), pero en TEST/OOS la pendiente se degrada (32->43->43) y pierde
+  significancia. NO es el filtro robusto 52/56/63 esperado. El efecto existe en muestra y se
+  debilita OOS -> NO meter el score en el Edificio (disciplina del TH mantenida).
+- INTERPRETACION: el contexto Wyckoff aporta un filtrado MARGINAL y no robusto; el edge del
+  Edificio NO se explica ni se amplifica de forma fiable por la estructura de Fase A medida.
+- Regla de oro: sin volumen, Edificio caja negra intacta. Reporte: `data/strategy_lab/ew_reports/PHASEA-R6/`.
+- Sig: R7 (direccion + expiracion binaria) tras OK, o decidir archivar rama Wyckoff-como-filtro.
+

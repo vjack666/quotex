@@ -151,10 +151,33 @@ por Trader-Humano: **NO mirar WIN/LOSS ni señal del Edificio**.
   generador de dirección. El siguiente paso real es R6 (cruzar contexto + Edificio).
 - Regla de oro cumplida: sin volumen, sin Edificio, sin win/loss; caja negra intacta.
 
+---
+
+## 8. Addendum R6 — Contexto (Fase A) × Edificio: la matriz (ejecutado)
+
+Rol: Scientist (reporte `data/strategy_lab/ew_reports/PHASEA-R6/`).
+
+- Matriz: `Phase_A_Score` de la ventana M15 previa al `brake_time` (solo OHLC+tiempo, rank
+  **por split** para no contaminar OOS) → terciles Fase A baja/media/alta → cruce con `win`
+  del Edificio (946 señales).
+- **TRAIN**: baja=27.0% · media=33.8% · alta=47.6% · chi²=21.46, p≈0.000 → pendiente
+  creciente y significativa: el contexto Fase A SÍ filtra el timing del Edificio en muestra.
+- **TEST/OOS**: baja=32.2% · media=43.3% · alta=43.3% · chi²=3.10, p≈0.54 → pendiente se
+  aplana y NO es significativa. No es el filtro robusto 52/56/63 esperado.
+- **Veredicto (falsación parcial)**: el efecto de filtrado existe en TRAIN pero **se degrada
+  fuera de muestra**. No se descarta del todo (test sigue ligeramente creciente 32→43), pero
+  **no es un filtro fiable** todavía. Confirma la disciplina del Trader-Humano: **NO meter el
+  score dentro del Edificio**. El edge del Edificio no se explica ni se amplifica de forma
+  robusta por la estructura de Fase A medida.
+- Conclusión R0–R6: la estructura tipo Fase A es **contexto marginal y no robusto** del edge
+  del Edificio. Wyckoff como "filtro duro" no se sostiene OOS con estos 7 componentes.
+- Regla de oro cumplida: sin volumen; Edificio (src/) caja negra intacta.
+
 - **R4** — ✅ HECHO. Mapeo explícito + Phase_A_Score + comp WIN/LOSS.
 - **R5** — ✅ HECHO (ver Addendum R7 arriba). Estructura independiente: persistente en el
   tiempo pero SIN edge direccional propio → Wyckoff = contexto/filtro, no gatillo.
-- **R6** — Cruzar contexto (Phase_A_Score) + Edificio: matriz Fase A baja/media/alta × dispara →
-  ¿mejora la probabilidad de la operación? (tu matriz 52/56/63%). Requiere OK.
-- **R7** — Binarias: dirección + expiración (horizonte natural del Edificio).
+- **R6** — ✅ HECHO (ver Addendum R8). Contexto × Edificio: filtra en TRAIN (27/34/48%) pero
+  se degrada en TEST/OOS (32/43/43%, no significativo) → filtro MARGINAL y no robusto.
+- **R7** — Binarias: dirección + expiración (horizonte natural del Edificio). O decidir
+  archivar la rama "Wyckoff-como-filtro" y mantener el Edificio tal cual. Requiere OK.
 - **R8–R10** — OOS/walk-forward, robustez (pares/sesiones), producción.
