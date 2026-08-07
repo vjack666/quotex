@@ -91,7 +91,13 @@
       COMPLETO con volumen real (0.52% ceros). Única vía gratuita completa = **EW en DIARIO con `6E=F`**
       (desvía spec M15→D, requiere aprobación). Barchart 1 descarga/día inviable; CME solo diario (validación).
       Alternativas presentadas: (A-gratis) diario Yahoo; (C-pago) Databento M15; (B) M15 60d insuficiente.
-      **NO se compró nada. NO se ejecutó EW-1.**
+    - **2026-08-07 (FASE 1 GRATIS propuesta, NO ejecutar) — reframe del objetivo**: el Trader-Humano
+      reframó a "comprobar si EW tiene capacidad predictiva". Fuente gratuita M15 2022-2026 NO existe;
+      única completa = Yahoo `6E=F` DIARIO 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). Plan:
+      diario → TRAIN 2022-2024 / TEST 2025-2026 → EW-1. **Puerta de evidencia:** sin señal OOS → matar EW
+      (no gastar M15); con señal OOS → justifica pagar Databento M15. **RESTRICCIÓN:** NO congelar EW-1 ni
+      ejecutar hasta que el cambio **M15→DIARIO** quede explícitamente autorizado como modificación del
+      protocolo. Pendiente: "sí, hacemos A: diario gratis". **NO comprado, NO ejecutado.**
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

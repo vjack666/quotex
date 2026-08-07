@@ -15,4 +15,5 @@
 | Veredicto A1 | PASA; AUTORIZADO Databento; BLOQUEO DE API KEY |
 | Scripts listos (sin ejecutar) | scripts/lab_ew_acquire_cme.py, scripts/lab_ew_verify_cme.py |
 | Búsqueda gratuita (NO pagar) | concluida: no hay M15/1min gratis 2022-26; unica gratuita completa = Yahoo 6E=F DIARIO |
-| Ejecución EW-1/2/3 | NO ejecutada. Pendiente elección A-gratis(diario) / C-pago(M15) del Trader-Humano |
+| Reframe objetivo | "comprobar si EW tiene capacidad predictiva"; FASE 1 GRATIS = diario 2022-26, gate antes de pagar |
+| Ejecución EW-1/2/3 | NO ejecutada. Pendiente autorización EXPLÍCITA del cambio M15->DIARIO (restricción) |

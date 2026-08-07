@@ -93,6 +93,15 @@
     requiere aprobación); **(C-pago) Databento M15** 2022-2026; **(B) M15 60d** insuficiente para OOS.
   - **NO se compró nada. NO se ejecutó EW-1.** Pendiente elección del Trader-Humano.
 
+- **REFRAME + FASE 1 GRATIS (2026-08-07, fin de sesión):** el Trader-Humano reframó el objetivo a
+  *comprobar si EW tiene capacidad predictiva*. Conclusión: fuente gratuita M15 2022-2026 NO existe;
+  única completa = Yahoo `6E=F` **DIARIO** 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). Plan:
+  1) diario 2022-2026 → 2) TRAIN 2022-2024 / TEST 2025-2026 → 3) EW-1. **Puerta de evidencia:** sin señal
+  OOS → matar EW (no gastar en M15); con señal OOS → justifica pagar Databento M15 y refinar en mayor
+  resolución. **RESTRICCIÓN EXPLÍCITA:** NO congelar EW-1 ni ejecutar hasta que el cambio **M15→DIARIO**
+  quede explícitamente autorizado como modificación del protocolo. Pendiente: "sí, hacemos A: diario gratis".
+  **NO comprado, NO ejecutado.**
+
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py
 - scripts/lab_exp074b_null.py

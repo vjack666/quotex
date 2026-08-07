@@ -32,6 +32,14 @@
 > UTC, período 2022-2026. **BLOQUEO DE ACCESO:** cliente instalado pero SIN API key → aún NO se ha
 > descargado nada. Scripts `lab_ew_acquire_cme.py` + `lab_ew_verify_cme.py` listos (sin ejecutar). EW
 > es ahora hipótesis sobre EUR/USD Futures 6E (no spot). Falta la key para correr acquire→verify.
+>
+> **2026-08-07 (NO PAGAR aún / FASE 1 GRATIS) — reframe + vía `6E=F` DIARIO:** el Trader-Humano reframó
+> el objetivo: *comprobar si EW tiene capacidad predictiva*. Fuente gratuita M15 2022-2026 **no existe**;
+> única completa = Yahoo `6E=F` **DIARIO** 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). **Plan
+> FASE 1 GRATIS:** diario → TRAIN 2022-2024 / TEST 2025-2026 → EW-1. **Puerta de evidencia:** sin señal
+> OOS → se mata EW (no gastar en M15); con señal OOS → justifica pagar Databento M15. **RESTRICCIÓN:** NO
+> congelar EW-1 ni ejecutar hasta que el cambio **M15→DIARIO** quede explícitamente autorizado. Pendiente:
+> "sí, hacemos A: diario gratis". **NO comprado, NO ejecutado.**
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)

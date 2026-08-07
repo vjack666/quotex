@@ -130,6 +130,23 @@ gratis tampoco cierra porque los individuales gratuitos no llegan a 2025-2026.
 - **(C-pago) Databento** para M15 2022-2026 (única fuente que lo da íntegro con volumen real).
 - **(B) M15 solo TEST 60d** (Yahoo) — insuficiente para split OOS; descartable para el Charter.
 Si ninguna gratuita convence, se reconsidera pagar. **NO se compró nada. NO se ejecutó EW-1.**
+
+## 2e. DECISIÓN PROPUESTA — FASE 1 GRATIS (pendiente autorización explícita del cambio M15→D)
+El Trader-Humano reframó el objetivo: *comprobar científicamente si Wyckoff Effort/Result (EW) tiene
+capacidad predictiva*. El problema original era volumen fiable; spot EURUSD (OTC) descartado; CME 6E
+tiene volumen real de contratos. La fuente gratuita M15 2022-2026 no existe, pero Yahoo `6E=F` DIARIO
+2022-2026 SÍ es completa y con volumen real.
+
+**Plan propuesto (FASE 1 GRATIS → gate antes de pagar):**
+1. `6E=F` **DIARIO** 2022-2026 (Yahoo, ~1,150 barras, volumen real, 0.52% ceros).
+2. Split OOS limpio: **TRAIN 2022-2024 / TEST 2025-2026**.
+3. Ejecutar EW-1 (autocorrelación de variables de effort/result) sobre TRAIN, validar en TEST.
+4. **Puerta de evidencia:** si NO hay señal OOS → se mata EW, NO se gasta en M15. Si SÍ hay señal →
+   justifica adquirir M15 de pago (Databento) y comprobar que el fenómeno sobrevive a mayor resolución.
+
+**RESTRICCIÓN EXPLÍCITA (orden del Trader-Humano):** NO congelar EW-1 ni ejecutar el experimento hasta
+que el cambio **M15 → DIARIO** quede explícitamente autorizado como modificación del protocolo. Hasta
+entonces: solo documentación del plan. **NO se compró nada. NO se ejecutó EW-1.**
 No basta con que una columna se llame `volume`. Para Wyckoff effort/result necesitamos volumen que
 sea **(a) continuo (sin ceros masivos), (b) con definición documentada y representativa**, incluso
 si es proxy. Jerarquía aceptable:
