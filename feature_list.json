@@ -230,7 +230,7 @@
       "status": "in_progress",
       "sdd": true,
       "spec_path": "specs/edificio_wyckoff_phasea/",
-      "note": "R0-R3 DONE. R4 DONE (d=0.27-0.37). R5 DONE (persistente ac1=0.505, sin edge dir propio). R6 DONE: contexto x Edificio filtra en TRAIN (27/34/48%, chi2 p~0) PERO se degrada en TEST/OOS (32/43/43%, p~0.54 no sig) -> filtro MARGINAL y no robusto. NO meter score en Edificio. Wyckoff=contexto marginal. Sig: R7 (direccion+expiracion) o archivar rama Wyckoff-filtro, tras OK."
+      "note": "R0-R3 DONE. R4 DONE (d=0.27-0.37). R5 DONE (persistente ac1=0.505, sin edge dir propio). R6 DONE: contexto x Edificio filtra TRAIN (27/34/48%, p~0) pero degrada TEST/OOS (32/43/43%, p~0.54 no sig) -> filtro MARGINAL y no robusto. R7 DONE: Edificio como binaria EURUSD offline, win 44-49% train/26-30% test, EV<0 siempre -> NO rentable, R10 descartado. Ambas lineas agotadas con evidencia. Decision TH: archivar rama o reenfocar (pendiente OK)."
     }
   ]
 }

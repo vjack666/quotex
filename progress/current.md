@@ -206,5 +206,21 @@ Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de 
 - INTERPRETACION: el contexto Wyckoff aporta un filtrado MARGINAL y no robusto; el edge del
   Edificio NO se explica ni se amplifica de forma fiable por la estructura de Fase A medida.
 - Regla de oro: sin volumen, Edificio caja negra intacta. Reporte: `data/strategy_lab/ew_reports/PHASEA-R6/`.
-- Sig: R7 (direccion + expiracion binaria) tras OK, o decidir archivar rama Wyckoff-como-filtro.
+
+### R7 EJECUTADO (2026-08-07) — Edificio como BINARIA (direccion + expiracion), SIN filtro Wyckoff
+- Script `scripts/lab_phaseA_r7_binary.py`. OFFLINE, caja negra intacta, sin volumen.
+- Solo EURUSD tiene M15 en disco (286 eventos: 205 train / 81 test). BRECHA DE DATOS honesta
+  (no se cambia de instrumento; otros 5 assets del Edificio no tienen precio en disco).
+- Win recalculado DESDE EL PRECIO con horizonte H fijo (1-5 velas M15), payout asumido 80% (OFFLINE).
+- RESULTADO (win rate / EV; break-even binario = 55.6% con payout 80%):
+  - TRAIN: win_orig 37.1% | H1=44.9%(EV-0.19) H2=48.8%(-0.12) H3=48.8%(-0.12) H4=49.3%(-0.11) H5=46.8%(-0.16)
+  - TEST:  win_orig 45.7% | H1=26.0%(-0.53) H2=28.4%(-0.49) H3=26.0%(-0.53) H4=29.6%(-0.47) H5=27.2%(-0.51)
+- VERDICTO (falsacion clara de viabilidad binaria): el Edificio NO es rentable como binaria.
+  El mejor caso (H4 train) llega a ~49% / EV -0.11; en TEST/OOS cae a 26-30% / EV -0.47..-0.53.
+  El edge del Edificio NO es un edge de direccion binaria a horizonte fijo. R10 (produccion binaria)
+  DESCARTADO para este dataset/horizontes. No es Wyckoff lo que lo arruina: la direccion no bate break-even.
+- Regla de oro: offline, Edificio caja negra intacta, sin volumen, sin filtro Wyckoff.
+  Limite: cobertura solo EURUSD (brecha de datos). Reporte: `data/strategy_lab/ew_reports/PHASEA-R7/`.
+- CONCLUSION R0-R7: rama Wyckoff-como-filtro marginal/no robusta (R6) y Edificio como binaria no rentable (R7).
+  Ambas lineas agotadas con evidencia. Decision del TH: archivar o reenfocar.
 

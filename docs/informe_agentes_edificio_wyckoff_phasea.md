@@ -173,11 +173,39 @@ Rol: Scientist (reporte `data/strategy_lab/ew_reports/PHASEA-R6/`).
   del Edificio. Wyckoff como "filtro duro" no se sostiene OOS con estos 7 componentes.
 - Regla de oro cumplida: sin volumen; Edificio (src/) caja negra intacta.
 
+---
+
+## 9. Addendum R7 — Edificio como binaria: dirección + expiración (ejecutado)
+
+Rol: Engineer + Scientist (reporte `data/strategy_lab/ew_reports/PHASEA-R7/`). OFFLINE, caja
+negra intacta, **sin filtro Wyckoff**.
+
+- El evento del Edificio ya trae `direction` (CALL/PUT) y `brake_time`. Se recalcula el win
+  **desde el precio** con horizonte H fijo (1–5 velas M15), payout asumido 80% (OFFLINE, no
+  dinero real). Break-even binario = 55.6% (payout 80%).
+- **Cobertura**: solo **EURUSD** tiene M15 en disco (286 eventos: 205 train / 81 test). Los
+  otros 5 assets del Edificio (AUDUSD, GBPUSD, NZDUSD, USDCAD, USDCHF, USDJPY) **no tienen
+  precio en disco** → brecha de datos honesta, no se cambia de instrumento.
+- **RESULTADO** (win rate / EV):
+  - TRAIN: win_orig 37.1% · H1=44.9%(EV −0.19) · H2=48.8%(−0.12) · H3=48.8%(−0.12) ·
+    H4=49.3%(−0.11) · H5=46.8%(−0.16)
+  - TEST/OOS: win_orig 45.7% · H1=26.0%(−0.53) · H2=28.4%(−0.49) · H3=26.0%(−0.53) ·
+    H4=29.6%(−0.47) · H5=27.2%(−0.51)
+- **Veredicto (falsación clara de viabilidad binaria)**: el Edificio **NO es rentable como
+  binaria**. El mejor caso (H4, train) llega a ~49% / EV −0.11; en TEST/OOS cae a 26–30% /
+  EV −0.47..−0.53. El edge del Edificio **no es un edge de dirección binaria a horizonte
+  fijo**. R10 (producción binaria) **DESCARTADO** para este dataset/horizontes. No es Wyckoff
+  lo que lo arruina: la dirección no bate el break-even.
+- Conclusión R0–R7: la rama "Wyckoff-como-filtro" es marginal/no robusta (R6) y el Edificio
+  como binaria no es rentable (R7). Ambas líneas agotadas con evidencia.
+- Regla de oro cumplida: offline; Edificio (src/) caja negra intacta; sin volumen; sin Wyckoff.
+
 - **R4** — ✅ HECHO. Mapeo explícito + Phase_A_Score + comp WIN/LOSS.
 - **R5** — ✅ HECHO (ver Addendum R7 arriba). Estructura independiente: persistente en el
   tiempo pero SIN edge direccional propio → Wyckoff = contexto/filtro, no gatillo.
 - **R6** — ✅ HECHO (ver Addendum R8). Contexto × Edificio: filtra en TRAIN (27/34/48%) pero
   se degrada en TEST/OOS (32/43/43%, no significativo) → filtro MARGINAL y no robusto.
-- **R7** — Binarias: dirección + expiración (horizonte natural del Edificio). O decidir
-  archivar la rama "Wyckoff-como-filtro" y mantener el Edificio tal cual. Requiere OK.
-- **R8–R10** — OOS/walk-forward, robustez (pares/sesiones), producción.
+- **R7** — ✅ HECHO (ver Addendum R9). Edificio como binaria (EURUSD, offline, sin Wyckoff):
+  win rate 44-49% train / 26-30% test, EV siempre <0 → NO rentable → R10 descartado.
+- **Conclusión R0–R7**: ambas líneas (Wyckoff-filtro y Edificio-binaria) agotadas con evidencia.
+  Decisión del Trader-Humano: archivar la rama o reenfocar (requiere OK).
