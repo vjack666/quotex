@@ -61,8 +61,14 @@
       cerrar SOLO el uso de este dataset, NO la hipótesis. Se escribió `DATA_REQUIREMENTS_EW.md`
       (qué es volumen real, campos mínimos, umbral ≤2% ceros, cobertura ≥3a M15, checklist de
       6 pasos de verificación antes de congelar EW-1). Conclusión: "Hipótesis NO EVALUADA por
-      insuficiencia del instrumento de medición". Pendiente decisión A/B del Trader-Humano.
-      NO se buscó otro dataset por cuenta propia. NO se ejecutó EW-1/2/3.
+      insuficiencia del instrumento de medición".
+    - **2026-08-07 (tarde, decisión A) — candidato local EVALUADO y RECHAZADO**: se revisó el
+      EURUSD_M1 de Dukascopy ya en `SMC-SYSTEMS/data/raw` (el repo lo usa vía `build_m15_from_m1.py`,
+      renombrando a `volume`=suma de ticks). Tiene **99.7% de ceros en volumen M15** (tick volume
+      del banco) — peor que HistData. FX spot OTC no tiene volumen centralizado; el tick volume de
+      cualquier feed individual es disperso/cero. NO se descargó nada nuevo, NO se congeló EW-1.
+      Pendiente decisión A1 (evaluar futuros CME, volumen de bolsa real) o A2 (aceptar bloqueo).
+      NO se ejecutó EW-1/2/3.
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

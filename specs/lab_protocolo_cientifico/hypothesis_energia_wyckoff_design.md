@@ -11,6 +11,13 @@
 > de la hipótesis. Conclusión correcta: **"Hipótesis no evaluada por insuficiencia del
 > instrumento de medición."** No se ejecuta EW-1 con este dataset (ni filtrando tick_volume>0:
 > introduciría sesgo de selección). Ver `DATA_REQUIREMENTS_EW.md`.
+>
+> **2026-08-07 (tarde) decisión A — evaluado candidato local y RECHAZADO:** el EURUSD_M1 de
+> Dukascopy ya presente en `SMC-SYSTEMS/data/raw` (usado por `build_m15_from_m1.py`) tiene
+> **99.7% de ceros en volumen M15** (tick volume del banco). Peor que HistData. FX spot OTC no
+> tiene volumen centralizado; el tick volume de cualquier feed individual es disperso/cero. NO se
+> descargó nada nuevo, NO se congeló EW-1. Pendiente decisión A1 (evaluar futuros CME, volumen de
+> bolsa real) o A2 (aceptar bloqueo). Ver `DATA_REQUIREMENTS_EW.md` §2 y §7.
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)

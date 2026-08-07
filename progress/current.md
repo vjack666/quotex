@@ -41,13 +41,21 @@
   tratar ceros como esfuerzo nulo → masa en cero espuria). La hipótesis QUEDA VIVA como hipótesis
   científica; solo se cierra el uso de ESTE dataset.
 - Conclusión correcta: **"Hipótesis NO EVALUADA por insuficiencia del instrumento de medición."**
-- `specs/lab_protocolo_cientifico/DATA_REQUIREMENTS_EW.md` definido (no ejecutado): qué es volumen
-  real (traded) vs tick volume, campos mínimos (OHLC + volume traded + atr), umbral ≤2% ceros,
-  cobertura ≥3a M15, frecuencia M15, y checklist de 6 pasos de verificación ANTES de congelar EW-1.
-  Distingue explícitamente real/traded volume, tick volume, calidad/continuidad del feed y
-  representatividad del instrumento (MT5 "volume" NO implica automáticamente volumen Wyckoff).
-- Pendiente decisión A/B del Trader-Humano: (A) buscar feed adecuado y verificar → EW-1;
-  (B) abandonar vía (hipótesis no falseada). NO se buscó dataset por cuenta propia. NO EW-1/2/3.
+- `specs/lab_protocolo_cientifico/DATA_REQUIREMENTS_EW.md` definido y ACTUALIZADO (2026-08-07 tarde):
+  realidad FX OTC (no hay volumen centralizado), qué es volumen adecuado (jerarquía: bolsa>broker>tick),
+  campos mínimos, umbral ≤2% ceros, cobertura ≥3a M15, checklist 6 pasos.
+- **DECISIÓN A (2026-08-07 tarde) — candidato local EVALUADO y RECHAZADO**: se revisó EURUSD_M1 de
+  Dukascopy ya en `SMC-SYSTEMS/data/raw` (usado por `build_m15_from_m1.py`, renombra a `volume`=suma
+  ticks). Resultado: **99.7% de ceros en volumen M15** (tick volume del banco), peor que HistData 55%.
+  FX spot OTC: el tick volume de cualquier feed individual es disperso/cero — inherente, no defecto
+  de Dukascopy. NO se descargó nada nuevo, NO se congeló EW-1.
+- **Pendiente decisión del Trader-Humano**:
+  - (A1) Evaluar SEGUNDO candidato: **futuros CME EURUSD** (volumen de bolsa real, traded volume
+    genuino, aunque sea futuro no spot) — única fuente que daría volumen válido. Requiere investigar
+    acceso (sin descargar aún).
+  - (A2) Aceptar el bloqueo de la vía Energía Wyckoff por insuficiencia de instrumento (hipótesis
+    NO falseada, solo NO EVALUADA).
+- NO se buscó dataset por cuenta propia más allá de inspeccionar el candidato ya presente. NO EW-1/2/3.
 
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py
