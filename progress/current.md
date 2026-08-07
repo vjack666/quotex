@@ -98,9 +98,19 @@
   única completa = Yahoo `6E=F` **DIARIO** 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). Plan:
   1) diario 2022-2026 → 2) TRAIN 2022-2024 / TEST 2025-2026 → 3) EW-1. **Puerta de evidencia:** sin señal
   OOS → matar EW (no gastar en M15); con señal OOS → justifica pagar Databento M15 y refinar en mayor
-  resolución. **RESTRICCIÓN EXPLÍCITA:** NO congelar EW-1 ni ejecutar hasta que el cambio **M15→DIARIO**
-  quede explícitamente autorizado como modificación del protocolo. Pendiente: "sí, hacemos A: diario gratis".
-  **NO comprado, NO ejecutado.**
+  - **RESTRICCIÓN EXPLÍCITA:** NO congelar EW-1 ni ejecutar hasta que el cambio **M15→DIARIO**
+    quede explícitamente autorizado como modificación del protocolo. Pendiente: "sí, hacemos A: diario gratis".
+    **NO comprado, NO ejecutado.**
+
+  - **AUTORIZADO A EJECUTADO (2026-08-07, fin de sesión):** el Trader-Humano dijo "hagamos A — diario gratis
+    con 6E=F". EW-1 adaptado formalmente M15→**D1**. Adquisición real: `lab_ew_acquire_daily.py` descargó
+    Yahoo `6E=F` DIARIO 2022-2026 → **1,150 barras** en `data/strategy_lab/ew_6e_daily.parquet` (raw intacto,
+    gitignored). `volume` = contratos reales CME. Verificación (`lab_ew_verify_daily.py`): 6/7 OK; único desvío
+    = 2025 con 2.38% missing de volumen (6 barras con precio real → laguna de reporte Yahoo, no día sin trading).
+    **Opción 2 del Trader-Humano:** `volume==0` = MISSING (NO imputar, NO borrar del raw); EW-1 usa solo las
+    **1,144 barras válidas** (`valid_volume = volume>0`); raw intacto para trazabilidad. Veredicto: APTO CON
+    EXCLUSIÓN DOCUMENTADA. **GATE DE CONGELACIÓN PENDIENTE:** Hermes confirmó modificación documentada y SIN
+    imputación; falta OK explícito del Trader-Humano para CONGELAR EW-1 (solo entonces se ejecuta). NO ejecutado.
 
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py

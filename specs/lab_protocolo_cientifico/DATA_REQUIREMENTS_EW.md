@@ -147,6 +147,25 @@ tiene volumen real de contratos. La fuente gratuita M15 2022-2026 no existe, per
 **RESTRICCIÓN EXPLÍCITA (orden del Trader-Humano):** NO congelar EW-1 ni ejecutar el experimento hasta
 que el cambio **M15 → DIARIO** quede explícitamente autorizado como modificación del protocolo. Hasta
 entonces: solo documentación del plan. **NO se compró nada. NO se ejecutó EW-1.**
+
+## 2f. ADQUISICIÓN EJECUTADA (FASE 1 GRATIS, AUTORIZADO A) + DECISIÓN OPCIÓN 2 (missing de volumen)
+- **Adquisición real (2026-08-07):** `scripts/lab_ew_acquire_daily.py` descargó Yahoo `6E=F` **DIARIO**
+  2022-01-01..2026-08-01 → **1,150 barras** guardadas INTACTAS en
+  `data/strategy_lab/ew_6e_daily.parquet` (gitignored). `volume` = contratos negociados reales (CME,
+  vía Yahoo). %missing volumen global = 0.52%; años 2022-2024 y 2026 en 0%; **2025 = 2.38% (6 barras)**.
+- **Diagnóstico de las 6 barras cero de 2025** (temp `hermes-verify-ew-2025-zeros.py`, ya borrado): las 6
+  tienen `Open≠Close` y **rango de precio normal** (0.002–0.009 ≈ 20–90 pips) → hubo trading real ese día;
+  el volumen=0 es **ausencia del reporte de volumen del proveedor**, no día sin negociación. Dispersas
+  (jun, jul, ago, nov 2025). No son masa sistemática (el 99.5% de días SÍ tiene volumen real).
+- **DECISIÓN TRADER-HUMANO — OPCIÓN 2 (2026-08-07):** tratar `volume==0` como **MISSING de volumen**
+  (NO como "día sin volumen", NO imputar). Excluir esas 6 barras SOLO de los cálculos EW que requieren
+  volumen. **Mantener el parquet RAW intacto** (1,150 barras) para trazabilidad. Separación `raw` vs
+  `analysis`: máscara `valid_volume = volume > 0`; EW-1 usa las **1,144 barras válidas**.
+- **Verificación (scripts/lab_ew_verify_daily.py):** checklist 6/7 OK; único desvío = missing 2025 (2.38%,
+  6 barras). Veredicto del script: **APTO CON EXCLUSIÓN DOCUMENTADA (Opción 2)** — no rechaza el dataset,
+  documenta la laguna y delega la autorización de congelación al Trader-Humano. NO se ejecutó EW-1.
+- **GATE DE CONGELACIÓN (pendiente):** Hermes confirmó la modificación documentada y la ausencia de
+  imputación. Falta autorización explícita del Trader-Humano para CONGELAR EW-1 (solo entonces se ejecuta).
 No basta con que una columna se llame `volume`. Para Wyckoff effort/result necesitamos volumen que
 sea **(a) continuo (sin ceros masivos), (b) con definición documentada y representativa**, incluso
 si es proxy. Jerarquía aceptable:

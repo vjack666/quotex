@@ -39,7 +39,18 @@
 > FASE 1 GRATIS:** diario → TRAIN 2022-2024 / TEST 2025-2026 → EW-1. **Puerta de evidencia:** sin señal
 > OOS → se mata EW (no gastar en M15); con señal OOS → justifica pagar Databento M15. **RESTRICCIÓN:** NO
 > congelar EW-1 ni ejecutar hasta que el cambio **M15→DIARIO** quede explícitamente autorizado. Pendiente:
-> "sí, hacemos A: diario gratis". **NO comprado, NO ejecutado.**
+> pendiente: "sí, hacemos A: diario gratis". **NO comprado, NO ejecutado.**
+>
+> **2026-08-07 (AUTORIZADO A — FASE 1 GRATIS EJECUTADA):** el Trader-Humano dijo "hagamos A — diario
+> gratis con `6E=F`". Se adaptó formalmente EW-1 de M15→**D1**. Adquisición real: `lab_ew_acquire_daily.py`
+> descargó Yahoo `6E=F` DIARIO 2022-2026 → **1,150 barras** en `data/strategy_lab/ew_6e_daily.parquet` (raw
+> intacto, gitignored). `volume` = contratos reales CME. Verificación (`lab_ew_verify_daily.py`): 6/7 OK;
+> único desvío = **2025 con 2.38% missing de volumen** (6 barras con precio real → laguna de reporte Yahoo,
+> no día sin trading). **DECISIÓN OPCIÓN 2 del Trader-Humano:** `volume==0` = MISSING (NO imputar, NO borrar
+> del raw); EW-1 usa solo las **1,144 barras válidas** (`valid_volume = volume>0`); raw intacto para
+> trazabilidad. Veredicto script: **APTO CON EXCLUSIÓN DOCUMENTADA**. **GATE DE CONGELACIÓN PENDIENTE:**
+> Hermes confirmó modificación documentada y SIN imputación; falta OK explícito del Trader-Humano para
+> CONGELAR EW-1 (solo entonces se ejecuta). **NO se ejecutó EW-1.**
 
 ## Contexto y motivación
 EXP-074b-NULL cerró el hilo del clustering por el LADO DEL ESTOCÁSTICO: ni binario (074b)
@@ -56,22 +67,22 @@ que SÍ estaría en el VOLUMEN y el RESULTADO de las velas. Esa es la vía Wycko
 NO es "¿qué señal gana?". Si no hay memoria ni separación reproducible, se acepta y se
 descarta también esta vía. Solo si hay memoria, se justifica un experimento de predicción.
 
-## Definición de variables (sobre cada vela M15 de EURUSD)
-- `move` = |close - open| (resultado absoluto direccional de la vela)
+## Definición de variables (sobre cada barra D1 de 6E=F, CME Euro FX Futures)
+- `move` = |close - open| (resultado absoluto direccional de la barra)
 - `rango` = high - low
 - `body` = |close - open|
 - `atr` = ATR(14) de la serie
-- `vol` = volume (o tick_volume si el feed no trae volume real)
+- `vol` = volume (contratos negociados reales CME; `volume==0` tratado como MISSING, excluido de cálculos EW)
 - **esfuerzo** = `vol / max(move, eps)`  → cuánto volumen por unidad de movimiento
-- **resultado** = `move / max(rango, eps)` → eficiencia direccional de la vela (0..1)
+- **resultado** = `move / max(rango, eps)` → eficiencia direccional de la barra (0..1)
 - **eficiencia** = `move / max(vol, eps)` → movimiento por unidad de volumen
 - **absorción** = `vol` alto (>p80) Y `resultado` bajo (<p20) → volumen sin avance (climax de absorción)
 - **climax** = `vol` anómalo (>p95) O `rango` anómalo (>p95) → evento de capitulación/extensión
-- **compresión** = pendiente negativa de `resultado` (ventana 5-10 velas) con `vol` sostenido (>media)
+- **compresión** = pendiente negativa de `resultado` (ventana 5-10 barras) con `vol` sostenido (>media)
 
 ## Diseño del experimento (propuestas, sin correr)
-### EXP-EW-1 — ¿Hay memoria en la energía? (baseline obligatorio)
-- Test de autocorrelación de `eficiencia` y `absorción` a lags 1-20 velas (Ljung-Box).
+### EXP-EW-1 — ¿Hay memoria en la energía? (baseline obligatorio) [escala D1, adaptado de M15]
+- Test de autocorrelación de `eficiencia` y `absorción` a lags 1-20 barras D1 (Ljung-Box).
 - Comparar contra autocorrelación del K-D M15 (ya sabemos del estocástico en 072: revierte).
 - Si la energía NO autocorrelaciona → no hay memoria → descartar vía (como el estocástico).
 - Si autocorrelaciona → hay proceso con memoria que el estocástico no ve → justifica EXP-EW-2.

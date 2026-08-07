@@ -39,13 +39,12 @@ gratuita con M15/1-min 6E + cobertura 2022-2026. Única gratuita COMPLETA = Yaho
 aprobar desviación M15→D]; (C-pago) Databento M15 2022-2026; (B) M15 60d insuficiente. NO se compró
 nada, NO se ejecutó EW-1. EW = hipótesis sobre EUR/USD Futures 6E.
 
- **Siguiente (PENDIENTE autorización explícita del cambio M15→DIARIO — FASE 1 GRATIS):** el Trader-Humano
- reframó el objetivo a "comprobar si EW tiene capacidad predictiva". Fuente gratuita M15 2022-2026 NO existe;
- única completa = Yahoo `6E=F` **DIARIO** 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). Plan FASE 1
- GRATIS: diario → TRAIN 2022-2024 / TEST 2025-2026 → EW-1. Puerta de evidencia: sin señal OOS → matar EW (no
- gastar M15); con señal OOS → justifica pagar Databento M15. **RESTRICCIÓN:** NO congelar EW-1 ni ejecutar el
- experimento hasta que el cambio M15→DIARIO quede explícitamente autorizado como modificación del protocolo.
- Pendiente decisión del Trader-Humano ("sí, hacemos A: diario gratis"). NO se compró nada, NO se ejecutó EW-1.
+ **Siguiente (PENDIENTE GATE DE CONGELACIÓN EW-1 — autorización explícita del Trader-Humano):** la
+ Fase 1 gratis (Yahoo `6E=F` DIARIO 2022-2026) está ADQUIRIDA y VERIFICADA (1,150 barras, raw intacto;
+ Opción 2: 6 barras missing de volumen 2025 excluidas de cálculos EW, sin imputar, raw preservado;
+ EW-1 usa 1,144 barras válidas). El diseño EW-1 quedó adaptado M15→D1. **Falta tu OK explícito para
+ CONGELAR EW-1** (solo entonces lo ejecuto). Tras la ejecución: puerta de evidencia OOS — sin señal →
+ matar EW (no pagar Databento); con señal → justifica pagar M15. **NO se ejecutó EW-1.**
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).

@@ -91,13 +91,15 @@
       COMPLETO con volumen real (0.52% ceros). Única vía gratuita completa = **EW en DIARIO con `6E=F`**
       (desvía spec M15→D, requiere aprobación). Barchart 1 descarga/día inviable; CME solo diario (validación).
       Alternativas presentadas: (A-gratis) diario Yahoo; (C-pago) Databento M15; (B) M15 60d insuficiente.
-    - **2026-08-07 (FASE 1 GRATIS propuesta, NO ejecutar) — reframe del objetivo**: el Trader-Humano
-      reframó a "comprobar si EW tiene capacidad predictiva". Fuente gratuita M15 2022-2026 NO existe;
-      única completa = Yahoo `6E=F` DIARIO 2022-2026 (~1,150 barras, volumen real, 0.52% ceros). Plan:
-      diario → TRAIN 2022-2024 / TEST 2025-2026 → EW-1. **Puerta de evidencia:** sin señal OOS → matar EW
-      (no gastar M15); con señal OOS → justifica pagar Databento M15. **RESTRICCIÓN:** NO congelar EW-1 ni
-      ejecutar hasta que el cambio **M15→DIARIO** quede explícitamente autorizado como modificación del
-      protocolo. Pendiente: "sí, hacemos A: diario gratis". **NO comprado, NO ejecutado.**
+    - **2026-08-07 (FASE 1 GRATIS AUTORIZADA + EJECUTADA — Opción 2):** el Trader-Humano dijo "hagamos A:
+      diario gratis con 6E=F". EW-1 adaptado formalmente M15→**D1**. Adquisición real: `lab_ew_acquire_daily.py`
+      descargó Yahoo `6E=F` DIARIO 2022-2026 → **1,150 barras** (raw intacto en
+      `data/strategy_lab/ew_6e_daily.parquet`). `volume` = contratos reales CME. Verificación: 6/7 OK; único
+      desvío = 2025 con 2.38% missing de volumen (6 barras con precio real → laguna de reporte Yahoo). **Opción
+      2 del Trader-Humano:** `volume==0` = MISSING (NO imputar, NO borrar del raw); EW-1 usa solo las 1,144
+      barras válidas (`valid_volume=volume>0`); raw intacto para trazabilidad. Veredicto: APTO CON EXCLUSIÓN
+      DOCUMENTADA. **GATE DE CONGELACIÓN PENDIENTE:** Hermes confirmó modificación documentada y SIN imputación;
+      falta OK explícito del Trader-Humano para CONGELAR EW-1 (solo entonces se ejecuta). **NO se ejecutó EW-1.**
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)

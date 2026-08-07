@@ -16,4 +16,7 @@
 | Scripts listos (sin ejecutar) | scripts/lab_ew_acquire_cme.py, scripts/lab_ew_verify_cme.py |
 | Búsqueda gratuita (NO pagar) | concluida: no hay M15/1min gratis 2022-26; unica gratuita completa = Yahoo 6E=F DIARIO |
 | Reframe objetivo | "comprobar si EW tiene capacidad predictiva"; FASE 1 GRATIS = diario 2022-26, gate antes de pagar |
-| Ejecución EW-1/2/3 | NO ejecutada. Pendiente autorización EXPLÍCITA del cambio M15->DIARIO (restricción) |
+| Adquisición Fase1 | EJECUTADA: Yahoo 6E=F DIARIO 2022-26 -> 1,150 barras raw intactas (parquet gitignored) |
+| Verificación | 6/7 OK; 2025 2.38% missing vol (6 barras, precio real). Opcion2: MISSING, no imputar, no borrar |
+| EW-1 escala | adaptado M15 -> D1 en diseno |
+| Ejecución EW-1 | NO ejecutada. PENDIENTE GATE DE CONGELACION (OK explicito del Trader-Humano) |
