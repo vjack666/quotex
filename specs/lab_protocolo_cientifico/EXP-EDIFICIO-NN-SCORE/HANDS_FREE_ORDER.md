@@ -25,9 +25,9 @@
 4. No reintroduzcas como feature prioritaria la H2 de EXP-POI-STOCH (ya refutada en OOS).
 5. Solo features de la whitelist (lo que el Edificio ya calcula/loguea).
 6. Split temporal estricto. Métricas de decisión = OOS.
-7. Reportar tablas con **IC95%** (Wilson o bootstrap) para rates y lifts.
+7. Reportar la **tabla resumen OOS** obligatoria (plantilla en validation.md / design.md) con AUC, WR global, WR top 20/30, lift, ECE, gap TRAIN−TEST e **IC95%** (Wilson o bootstrap).
 8. Si n_train < 500 → declarar potencia baja; no forzar ACEPTADA.
-9. Al terminar: summary con veredictos, actualizar progress/current.md y HANDOFF, commit **solo** archivos de este EXP, **sin push**, y parar.
+9. Al terminar: summary con veredictos + tabla resumen OOS, actualizar progress/current.md y HANDOFF, commit **solo** archivos de este EXP, **sin push**, y parar.
 
 ## Secuencia obligatoria
 
@@ -39,7 +39,7 @@ D. Extraer candidatos + features whitelist + labels.
 E. Baseline score Edificio (AUC, WR, top-k) en TRAIN y TEST.
 F. Entrenar LightGBM (o equivalente) solo en TRAIN.
 G. Evaluar OOS: AUC, top-k WR, lift + IC95%, calibración.
-H. summary.txt con H1/H2/H3 = ACEPTADA | REFUTADA | INCONCLUSA.
+H. summary.txt con tabla resumen OOS (obligatoria) + H1/H2/H3 = ACEPTADA | REFUTADA | INCONCLUSA.
 I. Actualizar progress/current.md y agent/HANDOFF.md.
 J. Commit solo este EXP. Mensaje: "EXP-EDIFICIO-NN-SCORE: [veredicto corto]".
 K. Parar. No integrar. No proponer más EXPs.
