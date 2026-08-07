@@ -45,8 +45,8 @@ def extract_features(k, d, kd, close, vol, atr, body, n):
 
     feats = []
     in_phase = False
-    start = None
-    extreme_side = None
+    start = 0
+    extreme_side = 0
     osc_starts = []
     for i in range(1, n):
         extreme_now = (k[i] <= 20) or (k[i] >= 80)
@@ -99,7 +99,7 @@ def extract_features(k, d, kd, close, vol, atr, body, n):
                         "atr_mean": atr_mean, "atr_trend": atr_trend,
                         "body_mean": body_mean, "body_trend": body_trend,
                         "efficiency": efficiency, "absorb": absorb,
-                        "move": float(move),
+                        "move": float(move), "start": int(start),
                     })
                 in_phase = False
     return feats
