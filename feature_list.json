@@ -209,6 +209,28 @@
       "sdd": true,
       "spec_path": "specs/lab_protocolo_cientifico/",
       "note": "Subordinado a docs/LAB_CHARTER.md. No duplica tribunal/marco/evidencia existentes."
+    },
+    {
+      "id": 39,
+      "name": "edificio_wyckoff_phasea",
+      "title": "Detector estructural de Fase A: Edificio (caja negra) + Wyckoff como marco de lectura",
+      "phase": "edificio_wyckoff",
+      "priority": 39,
+      "description": "Ruta maestra: descubrir que caracteristicas estructurales del mercado dan ventaja al Edificio y mapearlas a Wyckoff Fase A, usando precio/rango/secuencia/tiempo. Edificio = caja negra (NO se modifica). Volumen = variable de investigacion, NUNCA dependencia. Esta feature cubre R0-R3: congelar Edificio, inventario estructural OHLC, radiografia WIN/LOSS (edificio_events.parquet), descubrimiento estructural. R4-R10 (mapeo Wyckoff, Phase A Score, binarias, OOS, robustez, produccion) son features siguientes.",
+      "acceptance": [
+        "Edificio no modificado (src/ intacto)",
+        "Features estructurales solo OHLC+tiempo (sin volumen requisito)",
+        "Clasificacion WIN/LOSS via columna win de edificio_events.parquet",
+        "Contexto previo N=20 velas M15 alineado por brake_time",
+        "Reporte radiografia compara WIN vs LOSS (effect size + prueba)",
+        "Respeta split train/test OOS",
+        "Reporte inmutable + declaracion Charter",
+        "Solo datasets en disco (EURUSD_M15, edificio_events)"
+      ],
+      "status": "spec_ready",
+      "sdd": true,
+      "spec_path": "specs/edificio_wyckoff_phasea/",
+      "note": "Trader-humano APROBADO. Reglas de oro: (1) Edificio no se modifica para encajar en Wyckoff; (2) volumen nunca requisito. EW-1 baja a investigacion auxiliar (lab_ew_brake_link.py paralelo)."
     }
   ]
 }

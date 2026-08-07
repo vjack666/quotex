@@ -148,3 +148,17 @@
 - NO buscar más edge en clusters (orden Trader-Humano). NO ejecutar EXP-076.
 - Energía Wyckoff: BLOQUEADA por instrumento (NO resultado negativo). NO ejecutar EW-1/2/3.
   NO buscar feed por cuenta propia. Bloqueo = insuficiencia del instrumento de medición.
+
+### NUEVA RUTA (2026-08-07) — edificio_wyckoff_phasea (feature id 39, spec_ready, APROBADO trader-humano)
+Pivot del proyecto: objetivo final = Edificio como detector/timing de Fase A de Wyckoff para binarias.
+- SDD creado: `specs/edificio_wyckoff_phasea/{requirements,design,tasks,trader_humano_review}.md`.
+- ADR-039 (reglas de oro): (1) Edificio NO se modifica para encajar en Wyckoff; (2) volumen NUNCA requisito.
+- Datos verificados en disco: `src/strategy_lab/results/edificio_events.parquet` (señales con `win`, `split` OOS,
+  `brake_time`) + `data/strategy_lab/cohorte_real_eurusd/EURUSD_M15.parquet` (543k velas M15 spot, tick_volume).
+- EW-1 (`move/vol` 6E) baja a investigación auxiliar; `lab_ew_brake_link.py` queda paralelo, NO ruta principal.
+- Fases R0-R3 (esta feature): congelar Edificio → inventario OHLC → radiografía WIN/LOSS → descubrimiento estructural.
+  R4-R10 (mapeo Wyckoff, Phase A Score, binarias, OOS, robustez, producción) = features siguientes.
+- PODER: TH delegó a Hermes la toma de roles (trader-humano/scientist). Hermes dictó APROBADO y avanza experimentos;
+  TH pide aviso "cuando consigas la estructura adecuada".
+- Next: implementer ejecuta T1-T8 (script `lab_phaseA_radiografia.py`) sin tocar src/. Sin descargas.
+
