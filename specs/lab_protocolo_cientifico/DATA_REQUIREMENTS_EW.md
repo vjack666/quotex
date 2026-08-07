@@ -103,7 +103,33 @@ Objetivo: adquirir ÚNICAMENTE lo necesario para validar EW (todavía sin ejecut
 - **NOTA DE INSTRUMENTO:** EW pasa a ser hipótesis sobre **EUR/USD Futures 6E**, NO sobre el spot de
   EXP-071..075. Cualquier resultado EW NO se compara 1:1 con esos experimentos previos.
 
-## 3. Qué significa "volumen adecuado" para NUESTRO propósito (redefinido)
+## 2d. BÚSQUEDA DE FUENTE GRATUITA (2026-08-07 — decisión: NO pagar aún)
+El Trader-Humano ordenó NO comprar Databento y buscar fuente gratuita para CME 6E (prioridad Barchart,
+contratos individuales, export OHLCV intradía). Búsqueda read-only (sin descargas en masa). Resultado:
+
+| Fuente gratuita | Intradía M15/1min | Volumen real | Cobertura | Restricción | Veredicto |
+|---|---|---|---|---|---|
+| Barchart free | intradía ~10a pero **1 descarga/día** + máx 10k registros | SÍ (consolidado) | amplia en teoría | 1 CSV/día → inviable para 4a M15 de golpe | ⚠️ posible, impráctico |
+| Kaggle "Euro FX Futures (CME) 2000-2022" | 266 CSV individuales (OHLC+Vol) | SÍ (contratos) | **hasta 2022** | no cubre TEST 2025-2026 | ❌ cobertura corta |
+| Yahoo `6E=F` | M15 solo 60d; **diario 2022-2026** | SÍ real | diario completo; M15 60d | M15 histórico no gratis | ⚠️ diario SÍ, M15 NO |
+| CME Volume/OI reports | diario | SÍ (validación) | diario | solo validación, no M15 | ❌ no sustituye M15 |
+| massive.com (freemium) | 1-min aggs | SÍ | 2a free / 5a+ paid | M15 2022-26 requiere paid | ❌ pagado |
+| firstratedata / portara | 1-min | SÍ | completo | de pago | ❌ pagado |
+
+**CONCLUSIÓN de la búsqueda:** NO existe fuente gratuita que entregue M15 (o 1-min agregable) de CME 6E
+con cobertura 2022-2026 COMPLETA. Las gratuitas se quedan cortas en cobertura (Kaggle hasta 2022) o en
+profundidad intradía (Yahoo 60d; Barchart 1 download/día; CME solo diario). La única vía gratuita y
+COMPLETA es **Yahoo `6E=F` en DIARIO 2022-2026** (volumen real, 0.52% ceros, split OOS perfecto) — valida
+el instrumento y la hipótesis EW, solo en escala diaria (no M15). Construir el continuo desde individuales
+gratis tampoco cierra porque los individuales gratuitos no llegan a 2025-2026.
+
+**Alternativas presentadas al Trader-Humano (sin pagar aún):**
+- **(A-gratis) EW en DIARIO con `6E=F`** (Yahoo, 2022-2026 completo, volumen real). Desvía el spec M15→D;
+  el núcleo científico de EW (memoria temporal de effort/result) se prueba igual, solo en otra escala.
+  Requiere aprobación explícita del cambio de escala.
+- **(C-pago) Databento** para M15 2022-2026 (única fuente que lo da íntegro con volumen real).
+- **(B) M15 solo TEST 60d** (Yahoo) — insuficiente para split OOS; descartable para el Charter.
+Si ninguna gratuita convence, se reconsidera pagar. **NO se compró nada. NO se ejecutó EW-1.**
 No basta con que una columna se llame `volume`. Para Wyckoff effort/result necesitamos volumen que
 sea **(a) continuo (sin ceros masivos), (b) con definición documentada y representativa**, incluso
 si es proxy. Jerarquía aceptable:

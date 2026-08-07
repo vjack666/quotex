@@ -30,14 +30,14 @@ estocástico M15 describe ESTADO, no CONTROL ni transición. No se promueve nada
 porque el null de shuffle de columnas es "fuerte" (geometría favorable); el veredicto se
 apoya en la OOS (colapso total) y el %minoritario en el borde del null.
 
-**Siguiente (PENDIENTE API KEY Databento — adquisición autorizada A1):** Energía Wyckoff BLOQUEADA
-por instrumento en spot (NO resultado negativo). Dukascopy M1 rechazado (99.7% ceros). Candidato CME
-6E EVALUADO (SIN descarga) → PASA; `volume` = REAL traded volume de contratos en CME Globex. Trader-
-Humano AUTORIZÓ Databento (GLBX.MDP3, `6E.v.0`, OHLCV 1m, NO MBO, 2022-2026). **BLOQUEO DE ACCESO:**
-cliente `databento` 0.83.0 instalado PERO SIN API key → aún NO se descargó nada. Scripts acquire+verify
-listos sin ejecutar. Falta la key para correr acquire→verify (checklist completo + prueba crítica de
-rollovers). Si pasa: presentar para autorizar congelación EW-1. Si falla: documentar y detener. NO
-ejecutar EW-1/2/3; NO descargar sin key. EW ahora = hipótesis sobre EUR/USD Futures 6E (no spot).
+**Siguiente (PENDIENTE elección gratuita vs pagada — decisión Trader-Humano):** Energía Wyckoff
+BLOQUEADA por instrumento en spot (NO resultado negativo). Dukascopy M1 rechazado (99.7% ceros).
+CME 6E EVALUADO (SIN descarga) → PASA; `volume` = REAL traded volume. Databento autorizado pero
+**NO se compró** (orden: buscar fuente gratuita primero). Búsqueda gratuita read-only: NO hay fuente
+gratuita con M15/1-min 6E + cobertura 2022-2026. Única gratuita COMPLETA = Yahoo `6E=F` **DIARIO**
+2022-2026 (volumen real, 0.52% ceros, split OOS). Alternativas: (A-gratis) EW diario Yahoo [requiere
+aprobar desviación M15→D]; (C-pago) Databento M15 2022-2026; (B) M15 60d insuficiente. NO se compró
+nada, NO se ejecutó EW-1. EW = hipótesis sobre EUR/USD Futures 6E.
 
 **Tests:** pytest test_experiment_runner + test_promotion_gate + test_registry = 4 passed
 (pre-existing; scripts lab_exp0XX NO están en la suite — se verifican por ejecución real).

@@ -12,6 +12,7 @@
 | Checklist de usabilidad | §5 de DATA_REQUIREMENTS_EW (6 pasos antes de congelar EW-1) |
 | Candidato local rechazado (A) | Dukascopy M1 (SMC-SYSTEMS) — 99.7% ceros M15 |
 | Candidato CME 6E EVALUADO (A1) | REAL traded volume (contratos CME Globex); pasa factibilidad §2b |
-| Veredicto A1 | PASA; AUTORIZADO Databento; BLOQUEO DE ACCESO (sin API key) |
+| Veredicto A1 | PASA; AUTORIZADO Databento; BLOQUEO DE API KEY |
 | Scripts listos (sin ejecutar) | scripts/lab_ew_acquire_cme.py, scripts/lab_ew_verify_cme.py |
-| Ejecución EW-1/2/3 | NO ejecutada. Pendiente adquisición + verify + OK del Trader-Humano |
+| Búsqueda gratuita (NO pagar) | concluida: no hay M15/1min gratis 2022-26; unica gratuita completa = Yahoo 6E=F DIARIO |
+| Ejecución EW-1/2/3 | NO ejecutada. Pendiente elección A-gratis(diario) / C-pago(M15) del Trader-Humano |

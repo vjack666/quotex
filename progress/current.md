@@ -78,6 +78,21 @@
     y detener (sin imputar ni filtrar). NO se ejecutó EW-1/2/3.
 - NO se buscó dataset por cuenta propia más allá de inspeccionar el candidato ya presente. NO EW-1/2/3.
 
+- **NO PAGAR aún (2026-08-07) — BÚSQUEDA GRATUITA para CME 6E**: orden del Trader-Humano = no comprar
+  Databento; buscar fuente gratuita (Barchart, contratos individuales, export OHLCV intradía). Búsqueda
+  read-only concluye: NO existe fuente gratuita con M15/1-min de 6E y cobertura 2022-2026 completa.
+  - Kaggle "Euro FX Futures (CME) 2000-2022": 266 CSV individuales OHLC+Vol, pero **hasta 2022** → no
+    cubre TEST 2025-2026.
+  - Yahoo `6E=F`: M15 solo 60d (0% ceros, volumen real); **DIARIO 2022-2026 COMPLETO** (1,150 barras,
+    0.52% ceros, 0% missing) → la ÚNICA vía gratuita completa.
+  - Barchart free: intradía ~10a pero **1 descarga/día + máx 10k registros** → inviable para 4a M15.
+  - CME Volume/OI reports: solo diario (validación de volumen, no sustituye M15).
+  - massive/firstratedata/portara: de pago.
+  - **Conclusión:** construir continuo desde individuales gratuitos tampoco cierra (no llegan a 2025-26).
+    Alternativas: **(A-gratis) EW en DIARIO con `6E=F`** (Yahoo, 2022-2026, volumen real; desvía spec M15→D,
+    requiere aprobación); **(C-pago) Databento M15** 2022-2026; **(B) M15 60d** insuficiente para OOS.
+  - **NO se compró nada. NO se ejecutó EW-1.** Pendiente elección del Trader-Humano.
+
 ### Archivos de la sesión (commiteables de esta sesión, commit pendiente de OK)
 - scripts/lab_exp075_phaseA_continuous.py
 - scripts/lab_exp074b_null.py

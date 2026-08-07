@@ -84,6 +84,14 @@
       (descarga 1m) y `scripts/lab_ew_verify_cme.py` (checklist + inspección de rollovers) listos sin
       ejecutar. EW pasa a ser hipótesis sobre **EUR/USD Futures 6E** (no spot); resultados NO comparables
       1:1 con EXP-071..075. **Falta la API key para correr acquire→verify.** NO se ejecutó EW-1/2/3.
+    - **2026-08-07 (NO PAGAR aún) — BÚSQUEDA GRATUITA para CME 6E**: el Trader-Humano ordenó NO comprar
+      Databento y buscar fuente gratuita (Barchart, contratos individuales, export OHLCV intradía).
+      Búsqueda read-only: NO existe fuente gratuita con M15/1-min de 6E y cobertura 2022-2026 completa.
+      Kaggle individuales 2000-2022 (no llega a TEST); Yahoo `6E=F` da M15 solo 60d pero DIARIO 2022-2026
+      COMPLETO con volumen real (0.52% ceros). Única vía gratuita completa = **EW en DIARIO con `6E=F`**
+      (desvía spec M15→D, requiere aprobación). Barchart 1 descarga/día inviable; CME solo diario (validación).
+      Alternativas presentadas: (A-gratis) diario Yahoo; (C-pago) Databento M15; (B) M15 60d insuficiente.
+      **NO se compró nada. NO se ejecutó EW-1.**
   - **Art. 13 + ADR-005** añadidos al Charter: EURUSD REAL = SOLO descubrimiento;
     validación OTC obligatoria del propio lab antes de promover al Edificio.
     (commit efa212b)
