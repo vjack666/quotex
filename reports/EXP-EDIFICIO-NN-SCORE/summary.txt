@@ -1,0 +1,16 @@
+============================================================
+EXP-EDIFICIO-NN-SCORE — RESUMEN (hands-free)
+============================================================
+eventos=946 TRAIN=662 TEST=284 (temporal 70/30)
+winrate global TEST=0.363
+features whitelist (17): ['k_brake', 'd_brake', 'kd_dist_brake', 'brake_ratio', 'extreme_flag', 'cross_separation', 'k_cross', 'd_cross', 'hammer_flag', 'trend_brake', 'rvol_brake', 'htf_bias_brake', 'minutes_brake_to_cross', 'body_n_brake', 'cruce_en_zona_brake', 'cross_ago_brake', 'htf_sign_n']
+
+BASELINE (score Edificio=brake_ratio): AUC_TRAIN=0.524 AUC_TEST=0.505
+MODELO LightGBM: AUC_TRAIN=0.724 AUC_TEST=0.548 gap=+0.176
+
+H1 (ranking mejora OOS): ACEPTADA  (AUC_test 0.548 vs base 0.505)
+H2 top-20%: REFUTADA  lift=+0.066 IC95%[-0.059,+0.173]
+H2 top-30%: REFUTADA  lift=+0.026 IC95%[-0.057,+0.155]
+H3 (calibracion): ACEPTADA  ECE_model=0.012 ECE_base=0.278
+
+No se reintrodujo H2 de POI-STOCH (refutada). No se toco produccion.

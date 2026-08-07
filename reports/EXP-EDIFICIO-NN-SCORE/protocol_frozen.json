@@ -1,0 +1,36 @@
+{
+  "seed": 42,
+  "alpha": 0.05,
+  "domain": "REAL_edificio_features",
+  "model": "lightgbm",
+  "oos_split": "temporal 70/30 por brake_time",
+  "features_whitelist": [
+    "k_brake",
+    "d_brake",
+    "kd_dist_brake",
+    "brake_ratio",
+    "extreme_flag",
+    "cross_separation",
+    "k_cross",
+    "d_cross",
+    "hammer_flag",
+    "trend_brake",
+    "rvol_brake",
+    "htf_bias_brake",
+    "minutes_brake_to_cross",
+    "body_n_brake",
+    "cruce_en_zona_brake",
+    "cross_ago_brake",
+    "htf_sign_n"
+  ],
+  "target": "win",
+  "top_k_fractions": [
+    0.2,
+    0.3
+  ],
+  "min_train_events": 500,
+  "auc_gap_warn": 0.08,
+  "n_events": 946,
+  "n_train": 662,
+  "n_test": 284
+}
