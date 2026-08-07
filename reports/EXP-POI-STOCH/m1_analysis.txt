@@ -1,0 +1,21 @@
+============================================================
+EXP-POI-STOCH M1 ANALYSIS
+============================================================
+M1 velas=76835 | eventos M15=14269
+
+Ventanas M1 expandidas: 14269
+
+[M1] |K-D|_m1>=20: n=439 retrace_next_m1=0.251 vs base=0.502 diff=-0.251
+
+[M1] |K-D|_m1>=25: n=41 retrace_next_m1=0.073 vs base=0.502 diff=-0.428
+
+[M1] |K-D|_m1>=30: SIN eventos
+
+
+Eventos POI M1 directos: 102290
+
+[M1-direct] |K-D|>=20: n=2676 retrace=0.487 vs base=0.501 diff=-0.014
+
+[M1-direct] |K-D|>=25: n=282 retrace=0.652 vs base=0.501 diff=+0.151
+
+[M1-direct] |K-D|>=30: n=3 retrace=0.000 vs base=0.501 diff=-0.501

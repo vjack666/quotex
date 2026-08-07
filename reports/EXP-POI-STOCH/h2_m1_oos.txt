@@ -1,0 +1,29 @@
+================================================================
+EXP-POI-STOCH H2 M1 — OOS (POI + |K-D|>=25 -> retrace next M1)
+================================================================
+M1 velas=76835 | eventos POI M1=102290 | KD_THR=25.0 | seed=42
+
+TRAIN=71603 TEST=30687 (split temporal 70/30 por evento)
+
+
+[TRAIN]
+  |K-D|>=25 : n=189 rate=0.725 IC95%=[0.657,0.784]
+  rest      : n=71414 rate=0.508 IC95%=[0.505,0.512]
+  baseline(=rest) : 0.508
+  diff=+0.217
+  OR=2.55 IC95%=[1.90,3.57]  p=2.70e-09
+
+[TEST OOS]
+  |K-D|>=25 : n=93 rate=0.505 IC95%=[0.406,0.605]
+  rest      : n=30594 rate=0.484 IC95%=[0.478,0.489]
+  baseline(=rest) : 0.484
+  diff=+0.022
+  OR=1.09 IC95%=[0.72,1.63]  p=6.75e-01
+
+----------------------------------------------------------------
+TABLA:
+Grupo                   n    rate           IC95%   base      OR         IC95%OR         p
+TRAIN |K-D|>=25       189   0.725     [0.66,0.78]  0.508    2.55     [1.90,3.57]  2.70e-09
+TEST  |K-D|>=25        93   0.505     [0.41,0.60]  0.484    1.09     [0.72,1.63]  6.75e-01
+
+VEREDICTO H2-M1: REFUTADA (no replica OOS o IC incluye 1 / diff incluye 0)
