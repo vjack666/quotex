@@ -285,3 +285,64 @@ Archivos clave de este fix: `src/executor.py` (`_reconnect_if_needed`),
 | `src/scanner.py` | Stoch wire + early return si hay trades |
 | `src/config.py` | Flags operativos (stoch, continuous, align) |
 | `hub/static/index.html` | last_order_attempt + cycle_rolled toast |
+
+---
+
+## ⭐ SESIÓN 2026-08-07 NOCHE — EXP-POI-STOCH + EXP-EDIFICIO-NN-SCORE + POI HUMANIZADO
+
+**LEER PRIMERO al retomar.** Hoy se corrió la serie de experimentos del Edificio sobre
+EURUSD_otc (datos OTC, no spot) y se rediseñó el POI a petición del Trader-Humano.
+
+### Qué se hizo
+1. **EXP-POI-STOCH** (commit `87ff7c2`): POI+estocástico sobre EURUSD_otc M15.
+   H1=REFUTADA, H2=INCONCLUSA (no replica OOS), H3=REFUTADA. EURCHF_otc no disp (Token rejected).
+2. **EXP-POI-STOCH M1** (commit `ff25eb1`): H2 en M1 (POI M1 + |K-D|≥25 → retrace).
+   TRAIN OR=2.55 (p≈0) pero TEST OOS OR=1.09 IC[0.72,1.63] incluye 1 → **REFUTADA** (no-estacionariedad).
+3. **EXP-EDIFICIO-NN-SCORE** (commit `7731d81`): LightGBM sobre 17 features que el Edificio YA calcula
+   (edificio_events.parquet, 946 eventos, label `win`, split temporal 70/30). H1=ACEPTADA (AUC OOS 0.548>0.505),
+   H2=REFUTADA (top-k lift IC incluye 0), H3=ACEPTADA (calibración ECE 0.012 vs 0.278 baseline).
+   Conclusión: la red rankea/calibra mejor pero NO crea edge (win base 0.363, lejos de break-even ~0.55).
+4. **POI HUMANIZADO DINÁMICO** (commit `2fb9a0e`): el Trader-Humano pidió mejorar el POI porque
+   "no se calcula como es". El POI original (swing_levels_causal min_touch=2,tol=5,swing_k=2) daba
+   1104 niveles / 14269 eventos = ruido. Rediseñado como **zonas que nacen en pivote estructural y
+   MUEREN por breakout** (swing_k=8, tol=0.5×ATR, min_touch=3, bounce≥0.5, muerte=cuerpo≥0.6×ATR contra zona).
+   Resultado: **264 zonas / 2669 eventos / 10 vivas al final** — mucho más ordenado.
+5. **CHECK evento** (commit `2fb9a0e`): idx=2609 = PUT en resistencia 1.14830. Pierde a H=1,2,3,4 M15
+   (precio subió), gana solo a H=5. Confirma: el POI bien dibujado NO da edge direccional a H corto.
+
+### Decisión tomada
+- El POI del experimento era ruido (laxo). El POI dinámico (nace/muere por breakout) es el que se parece
+  al POI real del Trader-Humano. PERO la zona bien dibujada ≠ entrada ganadora: el evento 2609 lo prueba.
+- Arquitectura confirmada: Wyckoff/POI = CONTEXTO/FILTRO, no gatillo. El Edificio rankea mejor con red
+  pero no hay edge utilizable en binarias de H fijo.
+
+### Dónde quedamos
+- POI humanizado dibujado y validado a ojo (imágenes en reports/EXP-POI-STOCH/). Falta: re-correr
+  H1/H2 de EXP-POI-STOCH con el POI dinámico para ver si deja de estar refutada (PENDIENTE OK del TH).
+- También pendiente: chequear tasa de acierto de VARIOS eventos POI a H=1..5 (no solo el 2609).
+
+### Archivos clave de la sesión
+- `scripts/lab_exp_poi_stoch.py`, `lab_exp_poi_stoch_m1.py`, `lab_exp_poi_stoch_h2_m1_oos.py`
+- `scripts/lab_exp_edificio_nn_score.py`
+- `scripts/lab_poi_visual_check.py`, `lab_poi_humanizado.py`, `lab_poi_dinamico.py`, `lab_poi_check_event.py`
+- `reports/EXP-POI-STOCH/{summary.txt, h1_results.csv, h2_results.csv, m1_analysis.txt, h2_m1_oos.txt,
+  poi_full_events.png, poi_sequence_example.png, poi_dinamico_full.png, poi_dinamico_seq.png}`
+- `reports/EXP-EDIFICIO-NN-SCORE/{summary.txt, topk_table.csv, feature_importance.csv, protocol_frozen.json}`
+- `specs/lab_protocolo_cientifico/EXP-POI-STOCH/`, `EXP-EDIFICIO-NN-SCORE/` (HANDS_FREE_ORDER incluidos)
+- Datos: `src/strategy_lab/results/edificio_events.parquet` (946 eventos, label `win`, split OOS)
+- OTC crudo: `tools/quotex-historical-data/EURUSD_otc_60s_365days.csv` (76835 velas M1)
+
+### Reglas que NO romper
+- Una feature a la vez. NO push ciego (ver nota de push abajo).
+- Edificio caja negra intacta; no tocar src/ para meter POI.
+- Datos OTC = validación; NO se compara 1:1 con spot.
+- El POI humanizado es el que se parece al del Trader-Humano; no volver al laxo.
+
+### ⚠ PUSH PENDIENTE (divergencia con remoto)
+- HEAD local = `2fb9a0e` (3 commits adelante: ff25eb1, 87ff7c2, 7731d81, 2fb9a0e... en realidad
+  3 del lab + el de hoy). El remoto origin/main tiene **4 commits adelante** (otro Hermes pusheó
+  EXP-EDIFICIO-NN-SCORE `1c73b5d` y más). `git push` RECHAZADO (non-fast-forward).
+  `git pull --ff-only` NO puedo (divergen, necesita merge o rebase). **NO hice force ni merge.**
+  AL RETOMAR: integrar los 4 commits del remoto (pull/rebase) y luego push, con OK del usuario.
+  Estado seguro: mis commits están locales, repo sin archivos sueltos de la sesión (todo commiteado).
+
