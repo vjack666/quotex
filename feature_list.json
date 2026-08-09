@@ -231,6 +231,28 @@
       "sdd": true,
       "spec_path": "specs/edificio_wyckoff_phasea/",
       "note": "R0-R3 DONE. R4 DONE (d=0.27-0.37). R5 DONE (persistente ac1=0.505, sin edge dir propio). R6 DONE: contexto x Edificio filtra TRAIN (27/34/48%, p~0) pero degrada TEST/OOS (32/43/43%, p~0.54 no sig) -> filtro MARGINAL y no robusto. R7 DONE: Edificio como binaria EURUSD offline, win 44-49% train/26-30% test, EV<0 siempre -> NO rentable, R10 descartado. Ambas lineas agotadas con evidencia. Decision TH: archivar rama o reenfocar (pendiente OK)."
+    },
+    {
+      "id": 40,
+      "name": "fabrica_herramientas_edificio",
+      "title": "Fabrica de Herramientas del Edificio (EXPERIMENTO -> HERRAMIENTA -> ENSAMBLADOR -> CONTRATADO)",
+      "phase": "edificio_fabrica",
+      "priority": 40,
+      "description": "Reframe del Edificio como fabrica de produccion: cada EXP-XXX con identidad experimental previa se registra como HERRAMIENTA (emite evidencia: direction/quality/stage, NUNCA orden). El Edificio (pisos P1-P3) es la linea de produccion; se anade ENSAMBLADOR (decide BUY/SELL/NO TRADE a partir de evidencia combinada) + INSPECTOR (conflict/false-positive guard) + GOBERNADOR (riesgo/sizing Massaniello). Gap de produccion: convertir n combinado de la composicion en evidencia medida (EXP-077), no asumida. Subordinado a docs/LAB_CHARTER.md.",
+      "acceptance": [
+        "Registro de herramientas: cada herramienta referencia su EXP-XXX de origen + WR/n/pooled + veredicto Charter",
+        "Contrato de evidencia unico: direction/strength/confidence/stage, sin emision de orden",
+        "Ensamblador produce BUY/SELL/NO_TRADE a partir de evidencia, no de un indicador aislado",
+        "EXP-076 (broker timing) y EXP-077 (composicion arcoiris+valvula K/D con n combinado) definidos como experimentos del ciclo",
+        "Reporte de frecuencia/DD/racha sobre la serie filtrada para recalculo Massaniello",
+        "NO se promueve a REAL sin validacion OTC (Charter Art. 10/13)",
+        "tests cubren contrato de evidencia + ensamblador + paso de NO_TRADE",
+        "pytest tests/ en verde para cualquier codigo nuevo"
+      ],
+      "status": "in_progress",
+      "sdd": true,
+      "spec_path": "specs/fabrica_herramientas_edificio/",
+      "note": "Spec APROBADO por trader-humano (Ruben) + aprobacion humana final 2026-08-09. Ejecutando ciclo EXP-076..080 como lote autonomo."
     }
   ]
 }
