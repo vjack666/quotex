@@ -30,6 +30,27 @@ Escribir `protocol_frozen.json` con:
 11. Commit solo archivos de este EXP. Sin push. Sin tocar producción.
 12. Parar.
 
+## Tabla resumen OOS (obligatoria en summary.txt)
+
+El `summary.txt` debe incluir esta tabla rellenada con números reales:
+
+```
+| Métrica                    | Score Edificio | Modelo     | Diff / Lift | IC95%           | n    |
+|----------------------------|----------------|------------|-------------|-----------------|------|
+| AUC OOS                    |                |            |             |                 |      |
+| WR global OOS              |                |            |             |                 |      |
+| WR top 20% OOS             |                |            |             |                 |      |
+| WR top 30% OOS             |                |            |             |                 |      |
+| Lift top 20% vs baseline   | —              |            |             |                 |      |
+| Lift top 30% vs baseline   | —              |            |             |                 |      |
+| ECE OOS (calibración)      |                |            |             | —               | —    |
+| Gap AUC TRAIN−TEST         | —              |            |             | —               | —    |
+```
+
+- IC95% de rates: Wilson o bootstrap.
+- IC95% de lift (diff de WR): bootstrap.
+- Si n top-k es bajo, indicarlo en la celda o en nota bajo la tabla.
+
 ## Criterios de veredicto
 
 | Hipótesis | ACEPTADA | REFUTADA | INCONCLUSA |

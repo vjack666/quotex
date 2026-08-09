@@ -51,6 +51,23 @@ Cualquier feature fuera de la lista documentada en protocol_frozen queda prohibi
 | ECE / reliability | TEST | H3 |
 | Gap AUC TRAIN−TEST | — | alerta overfit |
 
+### Tabla resumen OOS (obligatoria en summary.txt)
+
+```
+| Métrica                    | Score Edificio | Modelo     | Diff / Lift | IC95%           | n    |
+|----------------------------|----------------|------------|-------------|-----------------|------|
+| AUC OOS                    | …              | …          | …           | […]             | …    |
+| WR global OOS              | …              | …          | …           | […]             | …    |
+| WR top 20% OOS             | …              | …          | …           | […]             | …    |
+| WR top 30% OOS             | …              | …          | …           | […]             | …    |
+| Lift top 20% vs baseline   | —              | …          | …           | […]             | …    |
+| Lift top 30% vs baseline   | —              | …          | …           | […]             | …    |
+| ECE OOS (calibración)      | …              | …          | …           | —               | —    |
+| Gap AUC TRAIN−TEST         | —              | …          | …           | —               | —    |
+```
+
+IC95% de rates: Wilson o bootstrap. IC95% de lift: bootstrap.
+
 ## 6. Outputs obligatorios
 
 ```
