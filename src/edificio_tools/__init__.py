@@ -23,8 +23,10 @@ from .registry import Tool, load_catalog, get_tool, active_tools
 from .inspector import inspect
 from .assembler import Decision, assemble
 from .gate import build_evidences, assemble_from_tools
+from .governor import Governor, Sizing, massaniello_fraction, expected_max_streak
 
 __all__ = [
     "Evidence", "Tool", "load_catalog", "get_tool", "active_tools",
     "inspect", "Decision", "assemble", "build_evidences", "assemble_from_tools",
+    "Governor", "Sizing", "massaniello_fraction", "expected_max_streak",
 ]
