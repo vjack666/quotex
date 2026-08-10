@@ -1,0 +1,50 @@
+{
+  "schema": "edificio_tools.catalog.v1",
+  "description": "Catalogo de herramientas del Edificio de Contratacion (R1). Legible por el nuevo dueno del producto.",
+  "tools": [
+    {
+      "name": "arcoiris_7ema",
+      "exp_ref": "EXP-EDF-04",
+      "wr_pooled": 70.6,
+      "n": 489,
+      "charter_verdict": "CANDIDATA",
+      "domain": "REAL",
+      "stage": "P2",
+      "active": true,
+      "note": "Arcoiris 7-EMA como gate de embudo. WR alta (71%) pero n bajo; requiere composicion (R7)."
+    },
+    {
+      "name": "valvula_kd",
+      "exp_ref": "EXP-EDF-FINAL",
+      "wr_pooled": 57.0,
+      "n": 5655,
+      "charter_verdict": "CANDIDATA",
+      "domain": "REAL",
+      "stage": "P3",
+      "active": true,
+      "note": "Válvula K/D del motor real: salida de extremo + |K-D|>=5 + presion 3 velas. n grande, p<0.0001."
+    },
+    {
+      "name": "cruce_limpio",
+      "exp_ref": "EXP-EDF-FINAL (modo viejo)",
+      "wr_pooled": 48.4,
+      "n": 2559,
+      "charter_verdict": "DESCARTADA",
+      "domain": "REAL",
+      "stage": "P3",
+      "active": false,
+      "note": "Cruce limpio pierde (48.4%). No se usa en produccion."
+    },
+    {
+      "name": "composicion_arcoiris_valvula_kd",
+      "exp_ref": "EXP-077 (CICLO-001)",
+      "wr_pooled": 60.5,
+      "n": 112861,
+      "charter_verdict": "CANDIDATA",
+      "domain": "REAL+BOTH",
+      "stage": "P3",
+      "active": true,
+      "note": "Composicion apilada medida con n combinado (EXP-077): EURUSD 2023/24, EURUSD OOS 2012-2022, XAUUSD. WR ~59-61% con n grande. Valida en OTC (EXP-080). Timing broker validado en OTC 60s (EXP-076, CALL 74.6% / PUT 67.0%). Pendiente validacion spot en vivo (CICLO-002)."
+    }
+  ]
+}
