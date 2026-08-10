@@ -249,10 +249,11 @@
         "tests cubren: enchufe cuenta, init Massaniello temprano, grabacion 1m sin borrado, wiring de cada boton",
         "pytest tests/ en verde para cualquier codigo nuevo"
       ],
-      "status": "spec_ready",
+      "status": "done",
+      "done_at": "2026-08-10",
       "sdd": true,
       "spec_path": "specs/hub_operacional_edificio/",
-      "note": "Spec preparado por CEO (Hermes). Requiere aprobacion humana + decision explicita sobre cuenta REAL (credenciales)."
+      "note": "IMPLEMENTADO Y VERIFICADO FISICAMENTE 2026-08-10. Commit 97debc6 (origin/main). Incluye: acceso directo QUOTEX Web App.lnk; barrera REAL (EDIFICIO_ALLOW_REAL=False, PRACTICE por defecto); Massaniello desde el inicio (STAKE_MODE=massaniello); caja negra retencion INFINITA + snapshot PISO_1 + feature_stream plano para RNA + tamaño medible de vela + account/monto Masaniello + estocastico/POI/freno; verificacion UI fisica (fix campos deshabilitados post-Detener + badge POI/extremo). AMPLIACION: pestaña EMBUDO en hub (/api/funnel) que explica como profesor el recorrido P1->P2->P3->CONTRATADO y por que se desechan los activos; hot-reload silencioso del frontend (/api/version, recarga solo cuando el usuario NO mira, sin parpadeo). 4 tests feature41 en verde. Cuenta REAL bloqueada: requiere OK humano explicito + credenciales."
     },
     {
       "id": 40,

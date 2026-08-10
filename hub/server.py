@@ -330,6 +330,147 @@ async def api_state():
     return _build_snapshot()
 
 
+import os as _os
+
+
+@app.get("/api/version")
+async def api_version():
+    """Versión del frontend = mtime del index.html servido.
+
+    El cliente sondea esto y recarga solo en silencio cuando el usuario
+    NO está mirando (pestaña oculta / ventana sin foco) — sin parpadeo.
+    """
+    try:
+        _idx = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)),
+                             "hub", "static", "index.html")
+        if not _os.path.exists(_idx):
+            _idx = _os.path.join("hub", "static", "index.html")
+        return {"version": int(_os.path.getmtime(_idx) * 1000)}
+    except Exception:
+        return {"version": 0}
+
+
+@app.get("/api/funnel")
+async def api_funnel():
+    """Funnel del Edificio de Contratación, contado desde datos reales.
+
+    Explica 'como profesor' qué consigue el motor por el camino:
+      total escaneado → entran a P1 → suben a P2 (freno) → a P3 (extremo+cruce)
+      → contratados. Y POR QUÉ se desechan (motivos acumulados + veredicto freno).
+    """
+    try:
+        bot = _bot_ref
+        # Estado vivo del Edificio
+        edificio_state = None
+        if bot is not None and hasattr(bot, "edificio") and bot.edificio is not None:
+            try:
+                edificio_state = _serialize(bot.edificio.get_state())
+            except Exception:
+                edificio_state = None
+        if edificio_state is None and _edificio_panel is not None:
+            edificio_state = _edificio_panel.get_state()
+
+        resumen = (edificio_state or {}).get("resumen", {}) or {}
+        cards = (edificio_state or {}).get("cards", {}) or {}
+
+        # Total escaneado (stats del bot)
+        total_scanned = 0
+        if bot is not None:
+            total_scanned = int(getattr(bot, "stats", {}).get("total_assets_scanned", 0) or 0)
+
+        # Descartes acumulados del scanner (reales, contadores del bot)
+        reject_by_reason = {}
+        if bot is not None:
+            st = getattr(bot, "stats", {}) or {}
+            mapping = {
+                "rejected_young_zone": "Zona joven (aún no madura)",
+                "rejected_same_asset_limit": "Límite mismo activo",
+                "rejected_diversification": "Diversificación",
+                "filtered_sensor": "Sensor filtrado",
+                "score_rejected_age": "Edad de señal",
+                "score_rejected_score": "Score bajo",
+                "expired_zones": "Zonas expiradas",
+                "skipped": "Omitidos",
+            }
+            for k, label in mapping.items():
+                v = int(st.get(k, 0) or 0)
+                if v:
+                    reject_by_reason[label] = v
+
+        # Histórico de la caja negra (lo que SÍ se guarda al enviar)
+        bb_totals = {
+            "contratados_db": 0,
+            "brake_confirmed": 0,
+            "brake_rejected": 0,
+            "brake_cancelled": 0,
+            "poi_p1": 0,
+            "poi_p2": 0,
+            "poi_p3": 0,
+        }
+        try:
+            from src.black_box_recorder import BlackBoxRecorder
+            _bb = BlackBoxRecorder()
+            import sqlite3
+            _con = sqlite3.connect(_bb.db_path)
+            _q = lambda s, a=(): _con.execute(s, a).fetchall()
+            bb_totals["contratados_db"] = _q(
+                "SELECT COUNT(*) FROM scan_candidates WHERE decision='BUY' OR order_id IS NOT NULL"
+            )[0][0]
+            for v, lab in (("CONFIRMED", "brake_confirmed"), ("REJECTED", "brake_rejected"),
+                           ("CANCELLED", "brake_cancelled")):
+                bb_totals[lab] = _q(
+                    "SELECT COUNT(*) FROM scan_candidates WHERE brake_verdict=?", (v,)
+                )[0][0]
+            bb_totals["poi_p1"] = _q("SELECT COUNT(*) FROM scan_candidates WHERE has_poi_p1=1")[0][0]
+            bb_totals["poi_p2"] = _q("SELECT COUNT(*) FROM scan_candidates WHERE has_poi_p2=1")[0][0]
+            bb_totals["poi_p3"] = _q("SELECT COUNT(*) FROM scan_candidates WHERE has_poi_p3=1")[0][0]
+            _con.close()
+        except Exception:
+            pass
+
+        # Activos vivos por piso (para que el profesor explique cada uno)
+        por_piso = {"p1": [], "p2": [], "p3": [], "contratado": []}
+        for asset, c in cards.items():
+            p = int(c.get("piso", 0))
+            entry = {
+                "asset": asset,
+                "direction": c.get("direction", ""),
+                "payout": c.get("payout", 0),
+                "reason": c.get("reason", ""),
+                "brake_verdict": c.get("brake_verdict"),
+                "stoch_k": c.get("stoch_k"),
+                "stoch_d": c.get("stoch_d"),
+                "p2_entry_extreme": c.get("p2_entry_extreme"),
+                "has_poi_p1": c.get("has_poi_p1"),
+                "has_poi_p2": c.get("has_poi_p2"),
+                "has_poi_p3": c.get("has_poi_p3"),
+                "order_status": c.get("order_status", ""),
+            }
+            if p == 1:
+                por_piso["p1"].append(entry)
+            elif p == 2:
+                por_piso["p2"].append(entry)
+            elif p == 3:
+                por_piso["p3"].append(entry)
+            elif p >= 4:
+                por_piso["contratado"].append(entry)
+
+        return {
+            "status": "ok",
+            "total_scanned": total_scanned,
+            "en_p1": resumen.get("en_p1", 0),
+            "en_p2": resumen.get("en_p2", 0),
+            "en_p3": resumen.get("en_p3", 0),
+            "contratados": resumen.get("contratados", 0),
+            "total_dentro": resumen.get("total_dentro", 0),
+            "reject_by_reason": reject_by_reason,
+            "bb": bb_totals,
+            "por_piso": por_piso,
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
 @app.get("/api/strat_f")
 async def api_strat_f():
     bot = _bot_ref

@@ -88,6 +88,9 @@ Expiración **10 min (600s)** por defecto desde 2026-07-19 (pedido usuario; ante
 | ID | Feature | Estado | Depende de |
 |----|---------|--------|------------|
 | 8 | `schedule_auto` | ⏸ in_progress (paused) | — |
+| 41 | `hub_operacional_edificio` | ✅ done (2026-08-10) | Edificio (#36), fábrica (#40) |
+
+> **Feature 41 — Hub Operacional del Edificio (2026-08-10, commit 97debc6):** cierra el ciclo operativo. Acceso directo `QUOTEX Web App.lnk`; barrera REAL (`EDIFICIO_ALLOW_REAL=False`, PRACTICE por defecto, REAL solo con OK humano + credenciales); Massaniello desde el inicio (`STAKE_MODE=massaniello`); caja negra retención INFINITA + snapshot PISO_1 + `feature_stream` plano para RNA + tamaño medible de vela + account/monto Massaniello + estocástico/POI/freno; verificación UI física (fix campos deshabilitados post-Detener + badge POI/extremo). **Ampliación:** pestaña **EMBUDO** en hub (`/api/funnel`) que explica como profesor el recorrido P1→P2→P3→CONTRATADO y por qué se desechan los activos; **hot-reload silencioso** del frontend (`/api/version`, recarga solo cuando el usuario NO mira, sin parpadeo). 4 tests feature41 en verde.
 
 ---
 

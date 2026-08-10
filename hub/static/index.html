@@ -551,6 +551,7 @@
 
 <nav class="tabs">
   <button class="tab-btn active" id="tab-op" onclick="showTab('op')">Operación</button>
+  <button class="tab-btn" id="tab-funnel" onclick="showTab('funnel')">Embudo</button>
   <button class="tab-btn" id="tab-bb" onclick="showTab('bb')">Caja Negra</button>
   <button class="tab-btn" id="tab-ctrl" onclick="showTab('ctrl')">Consola</button>
 </nav>
@@ -698,6 +699,48 @@
 
 </div><!-- /grid op -->
 </div><!-- /op-view -->
+
+<!-- ============ EMBUDO ============ -->
+<div class="view" id="funnel-view">
+  <div class="card col-12">
+    <h2>🚰 Embudo del Motor <span class="sub2">como el profesor explica por dónde pasa cada activo</span></h2>
+
+    <!-- Barras del funnel -->
+    <div id="funnel-bars" style="display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;"></div>
+
+    <!-- Explicación por etapa (profesor) -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px;">
+      <div style="background:var(--surface-3);border-radius:8px;padding:12px;border-left:3px solid var(--accent-2);">
+        <div style="font-weight:590;color:var(--accent-2);margin-bottom:4px;">🏛️ P1 · Recepción</div>
+        <div style="font-size:12px;color:var(--muted);">El activo paga bien (payout) y aparece el <b>freno</b> (el estocástico tocó su línea y el rango se comprimió). Es la "tarjeta de acceso". Sin freno, no entra.</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:8px;padding:12px;border-left:3px solid var(--orange);">
+        <div style="font-weight:590;color:var(--orange);margin-bottom:4px;">🧠 P2 · Cerebro</div>
+        <div style="font-size:12px;color:var(--muted);">Se espera el cierre de la vela M15. Si su rango es <b>menor</b> que la referencia (compresión confirmada) → freno <b>CONFIRMED</b>. Aquí se certifica el POI (extremo 20/80).</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:8px;padding:12px;border-left:3px solid var(--emerald);">
+        <div style="font-weight:590;color:var(--emerald);margin-bottom:4px;">⏳ P3 · Sala de Espera</div>
+        <div style="font-size:12px;color:var(--muted);">El estocástico debe volver a su zona de extremo y hacer un <b>cruce K/D limpio</b> (sin pegajosidad). Solo entonces está listo para contratar.</div>
+      </div>
+      <div style="background:var(--surface-3);border-radius:8px;padding:12px;border-left:3px solid var(--green);">
+        <div style="font-weight:590;color:var(--green);margin-bottom:4px;">✅ Contratado</div>
+        <div style="font-size:12px;color:var(--muted);">La fábrica (ensamblador/inspector/gobernador) arma la decisión con las herramientas (arcoíris/volante/POI). Si dice NO_TRADE, no se envía. Si no, orden a mercado.</div>
+      </div>
+    </div>
+
+    <!-- Por qué se desecha -->
+    <div style="margin-bottom:16px;">
+      <h3 style="font-size:14px;margin:0 0 8px;color:var(--muted);">❌ Por qué el motor desecha activos</h3>
+      <div id="funnel-rejects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+    </div>
+
+    <!-- Activos vivos por piso -->
+    <div>
+      <h3 style="font-size:14px;margin:0 0 8px;color:var(--muted);">🔎 Activos que el motor tiene en cada piso (y por qué)</h3>
+      <div id="funnel-porpiso" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+  </div>
+</div>
 
 <!-- ============ CAJA NEGRA ============ -->
 <div class="view" id="bb-view">
@@ -1287,6 +1330,99 @@ fetch('/api/strat_f').then(r=>r.json()).then(d=>{
     strat_f: d,
   }));
 }).catch(()=>{});
+// ── Embudo del motor ──
+function renderFunnel(f){
+  if(!f || f.status!=="ok"){ return; }
+  // Barras del funnel
+  const total = Math.max(1, f.total_scanned||0);
+  const steps = [
+    {label:"📡 Escaneados", val:f.total_scanned, color:"#7a86ff"},
+    {label:"🏛️ Entran a P1 (freno)", val:f.en_p1, color:"#5e6ad2"},
+    {label:"🧠 Suben a P2 (freno confirmado)", val:f.en_p2, color:"#ff9f43"},
+    {label:"⏳ Llegan a P3 (extremo+cruce)", val:f.en_p3, color:"#2dd4a7"},
+    {label:"✅ Contratados", val:f.contratados, color:"#22c55e"},
+  ];
+  const bars = document.getElementById("funnel-bars");
+  bars.innerHTML = "";
+  steps.forEach(s=>{
+    const pct = Math.max(2, Math.round((s.val/total)*100));
+    const div = document.createElement("div");
+    div.style.cssText = "display:flex;align-items:center;gap:10px;";
+    div.innerHTML =
+      `<div style="width:220px;font-size:12px;color:var(--muted);white-space:nowrap;">${s.label}</div>`+
+      `<div style="flex:1;background:var(--surface-3);border-radius:6px;height:26px;overflow:hidden;">`+
+        `<div style="width:${pct}%;height:100%;background:${s.color};display:flex;align-items:center;padding-left:8px;color:#0b0d12;font-weight:600;font-size:12px;min-width:34px;">${s.val}</div>`+
+      `</div>`;
+    bars.appendChild(div);
+  });
+  // Por qué se desecha
+  const rj = document.getElementById("funnel-rejects");
+  rj.innerHTML = "";
+  const rmap = f.reject_by_reason||{};
+  const bb = f.bb||{};
+  const extras = [];
+  if(bb.brake_rejected) extras.push(["Freno RECHAZADO (sin compresión)", bb.brake_rejected]);
+  if(bb.brake_cancelled) extras.push(["Freno CANCELADO (se perdió)", bb.brake_cancelled]);
+  if(bb.poi_p1) extras.push(["Activos con POI P1 certificado", bb.poi_p1]);
+  if(bb.poi_p2) extras.push(["Activos con POI P2 certificado", bb.poi_p2]);
+  if(bb.poi_p3) extras.push(["Activos con POI P3 certificado", bb.poi_p3]);
+  const all = Object.entries(rmap).concat(extras);
+  if(!all.length){ rj.innerHTML = '<span style="color:var(--faint);font-size:12px;font-style:italic;">sin descartes registrados aún</span>'; }
+  else all.forEach(([k,v])=>{
+    const b = document.createElement("span");
+    b.style.cssText = "background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:12px;color:var(--muted);";
+    b.innerHTML = `${k} <b style="color:var(--orange);">${v}</b>`;
+    rj.appendChild(b);
+  });
+  // Activos por piso
+  const pp = document.getElementById("funnel-porpiso");
+  pp.innerHTML = "";
+  const labels = {p1:"🏛️ P1 Recepción", p2:"🧠 P2 Cerebro", p3:"⏳ P3 Sala de Espera", contratado:"✅ Contratado"};
+  ["p1","p2","p3","contratado"].forEach(k=>{
+    const arr = (f.por_piso&&f.por_piso[k])||[];
+    const sec = document.createElement("div");
+    sec.style.cssText = "background:var(--surface-2);border-radius:8px;padding:10px;";
+    let html = `<div style="font-size:12px;font-weight:590;color:var(--muted);margin-bottom:6px;">${labels[k]} · <span style="color:var(--accent-2);">${arr.length}</span></div>`;
+    if(!arr.length){ html += '<div style="color:var(--faint);font-size:11px;font-style:italic;">vacío</div>'; }
+    else arr.forEach(a=>{
+      const dir = (a.direction||"").toUpperCase();
+      const poi = [a.has_poi_p1?"P1✓":null, a.has_poi_p2?"P2✓":null, a.has_poi_p3?"P3✓":null].filter(Boolean).join(" ");
+      const st = (a.stoch_k!=null&&a.stoch_d!=null)?`K${parseFloat(a.stoch_k).toFixed(0)}/D${parseFloat(a.stoch_d).toFixed(0)}`:"";
+      const brake = a.brake_verdict?` · freno:${a.brake_verdict}`:"";
+      const extreme = a.p2_entry_extreme?` · extremo:${a.p2_entry_extreme}`:"";
+      html += `<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:4px 0;border-top:1px solid var(--border);">`+
+        `<b style="color:var(--accent);min-width:90px;">${a.asset}</b>`+
+        `<span style="color:var(--emerald);min-width:46px;">${dir||"–"}</span>`+
+        `<span style="color:var(--muted);min-width:40px;">${a.payout||0}%</span>`+
+        `<span style="color:var(--muted);">${st}${brake}${extreme}${poi?` · ${poi}`:""}</span>`+
+        `<span style="color:var(--faint);margin-left:auto;font-style:italic;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.reason||""}">${a.reason||""}</span>`+
+      `</div>`;
+    });
+    sec.innerHTML = html;
+    pp.appendChild(sec);
+  });
+}
+function refreshFunnel(){
+  fetch('/api/funnel').then(r=>r.json()).then(renderFunnel).catch(()=>{});
+}
+refreshFunnel();
+setInterval(()=>{ if(document.getElementById("funnel-view").classList.contains("active")) refreshFunnel(); }, 3000);
+// ── Hot-reload silencioso del frontend ──
+// El server expone la mtime del index.html en /api/version. Si cambia,
+// recargamos SOLO cuando el usuario no está mirando (pestaña oculta /
+// ventana sin foco) → cero parpadeo, cero pestañeo, cero banner.
+let _appVersion = null;
+function checkAppVersion(){
+  if(_appVersion === null){ return; }  // aún no sabemos la versión base
+  fetch('/api/version').then(r=>r.json()).then(d=>{
+    if(!d || !d.version) return;
+    if(d.version !== _appVersion && (document.hidden || !document.hasFocus())){
+      location.reload();
+    }
+  }).catch(()=>{});
+}
+fetch('/api/version').then(r=>r.json()).then(d=>{ if(d && d.version) _appVersion = d.version; }).catch(()=>{});
+setInterval(checkAppVersion, 15000);
 _brBindDirtyHandlers();
 refreshBankroll(true); // first load only fills inputs from server
 if(typeof pollRunnerStatus==="function") pollRunnerStatus();
@@ -1304,11 +1440,14 @@ function stochCell(s){
 
 function showTab(which){
   document.getElementById("tab-op").classList.toggle("active", which==="op");
+  document.getElementById("tab-funnel").classList.toggle("active", which==="funnel");
   document.getElementById("tab-bb").classList.toggle("active", which==="bb");
   document.getElementById("tab-ctrl").classList.toggle("active", which==="ctrl");
   document.getElementById("op-view").classList.toggle("active", which==="op");
+  document.getElementById("funnel-view").classList.toggle("active", which==="funnel");
   document.getElementById("bb-view").classList.toggle("active", which==="bb");
   document.getElementById("ctrl-view").classList.toggle("active", which==="ctrl");
+  if(which==="funnel") refreshFunnel();
   if(which==="bb") loadBlackbox();
   if(which==="ctrl") loadConfig();
 }
