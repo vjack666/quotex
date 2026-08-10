@@ -7,14 +7,17 @@ P1->P2->P3 de `edificio_contratacion.py`.
 ## Orden de carpetas
 ```
 src/edificio_tools/
-  __init__.py     # exponte Evidence, Tool, load_catalog, get_tool
+  __init__.py     # exponte Evidence, Tool, load_catalog, get_tool, active_tools,
+                   #          inspect, Decision, assemble, build_evidences,
+                   #          assemble_from_tools
   evidence.py     # (R2) dataclass Evidence: direction/strength/confidence/stage — SIN orden
   registry.py     # (R1) dataclass Tool + loader del catalogo
   catalog.json    # herramientas ya medidas en el laboratorio (legible)
+  inspector.py    # (R5) INSPECTOR: frena si direccion opuesta con confianza alta
+  assembler.py    # (R4) ENSAMBLADOR: unico que produce BUY/SELL/NO_TRADE
+  gate.py         # (R3/R4/R5/R8) punto de integracion con el Edificio en CONTRATADO
   README.md       # este archivo
-  assembler.py    # (R4) ENSAMBLADOR  [Fase B, pendiente]
-  inspector.py    # (R5) INSPECTOR    [Fase B, pendiente]
-  governor.py     # (R6) GOBERNADOR   [Fase C, pendiente]
+  governor.py     # (R6) GOBERNADOR: tamaño Massaniello + veto DD  [Fase C, pendiente]
 ```
 
 ## Principio del contrato (R0-R16)
