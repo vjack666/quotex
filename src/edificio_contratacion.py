@@ -3,8 +3,9 @@
 Cada activo que pasa los filtros básicos entra al edificio y sube piso por piso:
 
   P1 (Recepción)     → paga bien
-  P2 (Cerebro)       → freno OK + extremo OK, espera separación K/D limpia
-  P3 (Sala de Espera) → cruce limpio confirmado + vela 5m válida (body o martillo)
+  P2 (Cerebro)       → freno OK + extremo OK, espera retorno del estocástico a su línea
+  P3 (Cámara presión) → válvula: K sale del extremo en dirección del trade Y la
+                        separación K-D abre (presión acumulada); o cruce limpio (modo viejo)
   CONTRATADO         → entrada al trade
 
 El activo NO puede saltarse pisos. Cada piso emite un POI que certifica
@@ -21,13 +22,29 @@ from typing import Any, Dict, List, Optional
 from config import (
     EDIFICIO_BODY_FILTER_MIN_RATIO,
     EDIFICIO_BRAKE_CONFIRM_RATIO,
-    EDIFICIO_HAMMER_MIN_TAIL_RATIO,
     EDIFICIO_POST_BRAKE_MIN_RATIO,
     EDIFICIO_SEPARATION_WAIT_SEC,
+    EDIFICIO_SMALLBODY_MAX_BODY_RATIO,
+    EDIFICIO_SMALLBODY_WICK_DOMINANCE,
+    EDIFICIO_P3_MODE,
+    EDIFICIO_P2_MAX_HOLD_VELAS,
+    EDIFICIO_DESCARTE_STICKY_THRESHOLD,
+    EDIFICIO_P3_NO_5M_GATE,
+    EDIFICIO_P3_GATE_MODE,
+    EDIFICIO_P3_DESVIO_K,
+    EDIFICIO_P3_EVOLVE_WINDOW,
+    EDIFICIO_P3_PAPER_ENTRY_OFFSET,
+    EDIFICIO_P3_PAPER_EXIT_OFFSET,
 )
 from sequence_engine import SequenceEngine, SequenceCard
 
 log = logging.getLogger("edificio_contratacion")
+
+# Fabrica de herramientas del Edificio (feature 40, SDD fabrica_herramientas_edificio).
+# Capa de decision de ORDEN (ensamblador/inspector/gobernador) que se anade al
+# final del embudo del edificio. La fabrica es parte del repo (src/edificio_tools),
+# por lo que el import es directo: si falta, el error es real y visible.
+import edificio_tools as _fab
 
 # ── Estados del edificio ──────────────────────────────────────────────
 
@@ -84,6 +101,7 @@ class BuildingCard:
     # Stoch M15 snapshot
     stoch_k: Optional[float] = None
     stoch_d: Optional[float] = None
+    stoch_k_prev: Optional[float] = None  # K de la vela anterior (evolución válvula)
     # |K-D| en el momento de la evaluación (para caja negra / auditoría)
     kd_distance: Optional[float] = None
 
@@ -128,6 +146,16 @@ class BuildingCard:
     brake_ratio: Optional[float] = None            # range(nueva cerrada) / range(referencia) al veredicto
     brake_witness_ts: Optional[float] = None       # ts de la vela que cerró y desencadenó el veredicto
     brake_confirmed_at: Optional[float] = None  # cuando pasó la confirmación con vela cerrada
+    # ── Leyes de permanencia/descarte P2 (2026-08-08) ──────────────────
+    # "Historia del estocástico": al entrar a P2 se graba la zona de extremo
+    # (20 CALL / 80 PUT) y la dirección. La promoción a P3 ocurre cuando el
+    # estocástico REGRESA a esa línea habiendo SALIDO antes de la zona.
+    p2_entry_extreme: Optional[float] = None    # 20.0 (CALL) o 80.0 (PUT) al entrar a P2
+    p2_left_zone: bool = False                 # True si el stoch salió de [20,80] estando en P2
+    p2_hold_velas: int = 0                     # velas M15 en P2 sin retorno al extremo
+    p2_descartado: bool = False                # Ley de descarte: candidatura inválida
+    p2_descartado_motivo: Optional[str] = None # razón del descarte (caja negra)
+    p3_kd_history: list = field(default_factory=list)  # últimas |K-D| en P3 (válvula: evolución)
     entry_pending: bool = False                 # P3 marcó entrada, esperando delay
     pending_since: Optional[float] = None       # timestamp del primer CONTRATADO elegible
 
@@ -205,18 +233,20 @@ def _as_dict_candles(candles) -> list[dict]:
     return out
 
 
-def _detect_hammer_pattern(
+def _detect_small_body_rejection(
     candle: Optional[dict],
     direction: str,
-    min_tail_ratio: float,
+    max_body_ratio: float,
+    wick_dominance: float,
 ) -> bool:
-    """True si la vela 5m es un martillo válido en la dirección del trade.
+    """Vela de 'cuerpo pequeño con rechazo direccional' (alternativa al martillo).
 
-    CALL → martillo alcista: mecha inferior larga (rechazo de mínimos).
-    PUT  → martillo invertido: mecha superior larga (rechazo de máximos).
-
-    La mecha principal debe ser >= min_tail_ratio * body y el cuerpo debe
-    quedar anclado al lado opuesto de la mecha. Requiere body > 0.
+    Pasa si el cuerpo es pequeño (body/range <= max_body_ratio) Y la mecha
+    dominante apunta en la dirección del trade:
+      CALL → mecha INFERIOR dominante (rechazo de mínimos).
+      PUT  → mecha SUPERIOR dominante (rechazo de máximos).
+    La mecha dominante debe ser >= wick_dominance × la otra (menos rígido que
+    el viejo martillo: sin exigir cola >= 2× body ni otra < 0.3× rango).
     """
     if not isinstance(candle, dict):
         return False
@@ -228,18 +258,18 @@ def _detect_hammer_pattern(
     except (TypeError, ValueError):
         return False
     body = abs(c - o)
-    if body <= 0:
-        return False
     rng = h - l
     if rng <= 0:
+        return False
+    if (body / rng) > max_body_ratio:
         return False
     upper = h - max(o, c)
     lower = min(o, c) - l
     direction = (direction or "").upper()
     if direction == "CALL":
-        return lower >= min_tail_ratio * body and upper < 0.3 * rng
+        return lower >= wick_dominance * upper
     if direction == "PUT":
-        return upper >= min_tail_ratio * body and lower < 0.3 * rng
+        return upper >= wick_dominance * lower
     return False
 
 
@@ -361,6 +391,7 @@ class EdificioContratacion:
         card.extreme_ok = extreme_ok
         card.cross_ok = cross_ok
         card.cross_sticky = cross_sticky
+        card.stoch_k_prev = card.stoch_k   # K de la vela anterior (para evolución de válvula)
         card.stoch_k = stoch_k
         card.stoch_d = stoch_d
         if stoch_k is not None and stoch_d is not None:
@@ -447,6 +478,21 @@ class EdificioContratacion:
                     card.brake_verdict = "CONFIRMED"
                     card.piso = PISO_2
                     card.p2_at = now
+                    # Ley de permanencia: grabar la zona de extremo del stoch
+                    # al entrar a P2 (la "historia" que debe cerrarse al volver).
+                    # Dirección ya definida por el scanner; extremo según dir.
+                    card.p2_entry_extreme = 20.0 if (direction or "").upper() == "CALL" else 80.0
+                    card.p2_left_zone = False
+                    card.p2_hold_velas = 0
+                    card.p2_descartado = False
+                    card.p2_descartado_motivo = None
+                    # Ley de descarte (anti-falsa entrada): si el cruce fue
+                    # pegajoso al entrar a P2, la candidatura es inválida.
+                    if abs(float(stoch_k or 0) - float(stoch_d or 0)) < EDIFICIO_DESCARTE_STICKY_THRESHOLD:
+                        card.p2_descartado = True
+                        card.p2_descartado_motivo = (
+                            f"cruce pegajoso al entrar a P2 (|K-D|<{EDIFICIO_DESCARTE_STICKY_THRESHOLD})"
+                        )
                     card.reason = f"P2 OK — tarjeta de acceso: freno CONFIRMED con vela M15 cerrada ({payout}%)"
                     log.info(
                         "[EDIFICIO] %s → P2 (tarjeta de acceso: freno CONFIRMED ratio=%.2f, payout=%d%%)",
@@ -479,6 +525,26 @@ class EdificioContratacion:
         if card.piso == PISO_2:
             if not payout_ok:
                 return self._expulsar(asset)
+            # ── Ley de descarte (anti-falsa entrada) ──────────────────────
+            if card.p2_descartado:
+                card.reason = f"P2 descartado — {card.p2_descartado_motivo or 'inválido'} ({payout}%)"
+                log.info("[EDIFICIO] %s: P2 descartado (%s), baja a P1", asset, card.p2_descartado_motivo)
+                card.piso = PISO_1
+                card.cross_separation_since = None
+                card.entry_pending = False
+                card.pending_since = None
+                card.brake_at = None
+                card.brake_confirmed_at = None
+                card.brake_verdict = None
+                card.brake_ratio = None
+                card.brake_witness_ts = None
+                card.p2_at = None
+                return "bajo"
+            # Modo de puerta P2→P3
+            if EDIFICIO_P3_MODE == "return_to_extreme":
+                return self._p2_return_to_extreme(asset, direction, payout, brake_ok,
+                                                  extreme_ok, cross_ok, cross_sticky, now, card)
+            # Modo original: cruce limpio + separación 60s
             if cross_ok and not cross_sticky:
                 # Cruce limpio: el separación K/D debe MANTENERSE una vela M15
                 # antes de promover a P3 (evita subir con un tick aislado).
@@ -546,20 +612,25 @@ class EdificioContratacion:
                 card.entry_pending = False
                 card.pending_since = None
                 return "bajo"
-            if not cross_ok or cross_sticky:
-                card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
-                return "stay"
-            # Gate vela 5m: body fuerte O martillo M5 en dirección del trade.
-            # El filtro se aplica al MOMENTO de marcar la entrada; si la vela
-            # no confirma, no se marca entrada y se espera la próxima vela.
-            _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else getattr(card, "candle_5m_prev", None)
-            if not self._5m_gate_pass(_c5, direction):
-                card.reason = (
-                    f"P3 OK — vela 5m sin confirmar "
-                    f"(body<{EDIFICIO_BODY_FILTER_MIN_RATIO} y no martillo) ({payout}%)"
-                )
-                log.info("[EDIFICIO] %s: vela 5m rechazada en P3 (patrón=%s)", asset, card.pattern_5m)
-                return "stay"
+            # ── Disparador de entrada (rama por modo de puerta P3) ──
+            if EDIFICIO_P3_GATE_MODE == "cruce_limpio":
+                if not cross_ok or cross_sticky:
+                    card.reason = f"P3 OK — esperando cruce limpio ({payout}%)"
+                    return "stay"
+            else:  # "valvula" (2026-08-08): P3 = cámara de presión
+                if not self._p3_valve_open(card, k=float(stoch_k or 0), d=float(stoch_d or 0), direction=direction):
+                    card.reason = f"P3 OK — válvula cerrada (esperando salida+separación K/D) ({payout}%)"
+                    return "stay"
+            # Gate vela 5m: solo para modo cruce_limpio (la válvula ya filtra).
+            if EDIFICIO_P3_GATE_MODE == "cruce_limpio" and not EDIFICIO_P3_NO_5M_GATE:
+                _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else getattr(card, "candle_5m_prev", None)
+                if not self._5m_gate_pass(_c5, direction):
+                    card.reason = (
+                        f"P3 OK — vela 5m sin confirmar "
+                        f"(body<{EDIFICIO_BODY_FILTER_MIN_RATIO} y no martillo) ({payout}%)"
+                    )
+                    log.info("[EDIFICIO] %s: vela 5m rechazada en P3 (patrón=%s)", asset, card.pattern_5m)
+                    return "stay"
             if card.entry_pending:
                 if card.pending_since is None:
                     card.pending_since = now
@@ -598,6 +669,55 @@ class EdificioContratacion:
                     card.contratado_at = now
                     card.order_status = "pending"
                     card.reason = f"CONTRATADO — delay ejecución cumplido ({payout}%)"
+
+                    # ── CAPA FABRICA DE HERRAMIENTAS (feature 40, R3/R4/R5/R6/R8) ──
+                    # Fail-safe: si la fabrica no esta disponible o falla, el edificio
+                    # conserva su comportamiento original (el CONTRATADO ya ocurrió).
+                    if card.direction:
+                        try:
+                            decision = _fab.assemble_from_tools(card.direction)
+                            if decision.action == "NO_TRADE":
+                                card.piso = PISO_3
+                                card.contratado_at = None
+                                card.order_status = ""
+                                card.reason = (
+                                    f"CONTRATADO bloqueado por FABRICA: "
+                                    f"{decision.reason} ({payout}%)"
+                                )
+                                log.info(
+                                    "[EDIFICIO] %s: CONTRATADO bloqueado por fabrica (%s)",
+                                    asset, decision.reason,
+                                )
+                                return "stay"
+                            # Gobernador: veto por drawdown proyectado (R6)
+                            tools = _fab.active_tools()
+                            wr_comb = sum(t.wr_pooled for t in tools) / max(1, len(tools))
+                            gov = _fab.Governor(bankroll=1000.0, dd_limit=0.20, payout=payout / 100.0)
+                            sizing = gov.size(wr=wr_comb / 100.0, n=200)
+                            if not sizing.allowed:
+                                card.piso = PISO_3
+                                card.contratado_at = None
+                                card.order_status = ""
+                                card.reason = (
+                                    f"CONTRATADO bloqueado por GOBERNADOR: {sizing.reason}"
+                                )
+                                log.info(
+                                    "[EDIFICIO] %s: bloqueado por Gobernador (%s)",
+                                    asset, sizing.reason,
+                                )
+                                return "stay"
+                            # Auditoria inmutable (R8) — registra la traza del BUY/SELL
+                            rec = _fab.audit_decision(decision, tools)
+                            card.reason = (
+                                f"CONTRATADO — fabrica OK ({decision.action}, "
+                                f"WRcomb={rec.wr_combined}, ncomb={rec.n_combined}) ({payout}%)"
+                            )
+                        except Exception as _fab_err:  # pragma: no cover - fail-safe
+                            log.warning(
+                                "[EDIFICIO] fabrica fallo en CONTRATADO (%s) — se conserva original",
+                                _fab_err,
+                            )
+
                     log.info("[EDIFICIO] %s → CONTRATADO (delay ejecución OK, payout=%d%%)", asset, payout)
                     ev = ContratadoEvent(
                         asset=asset,
@@ -840,12 +960,109 @@ class EdificioContratacion:
         except Exception as exc:
             log.debug("[EDIFICIO][EXPERIMENTO] %s medicion post-freno fallo: %s", getattr(card, "asset", "?"), exc)
 
+    def _p2_return_tracking(self, card: BuildingCard, k: Optional[float], extreme: Optional[float]) -> tuple:
+        """Sigue la 'historia del estocástico' en P2 (medido en velas, no tiempo).
+
+        Devuelve (retorno, expirado):
+          - retorno=True  si el stoch volvió a la zona de extremo habiendo
+            salido antes (la historia se cerró → promover a P3).
+          - expirado=True si lleva EDIFICIO_P2_MAX_HOLD_VELAS velas en P2 sin
+            retorno (ley de permanencia → descarte).
+        """
+        # Detectar salida de la zona de EXTREMO (no del rango medio).
+        # Zona de extremo = k<=20 (CALL) o k>=80 (PUT). "Salir" = k sube de 20
+        # (CALL) o baja de 80 (PUT). El retorno = volver a tocar la línea.
+        in_zone = (k is not None) and (float(k) <= 20.0 or float(k) >= 80.0)
+        # El estocástico "salió" si estuvo fuera de [20,80] después de entrar a P2.
+        if not in_zone:
+            card.p2_left_zone = True
+        # Retorno a la línea de extremo de entrada
+        if extreme is not None and k is not None:
+            if extreme == 20.0 and float(k) <= 20.0 and card.p2_left_zone:
+                return True, False
+            if extreme == 80.0 and float(k) >= 80.0 and card.p2_left_zone:
+                return True, False
+        return False, False
+    def _p2_return_to_extreme(self, asset, direction, payout, brake_ok,
+                              extreme_ok, cross_ok, cross_sticky, now, card) -> str:
+        """Puerta P2→P3 modo 'return_to_extreme' (2026-08-08).
+
+        El estocástico que entró en extremo al P2 debe REGRESAR a esa línea
+        (habiendo salido antes). Sin cronómetro: se cuenta en velas M15. Si no
+        regresa en EDIFICIO_P2_MAX_HOLD_VELAS velas → ley de permanencia:
+        descarte (baja a P1).
+        """
+        k = card.stoch_k
+        extreme = card.p2_entry_extreme
+        # Incrementar el contador de permanencia por ciclo (1 ciclo = 1 vela M15)
+        card.p2_hold_velas += 1
+        retorno, _ = self._p2_return_tracking(card, k, extreme)
+        if retorno:
+            card.piso = PISO_3
+            card.p3_at = now
+            card.reason = f"P3 OK — estocástico regresó a extremo {extreme:.0f} ({payout}%)"
+            log.info("[EDIFICIO] %s → P3 (retorno a extremo %.0f, payout=%d%%)", asset, extreme, payout)
+            return "subio"
+        # Ley de permanencia: plazo agotado sin retorno → descarte
+        if card.p2_hold_velas >= EDIFICIO_P2_MAX_HOLD_VELAS:
+            card.p2_descartado = True
+            card.p2_descartado_motivo = (
+                f"sin retorno a extremo en {EDIFICIO_P2_MAX_HOLD_VELAS} velas M15"
+            )
+            card.reason = f"P2 descartado — {card.p2_descartado_motivo} ({payout}%)"
+            log.info("[EDIFICIO] %s: P2 descartado (permanencia agotada), baja a P1", asset)
+            card.piso = PISO_1
+            card.p2_at = None
+            return "bajo"
+        card.reason = f"P2 OK — esperando retorno a extremo {extreme:.0f} ({payout}%)"
+        return "stay"
+
+    def _p3_valve_open(self, card: BuildingCard, k: float, d: float, direction: str) -> bool:
+        """Válvula P3→CONTRATADO (modo 'valvula', 2026-08-08).
+
+        P3 es cámara de presión: el stoch ya regresó a su línea (puerta P2→P3).
+        La válvula se ABRE cuando AMBAS condiciones se dan en la vela actual:
+          (a) SALIDA DEL EXTREMO en dirección del trade:
+              CALL → K > 20 y K >= K_prev (sale y sigue subiendo)
+              PUT  → K < 80 y K <= K_prev (sale y sigue bajando)
+          (b) SEPARACIÓN K-D abre con presión acumulada:
+              |K-D| >= EDIFICIO_P3_DESVIO_K  Y  la separación viene subiendo
+              en las últimas EDIFICIO_P3_EVOLVE_WINDOW velas (no un salto aislado).
+        Si vuelve a pegarse o al extremo → la válvula se cierra (sigue en P3,
+        no descarta: es permanencia, no descarte).
+        """
+        extreme = card.p2_entry_extreme
+        # (a) salida del extremo en dirección del trade
+        if extreme == 20.0:  # CALL
+            if not (k > 20.0 and k >= float(getattr(card, "stoch_k_prev", k))):
+                return False
+        elif extreme == 80.0:  # PUT
+            if not (k < 80.0 and k <= float(getattr(card, "stoch_k_prev", k))):
+                return False
+        else:
+            return False
+        # (b) separación K-D con evolución (presión acumulada)
+        sep = abs(k - d)
+        card.p3_kd_history.append(sep)
+        if len(card.p3_kd_history) > EDIFICIO_P3_EVOLVE_WINDOW + 1:
+            card.p3_kd_history.pop(0)
+        if sep < EDIFICIO_P3_DESVIO_K:
+            return False
+        # evolución: las últimas ventanas deben venir subiendo (no ruido)
+        if len(card.p3_kd_history) >= 2:
+            recent = card.p3_kd_history[-EDIFICIO_P3_EVOLVE_WINDOW:]
+            growing = all(recent[i] <= recent[i + 1] for i in range(len(recent) - 1))
+            if not growing:
+                return False
+        return True
+
     def _5m_gate_pass(self, candle: Optional[dict], direction: str) -> bool:
         """Vela 5m válida para contratar en P3.
 
         Pasa si el body es fuerte (body_pct >= EDIFICIO_BODY_FILTER_MIN_RATIO)
-        o si es un martillo M5 en la dirección del trade. Sin contexto 5m
-        (None) no bloquea: mantiene el comportamiento anterior.
+        o si es una vela de cuerpo pequeño respecto a la mecha (doji/spinning
+        top: body/range <= EDIFICIO_SMALLBODY_MAX_BODY_RATIO). Dirección-agnóstico:
+        reemplaza al martillo direccional. Sin contexto 5m (None) no bloquea.
         """
         if not isinstance(candle, dict):
             return True
@@ -863,7 +1080,10 @@ class EdificioContratacion:
                 body_pct = 0.0
         if body_pct >= EDIFICIO_BODY_FILTER_MIN_RATIO:
             return True
-        return _detect_hammer_pattern(candle, direction, EDIFICIO_HAMMER_MIN_TAIL_RATIO)
+        return _detect_small_body_rejection(
+            candle, direction,
+            EDIFICIO_SMALLBODY_MAX_BODY_RATIO, EDIFICIO_SMALLBODY_WICK_DOMINANCE,
+        )
 
     def reset(self) -> None:
         """Resetea el edificio completo."""
