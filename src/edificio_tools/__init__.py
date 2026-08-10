@@ -12,6 +12,9 @@ Estructura (orden para administracion y venta del producto):
   inspector.py   -> INSPECTOR (R5): frena si direccion opuesta con confianza alta
   assembler.py   -> ENSAMBLADOR (R4): unico que produce BUY/SELL/NO_TRADE
   gate.py        -> punto de integracion con el Edificio en CONTRATADO (R3/R4/R5/R8)
+  governor.py    -> GOBERNADOR (R6): tamaño Massaniello + veto DD
+  audit.py       -> trazabilidad a experimento (R8)
+  promotion.py   -> candados de dominio/robustez (R9/R10)
   README.md      -> mapa de la carpeta para el nuevo dueno
 
 Ver specs/fabrica_herramientas_edificio/ para el contrato completo (R0-R16).
@@ -24,9 +27,12 @@ from .inspector import inspect
 from .assembler import Decision, assemble
 from .gate import build_evidences, assemble_from_tools
 from .governor import Governor, Sizing, massaniello_fraction, expected_max_streak
+from .audit import AuditRecord, audit_decision
+from .promotion import PromotionVerdict, check_promotion
 
 __all__ = [
     "Evidence", "Tool", "load_catalog", "get_tool", "active_tools",
     "inspect", "Decision", "assemble", "build_evidences", "assemble_from_tools",
     "Governor", "Sizing", "massaniello_fraction", "expected_max_streak",
+    "AuditRecord", "audit_decision", "PromotionVerdict", "check_promotion",
 ]

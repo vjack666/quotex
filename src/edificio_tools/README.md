@@ -14,8 +14,10 @@ src/edificio_tools/
   inspector.py    # (R5) INSPECTOR: frena si direccion opuesta con confianza alta
   assembler.py    # (R4) ENSAMBLADOR: unico que produce BUY/SELL/NO_TRADE
   gate.py         # (R3/R4/R5/R8) punto de integracion con el Edificio en CONTRATADO
-  governor.py     # (R6) GOBERNADOR: tamaño Massaniello + veto DD
-  README.md       # este archivo
+  governor.py    # (R6) GOBERNADOR: tamaño Massaniello + veto DD
+  audit.py       # (R8) trazabilidad a experimento (BUY/SELL/NO_TRADE -> EXP-XXX)
+  promotion.py   # (R9/R10) candados de dominio (REAL!=OTC) y n/holdout/n combinado
+  README.md      # este archivo
 ```
 
 ## Principio del contrato (R0-R16)
