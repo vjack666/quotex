@@ -238,7 +238,22 @@ async def _send_one(
             "[EDIFICIO] %s: ORDEN ENVIADA %s $%.2f %ds → id=%s (ticket=%s)",
             ev.asset, direction, amount, duration, order_id, order_ref,
         )
-        _record_sent_to_black_box(edificio, ev, card, direction, amount, duration)
+        _size_candle = None
+        for _snap in (getattr(card, "candles_15m_snap", None), getattr(card, "candles_5m_snap", None)):
+            if _snap:
+                try:
+                    _size_candle = _snap[-1]
+                except Exception:
+                    _size_candle = None
+                if _size_candle:
+                    break
+        _cst = getattr(_size_candle, "ticks", None) if _size_candle is not None else None
+        _cvol = getattr(_size_candle, "volume", None) if _size_candle is not None else None
+        _record_sent_to_black_box(
+            edificio, ev, card, direction, amount, duration,
+            account_type=account_type,
+            candle_size_ticks=_cst, candle_volume=_cvol,
+        )
         edificio.register_sent(order_id, {
             "asset": ev.asset,
             "direction": direction,
@@ -320,6 +335,10 @@ def _record_sent_to_black_box(
     direction: str,
     amount: float,
     duration: int,
+    *,
+    account_type: str = "PRACTICE",
+    candle_size_ticks: Optional[float] = None,
+    candle_volume: Optional[float] = None,
 ) -> None:
     """Registra el envío confirmado en la caja negra (strategy="EDIFICIO")."""
     global _EDIFICIO_SCAN_SEQ
@@ -374,6 +393,11 @@ def _record_sent_to_black_box(
             "direction_source": getattr(card, "direction_source", None),
             "candles_15m": _candles_15m,
             "candles_5m": _candles_5m,
+            # Feature 41 (mix completo + medible):
+            "account_type": account_type,
+            "stake_amount": float(amount),
+            "candle_size_ticks": candle_size_ticks,
+            "candle_volume": candle_volume,
             "strategy_details": {
                 "amount": float(amount),
                 "order_ref": ev.order_ref,
@@ -402,6 +426,29 @@ def _record_sent_to_black_box(
                 "post_brake_measured_at": float(getattr(card, "post_brake_measured_at", 0) or 0) if getattr(card, "post_brake_measured_at", None) is not None else None,
             },
         })
+        # Feature 41: también volcar el vector plano a feature_stream (neuronas).
+        try:
+            bb.record_feature_vector({
+                "asset": ev.asset,
+                "direction": direction,
+                "stoch_k": _stoch_full.get("k") if isinstance(_stoch_full, dict) else None,
+                "stoch_d": _stoch_full.get("d") if isinstance(_stoch_full, dict) else None,
+                "kd_distance": _kd_distance,
+                "has_poi_p1": getattr(card, "has_poi_p1", False),
+                "has_poi_p2": getattr(card, "has_poi_p2", False),
+                "has_poi_p3": getattr(card, "has_poi_p3", False),
+                "brake_verdict": getattr(card, "brake_verdict", None),
+                "extreme_read": int(getattr(card, "extreme_read", 0) or 0),
+                "payout": int(card.payout or 0),
+                "account_type": account_type,
+                "candle_size_ticks": candle_size_ticks,
+                "candle_volume": candle_volume,
+                "stake_amount": float(amount),
+                "order_result": "SENT",
+                "source": "EDIFICIO",
+            })
+        except Exception as _fv_exc:
+            log.warning("[EDIFICIO] %s: feature_stream falló (no bloquea): %s", ev.asset, _fv_exc)
         log.info("[EDIFICIO] %s: registrado en caja negra (scan=%d)", ev.asset, scan_id)
     except Exception as exc:
         log.warning("[EDIFICIO] %s: no se pudo registrar en caja negra (no bloquea): %s", ev.asset, exc)

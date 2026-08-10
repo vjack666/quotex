@@ -116,11 +116,45 @@ CREATE TABLE IF NOT EXISTS scan_candidates (
 
     -- Order expiry used for multi-duration A/B data collection
     duration_sec    INTEGER,
-    
+
+    -- Feature 41 (mix completo + medible, Ruben 2026-08-10):
+    -- TAMAÑO medible de la vela (NO nº de velas): ticks y volumen de la vela
+    -- testigo, para que auditorías y neuronas usen magnitud real.
+    candle_size_ticks REAL,
+    candle_volume     REAL,
+    -- Cuenta y monto reales enviados (demó/real + Masaniello).
+    account_type     TEXT,
+    stake_amount     REAL,
+
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY(scan_id) REFERENCES scans(id)
+);
+
+CREATE TABLE IF NOT EXISTS feature_stream (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              REAL NOT NULL,
+    ts_iso          TEXT NOT NULL,
+    asset           TEXT NOT NULL,
+    direction       TEXT,
+    -- Vector plano de features por vela/decisión (listo para entrenar RNA).
+    stoch_k         REAL,
+    stoch_d         REAL,
+    kd_distance     REAL,
+    has_poi_p1      INTEGER DEFAULT 0,
+    has_poi_p2      INTEGER DEFAULT 0,
+    has_poi_p3      INTEGER DEFAULT 0,
+    brake_verdict   TEXT,
+    extreme_read    INTEGER DEFAULT 0,
+    payout          INTEGER,
+    account_type    TEXT,
+    candle_size_ticks REAL,
+    candle_volume   REAL,
+    stake_amount    REAL,
+    order_result    TEXT,
+    source          TEXT,          -- EDIFICIO | STRAT-F | WATCHDOG | HUMAN
+    created_at      TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS strategy_metrics (
@@ -216,6 +250,9 @@ class BlackBoxRecorder:
                 "brake_ratio", "brake_ref_range", "brake_witness_ts",
                 "brake_rule_version", "reject_reason", "strategy_details",
                 "order_id",
+                # Feature 41 (mix completo + medible, Ruben 2026-08-10):
+                # tamaño medible de vela + cuenta/monto enviados.
+                "candle_size_ticks", "candle_volume", "account_type", "stake_amount",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
@@ -467,22 +504,58 @@ class BlackBoxRecorder:
         brake_rule_version = data.get("brake_rule_version", None)
         direction_source = data.get("direction_source", None)
 
-        cur.execute('''
-            INSERT INTO scan_candidates 
-            (scan_id, ts, strategy, asset, direction, score, confidence, payout,
-             decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-             candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-             extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
-             brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version, direction_source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?)
-        ''', (
-            scan_id, ts, strategy, asset, direction, score, confidence, payout,
-            decision, decision_reason, reject_reason, strategy_details, candles_1m, candles_5m,
-            candles_15m, session_id, stoch_m15, stoch_m5, stoch_m1, filter_funnel, order_id, duration_sec,
-            extreme_read, agent_tag, band, kd_distance, cross_limpieza_ok, pattern_5m,
-            brake_verdict, brake_ratio, brake_ref_range, brake_witness_ts, brake_rule_version, direction_source
-        ))
+        # Feature 41: tamaño medible + cuenta/monto enviados.
+        candle_size_ticks = data.get("candle_size_ticks", None)
+        if candle_size_ticks is not None:
+            try:
+                candle_size_ticks = float(candle_size_ticks)
+            except (TypeError, ValueError):
+                candle_size_ticks = None
+        candle_volume = data.get("candle_volume", None)
+        if candle_volume is not None:
+            try:
+                candle_volume = float(candle_volume)
+            except (TypeError, ValueError):
+                candle_volume = None
+        account_type = data.get("account_type", None)
+        stake_amount = data.get("stake_amount", None)
+        if stake_amount is not None:
+            try:
+                stake_amount = float(stake_amount)
+            except (TypeError, ValueError):
+                stake_amount = None
+
+        # INSERT tolerante al schema: solo columnas que EXISTEN en la tabla.
+        # Evita el desfase "N values for M columns" si la DB tiene un schema
+        # parcial (p.ej. creada antes de añadir columnas Feature 41).
+        _values = {
+            "scan_id": scan_id, "ts": ts, "strategy": strategy, "asset": asset,
+            "direction": direction, "score": score, "confidence": confidence,
+            "payout": payout, "decision": decision, "decision_reason": decision_reason,
+            "reject_reason": reject_reason, "strategy_details": strategy_details,
+            "candles_1m": candles_1m, "candles_5m": candles_5m, "candles_15m": candles_15m,
+            "session_id": session_id, "stoch_m15": stoch_m15, "stoch_m5": stoch_m5,
+            "stoch_m1": stoch_m1, "filter_funnel": filter_funnel, "order_id": order_id,
+            "duration_sec": duration_sec, "extreme_read": extreme_read, "agent_tag": agent_tag,
+            "band": band, "kd_distance": kd_distance, "cross_limpieza_ok": cross_limpieza_ok,
+            "pattern_5m": pattern_5m, "brake_verdict": brake_verdict, "brake_ratio": brake_ratio,
+            "brake_ref_range": brake_ref_range, "brake_witness_ts": brake_witness_ts,
+            "brake_rule_version": brake_rule_version, "direction_source": direction_source,
+            "candle_size_ticks": candle_size_ticks, "candle_volume": candle_volume,
+            "account_type": account_type, "stake_amount": stake_amount,
+        }
+        try:
+            _existing = {r[1] for r in cur.execute(
+                "SELECT name FROM pragma_table_info('scan_candidates')").fetchall()}
+        except Exception:
+            _existing = set(_values.keys())
+        _cols = [c for c in _values if c in _existing]
+        _vals = [_values[c] for c in _cols]
+        _ph = ", ".join(["?"] * len(_cols))
+        _col_sql = ", ".join(_cols)
+        cur.execute(
+            f"INSERT INTO scan_candidates ({_col_sql}) VALUES ({_ph})", tuple(_vals)
+        )
         candidate_id = int(cur.lastrowid or 0)
         con.commit()
         con.close()
@@ -499,6 +572,51 @@ class BlackBoxRecorder:
             "decision": decision,
         })
         return candidate_id
+
+    def record_feature_vector(self, fv: Dict[str, Any]) -> int:
+        """Feature 41: registra un vector plano de features por vela/decisión
+        en `feature_stream`, listo para entrenar RNA (estilo EXP-084) y para
+        auditorías completas. Cero NULL forzado: campos faltantes = NULL."""
+        try:
+            ts = datetime.now(timezone.utc).timestamp()
+            ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            asset = fv.get("asset", "")
+            direction = fv.get("direction")
+            stoch_k = fv.get("stoch_k")
+            stoch_d = fv.get("stoch_d")
+            kd_distance = fv.get("kd_distance")
+            has_poi_p1 = int(bool(fv.get("has_poi_p1")))
+            has_poi_p2 = int(bool(fv.get("has_poi_p2")))
+            has_poi_p3 = int(bool(fv.get("has_poi_p3")))
+            brake_verdict = fv.get("brake_verdict")
+            extreme_read = int(fv.get("extreme_read") or 0)
+            payout = fv.get("payout")
+            account_type = fv.get("account_type")
+            candle_size_ticks = fv.get("candle_size_ticks")
+            candle_volume = fv.get("candle_volume")
+            stake_amount = fv.get("stake_amount")
+            order_result = fv.get("order_result")
+            source = fv.get("source", "BOT")
+            con = sqlite3.connect(self.db_path)
+            cur = con.cursor()
+            cur.execute('''
+                INSERT INTO feature_stream
+                (ts, ts_iso, asset, direction, stoch_k, stoch_d, kd_distance,
+                 has_poi_p1, has_poi_p2, has_poi_p3, brake_verdict, extreme_read,
+                 payout, account_type, candle_size_ticks, candle_volume,
+                 stake_amount, order_result, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (ts, ts_iso, asset, direction, stoch_k, stoch_d, kd_distance,
+                  has_poi_p1, has_poi_p2, has_poi_p3, brake_verdict, extreme_read,
+                  payout, account_type, candle_size_ticks, candle_volume,
+                  stake_amount, order_result, source))
+            fid = int(cur.lastrowid or 0)
+            con.commit()
+            con.close()
+            return fid
+        except Exception as e:
+            log.warning("⚠️ feature_stream insert falló (no bloquea): %s", e)
+            return -1
 
     def record_piso1_snapshot(
         self,
