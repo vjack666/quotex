@@ -163,6 +163,15 @@ def _build_snapshot() -> dict:
     if edificio_state:
         base["edificio"] = edificio_state
 
+    # Feature 41 (R2/R3): exponer la barrera de cuenta REAL al hub para que el
+    # humano vea en qué modo opera el bot (DEMO seguro por defecto).
+    try:
+        import config as _hub_cfg
+        base["account_mode"] = getattr(bot, "account_type", _hub_cfg.EDIFICIO_ACCOUNT_TYPE)
+        base["allow_real"] = bool(getattr(_hub_cfg, "EDIFICIO_ALLOW_REAL", False))
+    except Exception:
+        pass
+
     return base
 
 

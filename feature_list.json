@@ -233,6 +233,28 @@
       "note": "R0-R3 DONE. R4 DONE (d=0.27-0.37). R5 DONE (persistente ac1=0.505, sin edge dir propio). R6 DONE: contexto x Edificio filtra TRAIN (27/34/48%, p~0) pero degrada TEST/OOS (32/43/43%, p~0.54 no sig) -> filtro MARGINAL y no robusto. R7 DONE: Edificio como binaria EURUSD offline, win 44-49% train/26-30% test, EV<0 siempre -> NO rentable, R10 descartado. Ambas lineas agotadas con evidencia. Decision TH: archivar rama o reenfocar (pendiente OK)."
     },
     {
+      "id": 41,
+      "name": "hub_operacional_edificio",
+      "title": "Hub Operacional del Edificio: herramientas->cuenta, Massaniello desde el inicio, caja negra 1m agresiva, verificacion UI fisica",
+      "phase": "edificio_operacion",
+      "priority": 41,
+      "description": "Cerrar el ciclo operativo del Edificio: (1) acceso directo QUOTEX Web App.lnk; (2) relocalizar las herramientas de la fabrica (feature 40 ya enchufada) para que el Edificio envie senales a la cuenta (PRACTICE por defecto, REAL solo con credenciales+OK humano); (3) Massaniello activo DESDE EL COMIENZO (no tras 1ra operacion); (4) caja negra recolecta velas 1m de forma agresiva y SIN borrado (retencion infinita, solo export); (5) mejorar el hub + caja negra un 110%; (6) ELIMINAR modulos/UI redundantes; (7) verificar FISICAMENTE cada boton/menu del hub (browser-driven). Subordinado a docs/LAB_CHARTER.md y AGENTS.md (una feature a la vez, tests verdes).",
+      "acceptance": [
+        "QUOTEX Web App.lnk apunta al launcher (python app.py) y abre el hub",
+        "El Edificio envia senales a la cuenta via edificio_executor (PRACTICE por defecto; REAL requiere credenciales + flag humano)",
+        "Massaniello se inicializa al arranque del bot (no tras 1ra operacion) y gobierna el monto del Edificio",
+        "Caja negra guarda velas 1m en cada operacion y al llegar a piso 1; sin borrado de velas (retencion infinita en raw, export periodicos)",
+        "Hub mejorado (+110%): tabs, ctrl-bar, config, caja negra verificados fisicamente",
+        "Modulos/UI redundantes eliminados (no orphan code)",
+        "tests cubren: enchufe cuenta, init Massaniello temprano, grabacion 1m sin borrado, wiring de cada boton",
+        "pytest tests/ en verde para cualquier codigo nuevo"
+      ],
+      "status": "spec_ready",
+      "sdd": true,
+      "spec_path": "specs/hub_operacional_edificio/",
+      "note": "Spec preparado por CEO (Hermes). Requiere aprobacion humana + decision explicita sobre cuenta REAL (credenciales)."
+    },
+    {
       "id": 40,
       "name": "fabrica_herramientas_edificio",
       "title": "Fabrica de Herramientas del Edificio (EXPERIMENTO -> HERRAMIENTA -> ENSAMBLADOR -> CONTRATADO)",

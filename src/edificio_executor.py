@@ -24,6 +24,7 @@ from typing import Any, List, Optional
 
 from config import (
     EDIFICIO_ACCOUNT_TYPE,
+    EDIFICIO_ALLOW_REAL,
     EDIFICIO_MAX_EVENT_AGE_SEC,
     EDIFICIO_MAX_ORDER_TRIES,
     EDIFICIO_ORDER_AMOUNT,
@@ -33,6 +34,7 @@ from config import (
     MARTIN_RESOLVE_MAX_ATTEMPTS,
     MARTIN_RESOLVE_RETRY_SEC,
     MARTIN_RESOLVE_TIMEOUT_SEC,
+    STAKE_MODE,
 )
 from connection import interpret_broker_result, place_order
 from edificio_contratacion import CONTRATADO, PISO_3, ContratadoEvent
@@ -85,6 +87,14 @@ async def execute_contratados(
         return 0
 
     account_type = account_type or EDIFICIO_ACCOUNT_TYPE
+    # Barrera de seguridad (Feature 41, R2/R3): el agente NUNCA envía a REAL
+    # salvo que el humano active EDIFICIO_ALLOW_REAL explícitamente.
+    if str(account_type).upper() == "REAL" and not EDIFICIO_ALLOW_REAL:
+        log.error(
+            "[EDIFICIO] Bloqueado envío a cuenta REAL: EDIFICIO_ALLOW_REAL=False. "
+            "Use PRACTICE o active el flag explícitamente (acción humana)."
+        )
+        return 0
     amount = max(float(amount or EDIFICIO_ORDER_AMOUNT), 0.01)
     duration = max(int(duration or EDIFICIO_ORDER_DURATION_SEC), 60)
     max_tries = int(max_tries if max_tries is not None else EDIFICIO_MAX_ORDER_TRIES)
@@ -183,6 +193,20 @@ async def _send_one(
         card.reason = f"CONTRATADO descartado: direction inválida ({ev.direction})"
         card.order_status = "failed"
         return False, {"reason": "bad_direction"}
+
+    # Massaniello desde el inicio (Feature 41, R5): el monto lo gobierna el
+    # gestor si STAKE_MODE=massaniello y el manager existe; si no, se usa el
+    # monto fijo resuelto en execute_contratados.
+    payout = int(card.payout or 0)
+    if str(STAKE_MODE).lower() == "massaniello":
+        mgr = getattr(bot, "massaniello", None)
+        if mgr is not None and hasattr(mgr, "next_stake"):
+            try:
+                _stake, _ = mgr.next_stake(payout)
+                if _stake:
+                    amount = max(float(_stake), 0.01)
+            except Exception as _ms_exc:
+                log.warning("[EDIFICIO] %s: next_stake falló (%s) — monto fijo", ev.asset, _ms_exc)
 
     try:
         order_result = await place_order(

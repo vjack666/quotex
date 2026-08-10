@@ -1156,6 +1156,12 @@ function renderEdificio(ed){
         if(c.has_poi_p1) html += `<span style="font-size:9px;color:var(--emerald);">✓P1</span>`;
         if(c.has_poi_p2) html += `<span style="font-size:9px;color:var(--emerald);">✓P2</span>`;
         if(c.has_poi_p3) html += `<span style="font-size:9px;color:var(--emerald);">✓P3</span>`;
+        // Línea de extremo donde se certifica el POI (Feature 41: "ver el mismo POI")
+        if(c.p2_entry_extreme != null){
+          const ext = c.p2_entry_extreme;
+          const extLabel = ext <= 20 ? "extremo CALL 20" : ext >= 80 ? "extremo PUT 80" : "extremo " + ext;
+          html += `<span style="font-size:9px;color:var(--accent-2);background:rgba(56,189,248,.12);border-radius:999px;padding:1px 6px;font-weight:510;" title="POI certificado en línea de extremo estocástico">${extLabel}</span>`;
+        }
         // Tarjeta de acceso a P2: freno CONFIRMED (subió a P2 porque frenó)
         if(c.brake_verdict === "CONFIRMED"){
           const r = (c.brake_ratio != null) ? ` · ratio ${c.brake_ratio.toFixed(2)}` : '';
@@ -1471,6 +1477,7 @@ function botToggle(){
     fetch("/api/bot/stop",{method:"POST"}).then(r=>r.json()).then(d=>{
       updateRunnerUI(d);
       pollRunnerStatus();
+      loadConfig();  // Feature 41: refrescar lock de campos tras detener
     }).catch(()=>{ btn.disabled = false; btn.textContent = "Detener"; });
   } else {
     btn.disabled = true;
@@ -1482,10 +1489,12 @@ function botToggle(){
         btn.textContent = "Iniciar";
         updateRunnerUI(d);
         pollRunnerStatus();
+        loadConfig();
         return;
       }
       updateRunnerUI(d);
       pollRunnerStatus();
+      loadConfig();  // Feature 41: refrescar lock de campos tras iniciar
     }).catch(()=>{ btn.disabled = false; btn.textContent = "Iniciar"; });
   }
 }

@@ -45,6 +45,7 @@ log = logging.getLogger("edificio_contratacion")
 # final del embudo del edificio. La fabrica es parte del repo (src/edificio_tools),
 # por lo que el import es directo: si falta, el error es real y visible.
 import edificio_tools as _fab
+from black_box_recorder import get_black_box
 
 # ── Estados del edificio ──────────────────────────────────────────────
 
@@ -117,6 +118,7 @@ class BuildingCard:
     candle_5m_prev: Optional[dict] = None      # forma de la última vela 5m cerrada
     candles_15m_snap: list = field(default_factory=list)  # velas 15m crudas (últimas N)
     candles_5m_snap: list = field(default_factory=list)   # velas 5m crudas (últimas N)
+    candles_1m_snap: list = field(default_factory=list)   # velas 1m crudas (últimas N) — Feature 41 R7
 
     # Telemetría Fase A: origen de la dirección del trade en el scanner.
     direction_source: Optional[str] = None     # "M1" | "M15" | ""
@@ -364,6 +366,7 @@ class EdificioContratacion:
         candles_15m: Optional[list] = None,
         candles_5m: Optional[list] = None,
         close_candle_5m: Optional[dict] = None,
+        candles_1m: Optional[list] = None,
     ) -> str:
         """Evalúa un activo en el edificio.
 
@@ -414,6 +417,9 @@ class EdificioContratacion:
             card.candles_15m_snap = _as_dict_candles(candles_15m)[-24:]
         if candles_5m:
             card.candles_5m_snap = _as_dict_candles(candles_5m)[-24:]
+        # Feature 41 (R7): conservar la ventana 1m para el snapshot de PISO_1.
+        if candles_1m:
+            card.candles_1m_snap = _as_dict_candles(candles_1m)[-90:]
 
         # Patrón de la vela 5m cerrada (para caja negra / martillo M5).
         _c5 = close_candle_5m if isinstance(close_candle_5m, dict) else candle_5m_prev
@@ -439,6 +445,18 @@ class EdificioContratacion:
                 card.piso = PISO_1
                 card.p1_at = now
                 card.reason = f"Paga bien ({payout}%)"
+                # Feature 41 (R7): snapshot de velas 1m al ingresar a PISO_1.
+                try:
+                    _bb = get_black_box()
+                    if _bb is not None:
+                        _bb.record_piso1_snapshot(
+                            asset=asset,
+                            strategy="EDIFICIO",
+                            candles_1m=getattr(card, "candles_1m_snap", []) or [],
+                            session_id=getattr(self, "session_id", None),
+                        )
+                except Exception as _p1_exc:
+                    log.warning("[EDIFICIO] %s: snapshot P1 falló: %s", asset, _p1_exc)
                 log.info("[EDIFICIO] %s → P1 (payout=%d%%)", asset, payout)
                 return "subio"
             card.reason = f"Esperando pago ≥ mínimo ({payout}%)"
@@ -810,6 +828,7 @@ class EdificioContratacion:
                     "has_poi_p1": card.has_poi_p1,
                     "has_poi_p2": card.has_poi_p2,
                     "has_poi_p3": card.has_poi_p3,
+                    "p2_entry_extreme": card.p2_entry_extreme,  # línea de extremo 20/80 donde se certifica el POI
                     "p2_puerta": card.p2_puerta,
                     "order_id": card.order_id,
                     "order_status": card.order_status,

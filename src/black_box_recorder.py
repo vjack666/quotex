@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS maintenance_log (
 class BlackBoxRecorder:
     """Registra TODA la actividad de las estrategias."""
     
-    RETENTION_DAYS = 30  # Caducidad: 1 mes
+    RETENTION_DAYS = 0  # Feature 41 (R8): 0 = sin caducidad. NUNCA se borra vela.
 
     def __init__(self):
         self.db_path = BLACK_BOX_DB
@@ -208,6 +208,14 @@ class BlackBoxRecorder:
                 "loss_reason", "improvement_hint", "duration_sec",
                 "stoch_m5", "filter_funnel", "extreme_read",
                 "direction_source",
+                # Feature 41: columnas que record_candidate INSERTa y que antes
+                # solo se añadían en migraciones dispersas del arranque. Se
+                # centralizan aquí para que cualquier DB nueva sea completa.
+                "stoch_m1", "agent_tag", "band", "kd_distance",
+                "cross_limpieza_ok", "pattern_5m", "brake_verdict",
+                "brake_ratio", "brake_ref_range", "brake_witness_ts",
+                "brake_rule_version", "reject_reason", "strategy_details",
+                "order_id",
             ]
             existing = set(cols)
             for col in _NEW_COLS:
@@ -245,7 +253,11 @@ class BlackBoxRecorder:
             log.error("❌ Error inicializando DB: %s", e)
 
     def _cleanup_old_files(self) -> None:
-        """Elimina archivos DB y JSONL de caja negra con más de RETENTION_DAYS."""
+        """Feature 41 (R8): retención infinita. Con RETENTION_DAYS=0 no se
+        borra NINGÚN archivo de caja negra. El archivado se hace vía export
+        periódico (scripts/export_blackbox.py), nunca borrando el raw."""
+        if self.RETENTION_DAYS <= 0:
+            return
         try:
             cutoff = datetime.now() - timedelta(days=self.RETENTION_DAYS)
             cutoff_str = cutoff.strftime("%Y-%m-%d")
@@ -487,6 +499,46 @@ class BlackBoxRecorder:
             "decision": decision,
         })
         return candidate_id
+
+    def record_piso1_snapshot(
+        self,
+        asset: str,
+        strategy: str,
+        candles_1m: Any,
+        stoch_m1: Any = None,
+        session_id: Any = None,
+    ) -> int:
+        """Feature 41 (R7): registra el snapshot de velas 1m cuando un activo
+        ingresa a PISO_1 (Recepción) del Edificio. Línea base de trazabilidad
+        de mercado sin depender de una operación aceptada.
+        Reusa record_candidate para mantener el schema exacto de la DB."""
+        try:
+            ts = datetime.now(timezone.utc).timestamp()
+            con = sqlite3.connect(self.db_path)
+            cur = con.cursor()
+            cur.execute(
+                "INSERT INTO scans (ts, ts_iso, strategy, scan_number) VALUES (?, ?, ?, ?)",
+                (ts, datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(), strategy, 0),
+            )
+            scan_id = int(cur.lastrowid or 0)
+            con.close()
+            data = {
+                "asset": asset,
+                "direction": "",
+                "score": 0.0,
+                "confidence": 0.0,
+                "payout": 0,
+                "decision": "PISO1_SNAPSHOT",
+                "decision_reason": "ingreso a P1 — baseline trazabilidad",
+                "candles_1m": candles_1m,
+                "stoch_m1": stoch_m1,
+                "session_id": session_id,
+                "agent_tag": "BOT",
+            }
+            return self.record_candidate(scan_id, strategy, data)
+        except Exception as e:
+            log.error("❌ Error grabando snapshot PISO_1: %s", e)
+            return -1
 
     def update_candidate(
         self,

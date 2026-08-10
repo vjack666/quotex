@@ -57,6 +57,11 @@ SCAN_LEAD_SEC = 0.0  # exactamente en el open de la vela 5m
 # (socket único, regla de oro). Estos flags definen cómo se envía.
 EDIFICIO_ACCOUNT_TYPE = "PRACTICE"       # PRACTICE | REAL
 EDIFICIO_SEND_ORDERS_ENABLED = True      # demo completa: enviar órdenes demo
+# Barrera de seguridad (Feature 41, R2/R3): el agente NO debe enviar a cuenta
+# REAL bajo ninguna circunstancia. Requiere que el HUMANO ponga este flag en True
+# (y provea credenciales en .env). Por defecto False => cualquier intento de
+# account_type=REAL es bloqueado por edificio_executor antes de place_order.
+EDIFICIO_ALLOW_REAL = False
 EDIFICIO_ORDER_AMOUNT = 1.0             # monto por contrato (USD)
 EDIFICIO_ORDER_DURATION_SEC = DURATION_SEC  # vencimiento, alineado a DURATION_SEC
 
@@ -69,15 +74,68 @@ EDIFICIO_BODY_FILTER_MIN_RATIO = 0.03   # body/total_range mínimo en vela 5m pa
 # S(900)=71.3% y el WR NO mejora con la persistencia → 900s descarta ~23pp de
 # cruces elegibles sin ganancia. 60s retiene 94.4% filtrando solo ticks aislados.
 EDIFICIO_SEPARATION_WAIT_SEC = 60       # ventana corta (300s es techo defendible)
-# Martillo M5 en P3: mecha principal (inferior en CALL / superior en PUT) debe
-# ser >= este múltiplo del body para validar la vela como martillo.
-EDIFICIO_HAMMER_MIN_TAIL_RATIO = 2.0
+# Patrón alternativo en P3 (reemplaza al martillo): "cuerpo pequeño con rechazo
+# direccional". La vela pasa si (body/range <= MAX_BODY_RATIO) Y la mecha
+# dominante apunta en la dirección del trade (CALL → mecha inferior; PUT →
+# mecha superior), con la mecha dominante >= WICK_DOMINANCE × la otra.
+# Medio término entre doji (cualquier cuerpo pequeño) y el martillo rígido
+# (cola >= 2× body y otra < 0.3× rango). Experimental: sin veto.
+EDIFICIO_SMALLBODY_MAX_BODY_RATIO = 0.35      # cuerpo pequeño frente al rango
+EDIFICIO_SMALLBODY_WICK_DOMINANCE = 1.2       # mecha dominante >= 1.2× la otra
 # Confirmación del freno (deuda #1): el candidato (flag en vivo del scanner,
 # vela parcial vs cerrada) NO confirma por tiempo: espera el cierre de la
 # próxima vela M15 y exige que la vela CERRADA mantenga compresión
 # range(nueva cerrada) < este ratio × range(vela cerrada de referencia).
 EDIFICIO_BRAKE_CONFIRM_RATIO = 0.7
 EDIFICIO_RULE_VERSION = "2026-08-03a"   # versión de reglas EDIFICIO para backtest/auditoría
+# ── Puerta P2→P3: modo de promoción (2026-08-08) ──────────────────────
+# "cross_clean"       = regla original: cruce K/D limpio + separación 60s (actual).
+# "return_to_extreme" = NUEVA: el estocástico que entró en extremo (20/80) al
+#   P2 debe REGRESAR a esa línea (habiendo salido antes). Sin cronómetro: se
+#   mide en VELAS M15, no en segundos, para no dejar la estrategia inconclusa.
+EDIFICIO_P3_MODE = "cross_clean"
+# Leyes de permanencia/descarte (en VELAS M15, no segundos):
+# Un activo en P2 tiene hasta P2_MAX_HOLD_VELAS velas para que el estocástico
+# regrese al extremo. Si no regresa en ese plazo → descarte (baja a P1).
+EDIFICIO_P2_MAX_HOLD_VELAS = 8          # 8 velas M15 = 2h de ventana
+# Descarte anti-falsa-entrada: si al entrar a P2 el cruce es pegajoso
+# (|K-D| < este umbral) la candidatura se descarta de inmediato.
+EDIFICIO_DESCARTE_STICKY_THRESHOLD = 2.0
+# Cuando True, la puerta P3 NO exige el patrón de vela 5m (_5m_gate_pass).
+EDIFICIO_P3_NO_5M_GATE = False
+# ── Puerta P3→CONTRATADO: modo de contratación (2026-08-08) ──────────
+# "cruce_limpio" = regla original (K/D deben cruzar limpios en P3)
+# "valvula"      = P3 = cámara de presión; CONTRATADO cuando K sale del
+#                  extremo en dirección del trade Y la separación K-D abre
+#                  (presión acumulada), sin exigir cruce limpio.
+# ── ESTADO (2026-08-08, EXP-VALVULA-P3 + EXP-EDF-01..03 + EXP-EDF-FINAL) ──
+#   Válvula del MOTOR REAL (salir extremo + |K−D|>=5 + presión 3 velas):
+#   EDGE CONFIRMADO Y REPRODUCIBLE (EXP-EDF-FINAL, sweep 19 datasets).
+#   Pooled n=5.655 WR=57.0% p<0.0001; vence a ALL_P3 (baseline) en 19/19 años.
+#   XAUUSD 2009-2025 + EURUSD 2023/2024, parámetros congelados (no re-optimizados).
+#   El barrido original EXP-VALVULA-P3 (máquina B, def. distinta) dio ~50% y
+#   sigue siendo dato honesto — NO es la misma válvula.
+#   cruce_limpio + gate M5 DESCARTADO: moneda (45-57%, ns) en todos los datasets.
+#   Válvula = EDGE CONFIRMADO, ADOPTABLE COMO CANDIDATA. NO activa en REAL aún sin:
+#   (a) WR con broker real (timing openPrice ~300s), (b) recalcular sizing Massaniello
+#   por caída ~60% volumen trades, (c) decisión humana de adoptar.
+#   Default producción sigue "cruce_limpio" hasta esa validación.
+# ── DEUDA DE INGENIERÍA (YA RESUELTA en EXP-EDF-01) ──
+#   Edificio REAL (return_to_extreme) tenía bug P2→P3 (zona al revés + extreme_ok
+#   contradictorio → 0 P3). Reparado en edificio_contratacion.py (_p2_return_tracking).
+#   Ahora fluye P2=896/P3=855 (2024) idéntico a la máquina validada. EXP-EDF-01/02/03
+#   medidos sobre el motor real reparado.
+EDIFICIO_P3_GATE_MODE = "cruce_limpio"  # default producción; auditoría fuerza "valvula"
+EDIFICIO_P3_DESVIO_K = 5.0   # EDGE CONFIRMADO (pooled 57% WR, 19/19 años); apertura |K-D|>=este
+EDIFICIO_P3_EVOLVE_WINDOW = 3  # EDGE CONFIRMADO; velas sobre las que |K-D| sube
+# Definición de WIN (fiel al bot REAL, deep_analysis.py / analyze_trades.py):
+#   entry = openPrice de la orden; duration = DURATION_SEC (900s = 15min)
+#   CALL gana si exit > entry; PUT gana si exit < entry; empate no es WIN.
+# En auditoría paper (velas M15) se aproxima: señal i → entry i+1 → exit i+2.
+# LIMITACIÓN DOCUMENTADA: el bot real entra ~300s tras la señal; el CSV M15
+# no reconstruye ese precio intravela, así que i+1/i+2 es aproximación temporal.
+EDIFICIO_P3_PAPER_ENTRY_OFFSET = 1   # velas M15 desde señal hasta entry aproximado
+EDIFICIO_P3_PAPER_EXIT_OFFSET = 2    # velas M15 desde señal hasta exit aproximado
 # Espera post-freno matemática (body/range de la 1ª vela M15 post-freno).
 # 0.0 = medición activa sin veto; subir cuando el experimento defina el corte.
 EDIFICIO_POST_BRAKE_MIN_RATIO = 0.0
@@ -347,7 +405,7 @@ SESSION_AUTO_RESET_ON_COMPLETE = True
 #   "massaniello" → monto calculado por MassanielloRiskManager (gestión ON).
 #   "fixed"       → monto fijo FIXED_STAKE_USD por operación (gestión OFF).
 # Es INDEPENDIENTE del modo 24h (DAILY_LOSS_GUARD_ENABLED de abajo).
-STAKE_MODE = "fixed"         # "massaniello" | "fixed"
+STAKE_MODE = "massaniello"   # "massaniello" | "fixed"  — Feature 41 R5: Massaniello desde el inicio
 FIXED_STAKE_USD = 5.0        # monto fijo por operación cuando STAKE_MODE="fixed"
 
 # ── Recolección 24/7: desactivar frenos del Massaniello ─────────────────
