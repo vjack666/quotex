@@ -51,6 +51,8 @@ DEFAULT_ASSETS: List[str] = [
 # Máximo tiempo por par y margen de seguridad antes del próximo scan.
 TIMEOUT_PAR_SEC = 100.0
 MARGEN_PRE_SCAN_SEC = 10.0
+# Intentos antes de descartar un par imposible (activo no listado, etc.).
+MAX_REINTENTOS_PAR = 3
 
 
 def _pares_desde_caja_negra() -> List[str]:
@@ -166,11 +168,20 @@ class LiveBackfill:
                 self._hechos.add(f"{asset}|{tf}")
                 self._guardar_estado()
             else:
-                # No se pudo (timeout/error): rotar al final para reintentar
-                # en una ventana futura y no bloquear el resto de la cola.
-                self._pendientes.append(self._pendientes.pop(0))
-                # Pequeño respiro entre reintentos de pares distintos.
-                await asyncio.sleep(0.5)
+                clave = f"{asset}|{tf}"
+                reintentos = self._fallidos.get(clave, 0)
+                if reintentos >= MAX_REINTENTOS_PAR:
+                    # Descartar definitivamente: no rotar infinitamente un par
+                    # imposible (activo no listado, sin historia, etc.).
+                    log.info(
+                        "[BACKFILL] %s tf=%s: %d intentos fallidos — descartado",
+                        asset, tf, reintentos,
+                    )
+                    self._pendientes.pop(0)
+                else:
+                    # Reintentar en una ventana futura sin bloquear el resto.
+                    self._pendientes.append(self._pendientes.pop(0))
+                    await asyncio.sleep(0.5)
                 if time.monotonic() >= deadline:
                     break
 
@@ -184,40 +195,48 @@ class LiveBackfill:
         if path.exists():
             return True
         dias = next((d for (t, d) in TFS if t == tf), 1)
-        segundos = int(86400 * dias)
+        total_deseadas = max(1, int(86400 * dias / tf))
+        # El broker responde ~200 velas por request; paginamos hacia atrás.
+        # El LOCK de connection.py serializa con el HTF scanner / scan del bot:
+        # los buzones compartidos de pyquotex no distinguen activo ni tf, y dos
+        # pedidos en vuelo se roban respuestas (causa raíz 2026-07-28, y el
+        # colgado que se vio al correr el backfill SIN el lock).
+        from connection import _CANDLES_FETCH_LOCK  # import local: evita ciclo
+        chunk = 200
         timeout = min(TIMEOUT_PAR_SEC, max(5.0, max_sec - MARGEN_PRE_SCAN_SEC))
-        datos = None
+        deadline = time.monotonic() + timeout
+        velas: dict[int, dict] = {}
+        end_time = time.time()
         try:
-            # API del venv del bot (pyquotex clásica):
-            #   get_candles(asset, end_from_time, offset, period)
-            # end_from_time=ahora, offset=n velas hacia atrás, period=segundos.
-            offset = max(1, int(segundos / tf))
-            datos = await asyncio.wait_for(
-                self.client.get_candles(asset, time.time(), offset, tf),
-                timeout=timeout,
-            )
-            # get_candles descarta la vela en formación (calculate_candles
-            # hace candles[:-1]); si dejó el stream abierto, lo cerramos para
-            # no ensuciar el buzón del scan.
+            while len(velas) < total_deseadas and time.monotonic() < deadline:
+                restantes = total_deseadas - len(velas)
+                offset = min(chunk, restantes)
+                remaining = deadline - time.monotonic()
+                if remaining <= MARGEN_PRE_SCAN_SEC:
+                    break
+                async with _CANDLES_FETCH_LOCK:
+                    datos = await asyncio.wait_for(
+                        self.client.get_candles(asset, end_time, offset, tf),
+                        timeout=min(30.0, max(2.0, remaining)),
+                    )
+                if not datos:
+                    break
+                n_bajadas = 0
+                for c in datos:
+                    if c.get("time") and c.get("close") is not None:
+                        velas[int(c["time"])] = c
+                        n_bajadas += 1
+                # Retroceder al hueco anterior para la siguiente página.
+                ts_min = min(int(c["time"]) for c in datos if c.get("time"))
+                end_time = ts_min - tf
+                if n_bajadas < offset:
+                    break  # el broker no tiene más historia
+            # get_candles deja el stream abierto; cerrarlo para no ensuciar el
+            # buzón del scan (el HTF/scan piden velas con el MISMO client).
             try:
                 await self.client.stop_candles_stream(asset)
             except Exception:
                 pass
-        except AttributeError:
-            # pyquotex más nueva (replay 10/08): get_candles_deep(asset, seg, tf)
-            try:
-                datos = await asyncio.wait_for(
-                    self.client.get_candles_deep(asset, segundos, tf),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                log.info("[BACKFILL] %s tf=%s: timeout (ventana corta) — reintento en próximo ciclo", asset, tf)
-                self._marcar_fallido(asset, tf, "timeout")
-                return False
-            except Exception as exc:  # noqa: BLE001 — patrón replay: no tumba el bot
-                log.warning("[BACKFILL] %s tf=%s: %s", asset, tf, exc)
-                self._marcar_fallido(asset, tf, str(exc)[:60])
-                return False
         except asyncio.TimeoutError:
             log.info("[BACKFILL] %s tf=%s: timeout (ventana corta) — reintento en próximo ciclo", asset, tf)
             self._marcar_fallido(asset, tf, "timeout")
@@ -226,31 +245,21 @@ class LiveBackfill:
             log.warning("[BACKFILL] %s tf=%s: %s", asset, tf, exc)
             self._marcar_fallido(asset, tf, str(exc)[:60])
             return False
-        if not datos:
+        if not velas:
             log.info("[BACKFILL] %s tf=%s: vacío — descartado", asset, tf)
             self._marcar_fallido(asset, tf, "empty")
             return False
-        velas = [
-            {
+        unicos: List[dict] = []
+        for v_time in sorted(velas):
+            c = velas[v_time]
+            unicos.append({
                 "time": int(c["time"]),
                 "open": float(c["open"]),
                 "high": float(c["high"]),
                 "low": float(c["low"]),
                 "close": float(c["close"]),
                 "ticks": int(c.get("ticks") or 0),
-            }
-            for c in datos
-            if c.get("time") and c.get("close") is not None
-        ]
-        velas.sort(key=lambda c: c["time"])
-        unicos: List[dict] = []
-        for v in velas:
-            if not unicos or unicos[-1]["time"] != v["time"]:
-                unicos.append(v)
-        if not unicos:
-            log.info("[BACKFILL] %s tf=%s: sin velas válidas — descartado", asset, tf)
-            self._marcar_fallido(asset, tf, "no_valid")
-            return False
+            })
         try:
             tmp = path.with_suffix(".tmp")
             with open(tmp, "w", newline="", encoding="utf-8") as f:
