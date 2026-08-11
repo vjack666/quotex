@@ -186,11 +186,38 @@ class LiveBackfill:
         dias = next((d for (t, d) in TFS if t == tf), 1)
         segundos = int(86400 * dias)
         timeout = min(TIMEOUT_PAR_SEC, max(5.0, max_sec - MARGEN_PRE_SCAN_SEC))
+        datos = None
         try:
+            # API del venv del bot (pyquotex clásica):
+            #   get_candles(asset, end_from_time, offset, period)
+            # end_from_time=ahora, offset=n velas hacia atrás, period=segundos.
+            offset = max(1, int(segundos / tf))
             datos = await asyncio.wait_for(
-                self.client.get_candles_deep(asset, segundos, tf),
+                self.client.get_candles(asset, time.time(), offset, tf),
                 timeout=timeout,
             )
+            # get_candles descarta la vela en formación (calculate_candles
+            # hace candles[:-1]); si dejó el stream abierto, lo cerramos para
+            # no ensuciar el buzón del scan.
+            try:
+                await self.client.stop_candles_stream(asset)
+            except Exception:
+                pass
+        except AttributeError:
+            # pyquotex más nueva (replay 10/08): get_candles_deep(asset, seg, tf)
+            try:
+                datos = await asyncio.wait_for(
+                    self.client.get_candles_deep(asset, segundos, tf),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                log.info("[BACKFILL] %s tf=%s: timeout (ventana corta) — reintento en próximo ciclo", asset, tf)
+                self._marcar_fallido(asset, tf, "timeout")
+                return False
+            except Exception as exc:  # noqa: BLE001 — patrón replay: no tumba el bot
+                log.warning("[BACKFILL] %s tf=%s: %s", asset, tf, exc)
+                self._marcar_fallido(asset, tf, str(exc)[:60])
+                return False
         except asyncio.TimeoutError:
             log.info("[BACKFILL] %s tf=%s: timeout (ventana corta) — reintento en próximo ciclo", asset, tf)
             self._marcar_fallido(asset, tf, "timeout")
