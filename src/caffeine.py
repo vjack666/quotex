@@ -28,6 +28,7 @@ tráfico mientras otra ruta está reconstruyendo el socket (RT-02).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import random
 import time
@@ -78,7 +79,7 @@ def _resolve_app_ws(client):
         return None
 
 
-def _ws_send_text(client, payload: str) -> bool:
+async def _ws_send_text(client, payload: str) -> bool:
     """Envía ``payload`` como TEXTO por el WebSocket subyacente VIVO.
 
     Devuelve True si se despachó. Usa el socket real (WebSocketApp.wss de
@@ -91,8 +92,15 @@ def _ws_send_text(client, payload: str) -> bool:
         wss = _resolve_app_ws(client)
         if wss is None:
             return False
-        # WebSocketApp.send(data) con opcode por defecto (text) manda TEXTO.
-        wss.send(payload)
+        # pyquotex puede exponer el WebSocketApp síncrono (websocket-client)
+        # O el WebsocketClient async (su .send es coroutine). Despachamos
+        # correctamente en ambos casos para que el ping SÍ salga y el broker
+        # no corte la conexión por idle.
+        send = wss.send
+        if inspect.iscoroutinefunction(send):
+            await send(payload)
+        else:
+            send(payload)
         return True
     except Exception as exc:  # socket cerrado, no conectado, etc.
         log.debug("caffeine send falló (%s): %s", type(exc).__name__, exc)
@@ -160,7 +168,7 @@ class CaffeineLoop:
             async with _RECONNECT_LOCK:
                 if self._stop:
                     break
-                ok = _ws_send_text(self.client, _ENGINEIO_PING)
+                ok = await _ws_send_text(self.client, _ENGINEIO_PING)
                 if ok:
                     self._pings_sent += 1
                     # El ping de app es salida nuestra: NO cuenta como tráfico de
@@ -175,7 +183,7 @@ class CaffeineLoop:
                 # no en nuestros propios pings de salida.
                 idle = time.time() - self._last_traffic_ts
                 if idle >= config.CAFFEINE_TICK_AFTER_IDLE_SEC:
-                    if _ws_send_text(self.client, _SOCKETIO_TICK):
+                    if await _ws_send_text(self.client, _SOCKETIO_TICK):
                         self._ticks_sent += 1
                         log.debug("caffeine tick enviado (idle %.0fs)", idle)
 
