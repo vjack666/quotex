@@ -457,6 +457,33 @@ class EdificioContratacion:
                         )
                 except Exception as _p1_exc:
                     log.warning("[EDIFICIO] %s: snapshot P1 falló: %s", asset, _p1_exc)
+                # Feature 41 (R11): vector plano en feature_stream para TODO
+                # candidato que entra a P1 (aprendizaje con poca data). El
+                # outcome (WIN/LOSS) se actualiza al resolver la orden.
+                try:
+                    _bb = get_black_box()
+                    if _bb is not None:
+                        _bb.record_feature_vector({
+                            "asset": asset,
+                            "direction": direction or (card.direction or ""),
+                            "stoch_k": stoch_k,
+                            "stoch_d": stoch_d,
+                            "kd_distance": getattr(card, "kd_distance", None),
+                            "has_poi_p1": True,
+                            "has_poi_p2": False,
+                            "has_poi_p3": False,
+                            "brake_verdict": None,
+                            "extreme_read": int(extreme_read or 0),
+                            "payout": int(payout or 0),
+                            "account_type": getattr(self, "account_type", None),
+                            "candle_size_ticks": None,
+                            "candle_volume": None,
+                            "stake_amount": 0.0,
+                            "order_result": None,
+                            "source": "EDIFICIO",
+                        })
+                except Exception as _fv_exc:
+                    log.warning("[EDIFICIO] %s: feature_stream P1 falló: %s", asset, _fv_exc)
                 log.info("[EDIFICIO] %s → P1 (payout=%d%%)", asset, payout)
                 return "subio"
             card.reason = f"Esperando pago ≥ mínimo ({payout}%)"

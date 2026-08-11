@@ -1533,6 +1533,7 @@ class AssetScanner:
                     "candle_5m_prev": _candle_5m_prev,
                     "candles_15m": self._serialize_candles(list(_candles_15m)[-24:]),
                     "candles_5m": self._serialize_candles(list(_candles_5m)[-24:]),
+                    "candles_1m": self._serialize_candles(list(_candles_1m)[-90:]),
                 }
             except Exception:
                 flags_by_asset[_sym] = {
@@ -3027,6 +3028,10 @@ def _feed_edificio(bot: Any, assets: list, flags_by_asset: dict | None = None) -
     edificio = getattr(bot, "edificio", None)
     if edificio is None:
         return
+    try:
+        edificio.account_type = getattr(bot, "account_type", None) or "PRACTICE"
+    except Exception:
+        pass
     flags_by_asset = flags_by_asset or {}
     for asset, payout in assets:
         try:
@@ -3049,6 +3054,7 @@ def _feed_edificio(bot: Any, assets: list, flags_by_asset: dict | None = None) -
                 candle_5m_prev=_flags.get("candle_5m_prev"),
                 candles_15m=_flags.get("candles_15m"),
                 candles_5m=_flags.get("candles_5m"),
+                candles_1m=_flags.get("candles_1m"),
             )
         except Exception as exc:
             log.error("[EDIFICIO] Error evaluando %s: %s", asset, exc)

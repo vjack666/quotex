@@ -61,6 +61,7 @@ from hub.strat_f_panel import StratFPanel
 from maturing_watchlist import MaturingWatchlist
 from maturing_watcher import MaturingWatcher
 from edificio_contratacion import get_edificio, reset_edificio
+from live_backfill import LiveBackfill, MARGEN_PRE_SCAN_SEC
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -593,6 +594,20 @@ async def main(
 
     init_scan_pool()  # ProcessPool global para FASE 3 (parallel_scan_fase3)
 
+    # ── LiveBackfill: descargar velas históricas en los huecos entre scans ──
+    # Corre DENTRO del loop (work_window en la ventana de sueño) usando el
+    # mismo client/socket del bot — nunca una task suelta, para no pisar el
+    # buzón de velas de pyquotex durante el scan.
+    try:
+        bot._backfill = LiveBackfill(client)
+        log.info(
+            "[BACKFILL] activo: %d pares pendientes — descargando en huecos entre scans",
+            len(getattr(bot._backfill, "_pendientes", []) or []),
+        )
+    except Exception as exc:
+        bot._backfill = None
+        log.warning("No se pudo iniciar LiveBackfill: %s", exc)
+
     try:
         # Arranque inmediato: el primer scan NO espera al open de la vela 5m.
         # Los ciclos siguientes siguen alineados (sleep_for abajo).
@@ -792,6 +807,18 @@ async def main(
                 sleep_for = max(5.0, SCAN_INTERVAL_SEC - elapsed)
 
             try:
+                # LiveBackfill: aprovechar la ventana de sueño para descargar
+                # velas históricas (mismo socket, nunca pisa el scan).
+                _bf = getattr(bot, "_backfill", None)
+                if _bf is not None and _bf.quedan_pares():
+                    _ventana = max(5.0, sleep_for - MARGEN_PRE_SCAN_SEC)
+                    await _bf.work_window(_ventana)
+                    if ALIGN_SCAN_TO_CANDLE:
+                        sleep_for = seconds_until_next_scan(time.time())
+                    else:
+                        elapsed = time.time() - cycle_start
+                        sleep_for = max(5.0, SCAN_INTERVAL_SEC - elapsed)
+
                 aborted = await sleep_with_inline_countdown(
                     sleep_for,
                     "Próximo escaneo",

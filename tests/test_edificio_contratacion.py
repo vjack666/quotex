@@ -600,3 +600,38 @@ def test_p2_estadia_se_sostiene_con_tarjeta_y_extremo_vigente():
     assert result2 == "bajo"
     assert edificio.get_card("A_otc").piso == PISO_1
 
+
+def test_p1_snapshot_guarda_velas_1m_reales():
+    """Fix caja negra: las velas 1m pasadas al evaluate deben persistirse en
+    el card (candles_1m_snap) y en el snapshot de PISO_1 — no salir vacías."""
+    edificio = EdificioContratacion()
+    velas_1m = [
+        {"time": 1700000000 + i * 60, "open": 1.0 + i * 0.001,
+         "high": 1.0 + i * 0.002, "low": 0.999, "close": 1.0 + i * 0.001,
+         "ticks": 10}
+        for i in range(10)
+    ]
+    result = edificio.evaluate(
+        asset="VELA_otc", direction="PUT", payout=90, payout_ok=True,
+        candles_1m=velas_1m,
+    )
+    assert result == "subio"
+    card = edificio.get_card("VELA_otc")
+    assert card is not None
+    assert card.candles_1m_snap, "candles_1m_snap no debería quedar vacío"
+    assert card.candles_1m_snap[-1]["time"] == velas_1m[-1]["time"]
+    assert len(card.candles_1m_snap) == 10
+
+
+def test_p1_sin_velas_1m_no_rompe_evaluate():
+    """Sin velas 1m (feed viejo) el evaluate sigue funcionando y el card
+    conserva una lista vacía — sin excepción (regresión del fix)."""
+    edificio = EdificioContratacion()
+    result = edificio.evaluate(
+        asset="SINVELA_otc", direction="CALL", payout=90, payout_ok=True,
+    )
+    assert result == "subio"
+    card = edificio.get_card("SINVELA_otc")
+    assert card is not None
+    assert card.candles_1m_snap == []
+
