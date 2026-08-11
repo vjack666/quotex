@@ -1,0 +1,174 @@
+{
+  "experiment": "EXP-036",
+  "status": "PASS if live.reached_entrada == 0 or < 5% of candidates, else needs hardening",
+  "live_db": "C:\\Users\\v_jac\\Desktop\\QUOTEX\\data\\db\\black_box_strat_2026-08-03.db",
+  "trade_journal_db": "C:\\Users\\v_jac\\Desktop\\QUOTEX\\data\\db\\trade_journal-2026-08-04.db",
+  "backtest_parquet": "C:\\Users\\v_jac\\Desktop\\SMC-SYSTEMS\\data\\raw\\EURUSD_M15.parquet",
+  "live_summary": {
+    "candidates": 118,
+    "decisions": {
+      "BUY": 108,
+      "ACCEPTED": 10
+    },
+    "accepted": 108,
+    "rejected": 10,
+    "with_order_result": 0,
+    "brake_ok_rate": 1.0,
+    "cross_ok_rate": 1.0,
+    "cross_limpieza_ok_rate": 1.0,
+    "avg_brake_ratio": 0.0,
+    "avg_kd_distance": 0.0,
+    "pending_orders": 108
+  },
+  "sequence_summary": {
+    "reached_entrada": 0,
+    "reject_reception": 0,
+    "reject_cerebro": 0,
+    "stuck_in_cerebro": 0,
+    "rejection_counts": {
+      "RECHAZAR_CEREBRO": 108,
+      "RECHAZAR_RECEPCION": 20
+    },
+    "sample_transitions": [
+      {
+        "id": 1,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 2,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 3,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 4,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 5,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 6,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 10,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 11,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 15,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 16,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 17,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 18,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 19,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 20,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 21,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 22,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 23,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 24,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 25,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      },
+      {
+        "id": 26,
+        "final_floor": "CEREBRO",
+        "transitions": 1,
+        "reject_reason": null
+      }
+    ]
+  },
+  "expired_zones_count": 15,
+  "expired_reasons": {
+    "BROKEN_ABOVE": 15
+  },
+  "backtest_summary": {
+    "m15_rows": 113123,
+    "columns": [
+      "close",
+      "high",
+      "low",
+      "open",
+      "tick_volume",
+      "timestamp",
+      "volume"
+    ],
+    "first_ts": "2022-01-02 17:00:00+00:00",
+    "last_ts": "2026-07-21 23:30:00+00:00"
+  },
+  "conclusion": "live accepted 108 but sequence_engine blocks before ENTRADA due missing kd/cross conditions or dwell requirements"
+}

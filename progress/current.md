@@ -96,3 +96,29 @@
 
 **Estado al cerrar:** hub corriendo (puerto 8094) recogiendo datos en DEMO. Bot vivo, Edificio con activos en P1. Cuenta REAL bloqueada.
 
+
+---
+
+# Replay de señales 2026-08-10 — WIN/LOSS hipotético (11/08)
+
+**Pedido TH:** cerrar el servidor, analizar la caja negra y descargar velas para saber si las señales del día hubieran sido ganadoras.
+
+### Cierre del servidor
+- Hub (app.py :8080, PID 32060) + instancia residual (:8094, PID 27396) detenidos; runtime/main.lock eliminado. Procesos hermes-agent NO tocados (orden explícita).
+- Nota: stop_webapp.ps1 filtra .venv y NO habría matado esos procesos (corrían con C:\Python314\python.exe). Cierre manual con Stop-Process.
+
+### Caja negra (data/db/black_box_strat_2026-08-10.db) — análisis
+- scan_candidates 183 = 172 PISO1_SNAPSHOT + 11 BUY; feature_stream 3; maintenance_log 93 (solo HTF_LIBRARY); phase_log 0; strategy_metrics 0; scans 189 (casi todos total_candidates 0).
+- Las 11 BUY = tests pytest (OID-77/OID-88/TICK123; timestamps idénticos a feature_stream). order_result="SENT" HARCODEADO en src/edificio_executor.py:447.
+- Los 172 snapshots P1 reales VACIOS: direction NULL, stoch_m15={}, payout=0, candles=[] — el trazador (F41 R7) no persistió datos reales. La única fuente de señales reales es el log.
+
+### Replay (tools/quotex-historical-data/replay_edificio_2026-08-10.py)
+- 29 señales extraídas del log (26 P2 + 3 P3) de ~17 activos OTC; dirección reconstruida con la regla EXACTA de scanner.py:1484-1502 (stoch FULL M15 + tendencia %K M1); simulación 900s (entry=open vela M1 en ts; exit=close vela M1 en ts+900).
+- Velas M1/M15 reales del broker (get_candles_deep, 1 día, copia local pyquotex + QUOTEX_DEMO_SSID + change_account PRACTICE — patrón de src/connection.py).
+- Resultado: **18 WIN / 11 LOSS (62.1%) | P&L hipotético +5.61 (stake 1.0)**. P2: 16/26 (61.5%) | P3: 2/3 (USCrude LOSS, BTC WIN, SOL WIN).
+- Datos + reporte: tools/quotex-historical-data/replay_2026-08-10/ (35 CSVs velas + reporte_2026-08-10.txt).
+
+### Aprendizajes
+- pyquotex del .venv NO tiene get_candles_deep (solo la copia local de tools/quotex-historical-data/pyquotex/).
+- connect() suele fallar al primer intento ("Websocket connection rejected"); con QUOTEX_DEMO_SSID en session_data + reintentos + change_account("PRACTICE") conecta (patrón del bot).
+- python -c con comillas dobles falla en PowerShell; escribir scripts temp y ejecutarlos.

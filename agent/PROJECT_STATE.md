@@ -196,3 +196,26 @@ Ad-hoc (documented in changelog, no feature id): Massaniello 24/7, scan 5m, coun
 1. Run 24/7 PRACTICE; fill black box with math filters + contextual scoring + stoch zone/action + outcomes.
 2. Optional SDD: M1 micro-trend confirm before buy.
 3. Housekeeping: schedule_auto review.
+
+---
+
+## 🔬 Auditoría Funnel 5m/M15 (2026-08-08) — LEER AL RETOMAR
+
+**Sesión de auditoría (no feature SDD, trabajo ad-hoc del Trader-Humano):**
+- EXP-FUNNEL-5M: freno+arcoíris+estocástico en M5, 30 combos, 8 datasets (EURUSD 22-25,
+  XAUUSD 20/21/23/24) → WR 44-52% → **REFUTADO** (moneda). Reporte `reports/AUDITORIA_FUNNEL/exp_funnel_5m.md`.
+- EXP-MTF: arcoíris M15 como filtro de tendencia + trigger M5 (9 modos `audit_multitf.py`
+  + 4 modos M15 puro `audit_m15_pure.py`), 4 datasets → techo **56-57%** (XAUUSD 2024,
+  n>700, p<0.0002). A 15min real cae a moneda. **NO se llegó a 60%.**
+  Reporte `reports/AUDITORIA_FUNNEL/exp_mtf.md`.
+- Conclusión: el límite de "indicadores M5/M15 sin el embudo del Edificio" es ~57% WR.
+  Para 60%+ hay que recuperar la ESTRUCTURA del Edificio (P1→P2→P3 validado en EXP-EDF-04, 71%).
+  Rama M5/M15 aislada AGOTADA.
+
+**Tests:** `test_edificio_contratacion.py` = 21 passed (lo único que esta sesión modificó:
+fix P2→P3 + válvula [NO ADOPTADO] en `src/edificio_contratacion.py`/`src/config.py`).
+Los 22 tests rotos de `init.ps1` son PRE-EXISTENTES del bot STRAT-F (no de esta sesión).
+
+**Bloqueo de commit:** 3 conflictos sin resolver en `specs/lab_protocolo_cientifico/EXP-EDIFICIO-NN-SCORE/*.md`
+(heredados de 2026-08-07, push pendiente) BLOQUEAN cualquier commit. Mi trabajo de hoy quedó
+SIN commitear. Al retomar: resolver esos 3 conflictos antes de commitear. NO push sin OK.

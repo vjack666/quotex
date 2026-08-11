@@ -347,14 +347,14 @@ def test_p3_vela_grande_pasa_filtro_y_contrata():
     assert edificio.get_card("A_otc").piso == CONTRATADO
 
 
-def test_p3_martillo_m5_valida_entrada():
+def test_p3_cuerpo_pequeno_valida_entrada():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
-    # Martillo alcista: body chico (2% < filtro 3%) pero mecha inferior larga
-    # (0.0014 / body 0.0006 = 2.33x >= EDIFICIO_HAMMER_MIN_TAIL_RATIO 2.0).
-    vela_martillo = {
-        "name": "hammer",
-        "side": "bull",
+    # Doji con rechazo direccional CALL: cuerpo pequeño (body/range=0.27 <= 0.35)
+    # y mecha INFERIOR dominante (0.0014 vs 0.0002 upper, ratio 7x >= 1.2).
+    vela_do = {
+        "name": "doji",
+        "side": "doji",
         "body_pct": 0.02,
         "open": 1.0000,
         "high": 1.0008,
@@ -365,22 +365,23 @@ def test_p3_martillo_m5_valida_entrada():
     result = edificio.evaluate(
         asset="A_otc", direction="CALL", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
-        close_candle_5m=vela_martillo,
+        close_candle_5m=vela_do,
     )
     assert result == "stay"
     card = edificio.get_card("A_otc")
     assert card.piso == PISO_3
-    assert card.entry_pending is True  # el martillo valida la entrada
-    assert card.pattern_5m == "hammer"
+    assert card.entry_pending is True  # cuerpo pequeño + rechazo CALL valida
+    assert card.pattern_5m == "doji"
 
 
-def test_p3_martillo_en_direccion_opuesta_no_valida():
+def test_p3_rechazo_direccional_misma_vela_no_valida_ambos():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
-    # Martillo alcista (mecha inferior larga) NO vale para un PUT.
-    vela_martillo = {
-        "name": "hammer",
-        "side": "bull",
+    # La misma vela doji con mecha INFERIOR domina en CALL pero NO en PUT:
+    # el rechazo es direccional (a diferencia del doji puro agnóstico).
+    vela_do = {
+        "name": "doji",
+        "side": "doji",
         "body_pct": 0.02,
         "open": 1.0000,
         "high": 1.0008,
@@ -388,23 +389,23 @@ def test_p3_martillo_en_direccion_opuesta_no_valida():
         "close": 1.0006,
         "ts": 1785597900,
     }
-    result = edificio.evaluate(
+    edificio.evaluate(
         asset="A_otc", direction="PUT", payout=90, payout_ok=True,
         brake_ok=True, extreme_ok=True, cross_ok=True,
-        close_candle_5m=vela_martillo,
+        close_candle_5m=vela_do,
     )
-    assert result == "stay"
     card = edificio.get_card("A_otc")
-    assert card.entry_pending is False  # sin body fuerte ni martillo PUT
+    assert card.entry_pending is False  # mecha inferior no valida PUT
 
 
-def test_p3_vela_sin_body_ni_martillo_bloquea_entrada():
+def test_p3_spooling_sin_wick_dominante_bloquea():
     edificio = EdificioContratacion()
     _subir_a_p3(edificio)
     card = edificio.get_card("A_otc")
     assert card.entry_pending is False
-    # Vela con mechas largas en AMBOS lados: body_pct 0.0273 (< 3%) y ninguna
-    # mecha califica como martillo (la contraparte supera 0.3*rng).
+    # Spinning top: cuerpo pequeño (body/range=0.0273 <= 0.35) PERO mechas
+    # casi iguales (upper 0.0114 vs lower 0.0100, ratio < 1.2) → sin rechazo
+    # direccional → el gate AHORA BLOQUEA (restaura el filtro real en P3).
     vela_plana = {
         "name": "spinning_top",
         "side": "bull",
@@ -422,7 +423,7 @@ def test_p3_vela_sin_body_ni_martillo_bloquea_entrada():
     )
     assert result == "stay"
     assert card.piso == PISO_3
-    assert card.entry_pending is False  # no marcó entrada
+    assert card.entry_pending is False  # no marcó entrada (sin wick dominante)
 
 
 def test_post_brake_medicion_reintentable_cuando_llega_vela():

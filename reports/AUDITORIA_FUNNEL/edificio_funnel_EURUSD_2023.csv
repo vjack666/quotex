@@ -1,0 +1,16 @@
+piso,motivo,conteo
+P1,P1 OK — esperando freno (tarjeta de acceso a P2) (90%),9485
+P1,"P1 OK — freno candidato, esperando vela M15 cerrada (90%)",2714
+P1,P2 descartado — sin retorno a extremo en 8 velas M15 (90%),210
+P1,"P1 OK — freno sin compresión, esperando nuevo candidato (90%)",90
+P1,P2 descartado — cruce pegajoso al entrar a P2 (|K-D|<2.0) (90%),79
+P1,Paga bien (90%),1
+P2,Baja a P2 — freno perdido (90%),577
+P2,P2 OK — esperando retorno a extremo 20 (90%),498
+P2,P2 OK — esperando retorno a extremo 80 (90%),476
+P2,P2 OK — tarjeta de acceso: freno CONFIRMED con vela M15 cerrada (90%),289
+P2,Baja a P2 — extremo perdido (90%),27
+P3,P3 OK — estocástico regresó a extremo 80 (90%),328
+P3,P3 OK — estocástico regresó a extremo 20 (90%),276
+P3,P3 OK — esperando cruce limpio (90%),126
+P3,"P3 OK — entrada marcada, delay 5 min (90%)",2

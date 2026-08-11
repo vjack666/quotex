@@ -1,0 +1,44 @@
+
+==============================================================================
+RESUMEN — 29 señales (stake 1.0, expiración 900s)
+------------------------------------------------------------------------------
+  WIN : 18  (62.1%)
+  LOSS: 11
+  DRAW: 0
+  SIN_DIR: 0 | SIN_DATOS: 0
+  P&L hipotético: +5.61 unidades de stake
+
+Por piso:
+  P2: 26 señales | WIN 16 | LOSS/DRAW 10
+  P3: 3 señales | WIN 2 | LOSS/DRAW 1
+
+hora      asset        piso ratio  payout  dir    src  entry        exit         resultado 
+14:56:59  DOTUSD_otc   P2   0.69   92%   CALL M1       0.75990      0.75540 LOSS      
+14:59:59  DOTUSD_otc   P2   0.69   92%   CALL M1       0.75410      0.75430 WIN       
+15:10:59  ETHUSD_otc   P2   0.54   92%   PUT  M1    1941.66000   1940.18000 WIN       
+15:17:04  USDPKR_otc   P2   0.52   93%   PUT  M1     288.88400    288.85300 WIN       
+15:17:04  AUDCHF_otc   P2   0.59   91%   CALL M1       0.57224      0.57156 LOSS      
+16:02:10  ETHUSD_otc   P2   0.34   92%   PUT  M1    1956.76000   1953.97000 WIN       
+16:02:10  LINUSD_otc   P2   0.48   92%   CALL M1       8.39800      8.43900 WIN       
+16:07:18  USDARS_otc   P2   0.65   93%   PUT  M1    1560.86000   1560.09000 WIN       
+16:10:23  LINUSD_otc   P2   0.48   92%   PUT  M1       8.39500      8.42000 LOSS      
+16:16:01  ETCUSD_otc   P2   0.50   92%   PUT  M1       6.17600      6.13900 WIN       
+16:17:07  LINUSD_otc   P2   0.03   92%   PUT  M1       8.44200      8.42400 WIN       
+16:23:01  USCrude_otc  P2   0.58   92%   PUT  M1      48.46100     48.42500 WIN       
+16:26:01  XRPUSD_otc   P2   0.63   92%   PUT  M1       1.18140      1.17680 WIN       
+16:47:00  AXSUSD_otc   P2   0.42   92%   CALL M15      0.93830      0.92870 LOSS      
+16:49:12  XRPUSD_otc   P2   0.60   92%   CALL M1       1.17360      1.17820 WIN       
+17:23:00  ETHUSD_otc   P2   0.34   92%   PUT  M15   1961.64000   1953.50000 WIN       
+17:26:00  AUDJPY_otc   P2   0.48   92%   CALL M15    111.72200    111.80600 WIN       
+17:31:48  NZDCAD_otc   P2   0.29   94%   CALL M1       0.81944      0.82388 WIN       
+17:41:02  TRUUSD_otc   P2   0.41   92%   PUT  M1       1.57680      1.58760 LOSS      
+17:45:55  SOLUSD_otc   P2   0.61   92%   CALL M1      73.55000     71.81000 LOSS      
+17:49:58  SOLUSD_otc   P2   0.61   92%   PUT  M1      73.05000     71.51000 WIN       
+18:36:01  LINUSD_otc   P2   0.69   92%   CALL M1       8.31500      8.40700 WIN       
+18:43:02  USDBDT_otc   P2   0.46   93%   PUT  M1     127.51800    127.60700 LOSS      
+18:51:02  BTCUSD_otc   P2   0.58   92%   PUT  M1   58967.88000  59289.45000 LOSS      
+18:54:01  BTCUSD_otc   P2   0.58   92%   PUT  M1   58988.50000  59398.83000 LOSS      
+19:06:01  BRLUSD_otc   P2   0.68   92%   CALL M1       0.19453      0.19431 LOSS      
+16:26:01  USCrude_otc  P3   0.58   92%   PUT  M1      48.48700     48.52800 LOSS      
+18:57:01  BTCUSD_otc   P3   0.58   92%   CALL M1   59030.28000  59487.84000 WIN       
+18:58:01  SOLUSD_otc   P3   0.61   93%   CALL M15     70.71000     71.67000 WIN       

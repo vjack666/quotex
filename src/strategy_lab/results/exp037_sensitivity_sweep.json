@@ -1,0 +1,676 @@
+{
+  "ranked": [
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 113083,
+      "fail_entrada": 0,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 1.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 113083,
+      "fail_entrada": 0,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 1.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 98830,
+      "fail_entrada": 14253,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.8739598348115986,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 98830,
+      "fail_entrada": 14253,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.8739598348115986,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 92069,
+      "fail_entrada": 21014,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.8141718914425687,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 92069,
+      "fail_entrada": 21014,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.8141718914425687,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 85431,
+      "fail_entrada": 27652,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.755471644721134,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 85431,
+      "fail_entrada": 27652,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.755471644721134,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 79215,
+      "fail_entrada": 33868,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.70050317023779,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 79215,
+      "fail_entrada": 33868,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.70050317023779,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 73548,
+      "fail_entrada": 39535,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.6503895368888338,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 73548,
+      "fail_entrada": 39535,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.6503895368888338,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 62878,
+      "fail_entrada": 50205,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.5560340634755003,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 62878,
+      "fail_entrada": 50205,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.5560340634755003,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 0.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 1.5,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 2.5,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 3.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 0,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 1,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": true
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    },
+    {
+      "config": {
+        "kd_distance": 4.0,
+        "dwell_cerebro": 2,
+        "cross_limpieza_ok": false
+      },
+      "total": 113083,
+      "reached_entrada": 0,
+      "fail_entrada": 113083,
+      "reject_reception": 0,
+      "reject_cerebro": 0,
+      "stuck_cerebro": 0,
+      "reject_reason_counts": {},
+      "entrada_rate": 0.0,
+      "noise_rate": 0.0
+    }
+  ]
+}

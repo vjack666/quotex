@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>EXP-076 — Cómo llegamos al 74.6% (visual)</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+  h1 { color: #fbbf24; text-align: center; font-size: 26px; margin-bottom: 4px; }
+  .sub { text-align: center; color: #94a3b8; margin-bottom: 28px; font-size: 14px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px 24px; margin-bottom: 22px; }
+  .card h2 { color: #38bdf8; font-size: 17px; margin-top: 0; }
+  .card p { color: #cbd5e1; font-size: 14px; line-height: 1.5; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: #94a3b8; margin-top: 8px; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .note { background: #fef3c7; color: #78350f; border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-top: 12px; }
+  .warn { background: #fee2e2; color: #7f1d1d; border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<h1>¿Cómo llegamos al 74.6% de ganadas?</h1>
+<div class="sub">EXP-076 · EURUSD OTC 60 segundos · datos reales del broker (2026-06-13 → 08-05)</div>
+
+<!-- ============ DIAGRAMA 1: EL EMBUDO ============ -->
+<div class="card">
+  <h2>1 · El embudo: solo se opera cuando DOS filtros dicen lo mismo</h2>
+  <svg viewBox="0 0 900 300" width="100%" xmlns="http://www.w3.org/2000/svg">
+    <!-- flechas del flujo -->
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#38bdf8"/>
+      </marker>
+    </defs>
+
+    <!-- entrada -->
+    <rect x="20" y="120" width="150" height="60" rx="10" fill="#334155" stroke="#64748b" stroke-width="2"/>
+    <text x="95" y="145" fill="#e2e8f0" font-size="13" text-anchor="middle" font-weight="bold">Todas las velas</text>
+    <text x="95" y="162" fill="#94a3b8" font-size="11" text-anchor="middle">76.835 velas de 60s</text>
+
+    <!-- flecha -->
+    <line x1="170" y1="150" x2="210" y2="150" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- filtro arcoiris -->
+    <rect x="215" y="90" width="180" height="120" rx="10" fill="#0c4a6e" stroke="#38bdf8" stroke-width="2"/>
+    <text x="305" y="120" fill="#7dd3fc" font-size="13" text-anchor="middle" font-weight="bold">Filtro 1: ARCOÍRIS</text>
+    <text x="305" y="140" fill="#bae6fd" font-size="11" text-anchor="middle">7 medias móviles apiladas</text>
+    <text x="305" y="156" fill="#bae6fd" font-size="11" text-anchor="middle">(5 → 320 periodos)</text>
+    <text x="305" y="176" fill="#bae6fd" font-size="11" text-anchor="middle">¿el precio tiene empuje?</text>
+    <text x="305" y="196" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="bold">solo si el arcoíris "abre" a favor</text>
+
+    <!-- flecha -->
+    <line x1="395" y1="150" x2="435" y2="150" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- filtro valvula -->
+    <rect x="440" y="90" width="180" height="120" rx="10" fill="#0c4a6e" stroke="#38bdf8" stroke-width="2"/>
+    <text x="530" y="120" fill="#7dd3fc" font-size="13" text-anchor="middle" font-weight="bold">Filtro 2: VÁLVULA K/D</text>
+    <text x="530" y="140" fill="#bae6fd" font-size="11" text-anchor="middle">Estocástico 14,3,3</text>
+    <text x="530" y="156" fill="#bae6fd" font-size="11" text-anchor="middle">(desvío 5)</text>
+    <text x="530" y="176" fill="#bae6fd" font-size="11" text-anchor="middle">¿el oscilador confirma?</text>
+    <text x="530" y="196" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="bold">bloquea si contradice</text>
+
+    <!-- flecha -->
+    <line x1="620" y1="150" x2="660" y2="150" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- salida -->
+    <rect x="665" y="110" width="215" height="80" rx="10" fill="#14532d" stroke="#4ade80" stroke-width="2"/>
+    <text x="772" y="140" fill="#86efac" font-size="13" text-anchor="middle" font-weight="bold">✅ SEÑAL DE OPERACIÓN</text>
+    <text x="772" y="160" fill="#bbf7d0" font-size="11" text-anchor="middle">1962 CALL · 1695 PUT</text>
+    <text x="772" y="176" fill="#bbf7d0" font-size="11" text-anchor="middle">(de 76.835 velas)</text>
+  </svg>
+
+  <p>La clave: cada filtro solo da ~48% (tirar una moneda). <b>Juntos</b> saltan a 59-61%. El edge está en la <b>combinación</b>, no en cada filtro.</p>
+  <div class="legend">
+    <span><span class="dot" style="background:#38bdf8"></span>Arcoíris: 7 medias apiladas</span>
+    <span><span class="dot" style="background:#4ade80"></span>Salida: señal confirmada</span>
+  </div>
+</div>
+
+<!-- ============ DIAGRAMA 2: EL TIMING ============ -->
+<div class="card">
+  <h2>2 · El timing real del broker (la deuda que cerró este experimento)</h2>
+  <svg viewBox="0 0 900 230" width="100%" xmlns="http://www.w3.org/2000/svg">
+    <!-- linea de tiempo -->
+    <line x1="40" y1="130" x2="860" y2="130" stroke="#64748b" stroke-width="2"/>
+    <!-- puntos -->
+    <circle cx="100" cy="130" r="10" fill="#38bdf8"/>
+    <circle cx="420" cy="130" r="10" fill="#f59e0b"/>
+    <circle cx="740" cy="130" r="10" fill="#4ade80"/>
+
+    <!-- etiquetas -->
+    <text x="100" y="110" fill="#7dd3fc" font-size="12" text-anchor="middle" font-weight="bold">SEÑAL en T</text>
+    <text x="100" y="165" fill="#94a3b8" font-size="11" text-anchor="middle">el gate detecta la oportunidad</text>
+
+    <text x="420" y="110" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="bold">ENTRADA en T+300s</text>
+    <text x="420" y="165" fill="#94a3b8" font-size="11" text-anchor="middle">el broker tarda ~300s en ejecutar</text>
+
+    <text x="740" y="110" fill="#86efac" font-size="12" text-anchor="middle" font-weight="bold">RESULTADO en T+1200s</text>
+    <text x="740" y="165" fill="#94a3b8" font-size="11" text-anchor="middle">entrada + 900s de duración del contrato</text>
+
+    <!-- flecha entre señal y entrada -->
+    <text x="260" y="120" fill="#e2e8f0" font-size="11" text-anchor="middle">⏳ 300s demora del broker</text>
+    <text x="580" y="120" fill="#e2e8f0" font-size="11" text-anchor="middle">⏳ 900s duración del contrato</text>
+
+    <!-- box conclusion -->
+    <rect x="250" y="185" width="400" height="35" rx="8" fill="#14532d" stroke="#4ade80" stroke-width="1.5"/>
+    <text x="450" y="207" fill="#bbf7d0" font-size="12" text-anchor="middle">✅ La demora de ~300s NO mata el edge: el WR sigue enorme</text>
+  </svg>
+  <p>Antes pensábamos que la demora del broker podía arruinar la señal. Este experimento la midió de verdad: <b>la señal sobrevive</b> a la demora real.</p>
+</div>
+
+<!-- ============ DIAGRAMA 3: LAS BARRAS ============ -->
+<div class="card">
+  <h2>3 · Los números, comparados</h2>
+  <svg viewBox="0 0 900 320" width="100%" xmlns="http://www.w3.org/2000/svg">
+    <!-- ejes -->
+    <line x1="60" y1="40" x2="60" y2="260" stroke="#64748b" stroke-width="2"/>
+    <line x1="60" y1="260" x2="880" y2="260" stroke="#64748b" stroke-width="2"/>
+    <!-- escalas -->
+    <text x="50" y="264" fill="#94a3b8" font-size="11" text-anchor="end">0%</text>
+    <text x="50" y="186" fill="#94a3b8" font-size="11" text-anchor="end">50%</text>
+    <text x="50" y="130" fill="#94a3b8" font-size="11" text-anchor="end">60%</text>
+    <text x="50" y="70"  fill="#94a3b8" font-size="11" text-anchor="end">75%</text>
+    <line x1="55" y1="186" x2="880" y2="186" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <text x="870" y="182" fill="#f87171" font-size="11" text-anchor="end">⚖ breakeven = 54% (payout 85%)</text>
+
+    <!-- barra valvula sola -->
+    <rect x="90" y="193" width="110" height="67" rx="4" fill="#64748b"/>
+    <text x="145" y="252" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="bold">Válvula sola</text>
+    <text x="145" y="268" fill="#94a3b8" font-size="11" text-anchor="middle">≈48% · moneda</text>
+    <text x="145" y="175" fill="#e2e8f0" font-size="14" text-anchor="middle" font-weight="bold">48%</text>
+
+    <!-- barra composicion -->
+    <rect x="280" y="127" width="110" height="133" rx="4" fill="#38bdf8"/>
+    <text x="335" y="252" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="bold">Comp. M15</text>
+    <text x="335" y="268" fill="#94a3b8" font-size="11" text-anchor="middle">(EXP-077)</text>
+    <text x="335" y="118" fill="#7dd3fc" font-size="14" text-anchor="middle" font-weight="bold">59-61%</text>
+
+    <!-- barra OTC puro -->
+    <rect x="470" y="44" width="110" height="216" rx="4" fill="#4ade80"/>
+    <text x="525" y="252" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="bold">OTC 60s puro</text>
+    <text x="525" y="268" fill="#94a3b8" font-size="11" text-anchor="middle">n=1962 · p≈0</text>
+    <text x="525" y="36" fill="#86efac" font-size="18" text-anchor="middle" font-weight="bold">74.6%</text>
+
+    <!-- callout -->
+    <rect x="630" y="60" width="240" height="90" rx="10" fill="#14532d" stroke="#4ade80" stroke-width="1.5"/>
+    <text x="750" y="85" fill="#bbf7d0" font-size="12" text-anchor="middle" font-weight="bold">El 74.6% es de esta rama</text>
+    <text x="750" y="104" fill="#bbf7d0" font-size="11" text-anchor="middle">mismo gate (arcoíris+válvula)</text>
+    <text x="750" y="120" fill="#bbf7d0" font-size="11" text-anchor="middle">pero calculado sobre velas 60s</text>
+    <text x="750" y="140" fill="#fbbf24" font-size="11" text-anchor="middle" font-weight="bold">+20 pts sobre breakeven</text>
+  </svg>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#64748b"></span>Un filtro solo (sin edge)</span>
+    <span><span class="dot" style="background:#38bdf8"></span>Composición M15 (histórico)</span>
+    <span><span class="dot" style="background:#4ade80"></span>OTC 60s con timing real (EXP-076)</span>
+  </div>
+</div>
+
+<!-- ============ DIAGRAMA 4: LAS DOS RAMAS ============ -->
+<div class="card">
+  <h2>4 · La parte incómoda: qué se midió y qué NO</h2>
+  <svg viewBox="0 0 900 250" width="100%" xmlns="http://www.w3.org/2000/svg">
+    <!-- rama 1 -->
+    <rect x="40" y="30" width="400" height="90" rx="10" fill="#1e293b" stroke="#f87171" stroke-width="2"/>
+    <text x="240" y="55" fill="#f87171" font-size="13" text-anchor="middle" font-weight="bold">Rama A: comp. M15 → OTC 60s</text>
+    <text x="240" y="75" fill="#e2e8f0" font-size="12" text-anchor="middle">mapear la señal M15 exacta al timing real</text>
+    <text x="240" y="95" fill="#fca5a5" font-size="13" text-anchor="middle" font-weight="bold">❌ n = 0 · no hubo match de velas</text>
+    <text x="240" y="112" fill="#94a3b8" font-size="11" text-anchor="middle">faltaron 1107 señales CALL y 1182 PUT</text>
+
+    <!-- rama 2 -->
+    <rect x="460" y="30" width="400" height="90" rx="10" fill="#14532d" stroke="#4ade80" stroke-width="2"/>
+    <text x="660" y="55" fill="#86efac" font-size="13" text-anchor="middle" font-weight="bold">Rama B: gate sobre velas 60s OTC</text>
+    <text x="660" y="75" fill="#e2e8f0" font-size="12" text-anchor="middle">el MISMO arcoíris+válvula, pero directo en 60s</text>
+    <text x="660" y="95" fill="#4ade80" font-size="13" text-anchor="middle" font-weight="bold">✅ CALL 74.6% · PUT 67.0%</text>
+    <text x="660" y="112" fill="#94a3b8" font-size="11" text-anchor="middle">n=1962 / 1695 · p≈0 · supera breakeven</text>
+
+    <!-- conclusion -->
+    <rect x="40" y="145" width="820" height="85" rx="10" fill="#0f172a" border="1" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="450" y="170" fill="#fbbf24" font-size="13" text-anchor="middle" font-weight="bold">¿Qué significa en criollo?</text>
+    <text x="450" y="190" fill="#e2e8f0" font-size="12" text-anchor="middle">→ La hipótesis de TIMING quedó confirmada: el gate + la demora real del broker siguen dando un WR enorme.</text>
+    <text x="450" y="208" fill="#e2e8f0" font-size="12" text-anchor="middle">→ El 74.6% NO es la señal M15 exacta todavía: esa rama no produjo eventos.</text>
+    <text x="450" y="224" fill="#fbbf24" font-size="12" text-anchor="middle" font-weight="bold">→ Por eso CICLO-001 = CONTINUAR (no PROMOVER), y falta validación en vivo.</text>
+  </svg>
+
+  <div class="warn">⚠ <b>Por qué el 74.6% no es "misión cumplida":</b> viene de la señal 60s pura con timing real, no de la composición M15 exacta. El dictamen fue CONTINUAR — el siguiente paso es validar en cuenta demo REAL+OTC y ver si el número aguanta en el mundo real.</div>
+</div>
+
+</body>
+</html>

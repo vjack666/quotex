@@ -1,0 +1,20 @@
+{
+  "config": {
+    "kd_distance": 2.0,
+    "dwell_cerebro": 1,
+    "cross_limpieza_ok": true
+  },
+  "train": {
+    "total": 79158,
+    "entrada_count": 59734,
+    "entrada_rate": 0.7546173475833143
+  },
+  "test": {
+    "total": 33925,
+    "entrada_count": 25697,
+    "entrada_rate": 0.7574649963154017
+  },
+  "delta": 0.0028476487320873156,
+  "stable": true,
+  "conclusion": "ESTABLE"
+}

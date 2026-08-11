@@ -7,6 +7,59 @@
 
 ---
 
+## ⭐ SESIÓN 2026-08-08 — AUDITORÍA FUNNEL 5m/M15 (freno+arcoíris+estocástico) — CIERRE
+
+**LEER PRIMERO al retomar.** Hoy se auditaron combinaciones de freno + arcoíris + estocástico
+en M5 y M15 con entry/exit en 5min y señal a 15min de expiración, por petición del Trader-Humano.
+Autonomía de 30min sin preguntas para llegar a 60% WR (NO alcanzado).
+
+### Qué se hizo
+1. **EXP-FUNNEL-5M** (freno+arcoíris+estocástico, M5, 30 combos sistemáticos): WR 44-52% en
+   8 datasets (EURUSD 2022/23/24/25, XAUUSD 2020/21/23/24) → **REFUTADO** (moneda). El experimento
+   especial (freno→arcoíris full→salida estocástica→15min) dio 45-49%. BUG corregido: exit_off 2→3
+   (15min real) y scross N=0 (gate inicial bloqueaba re-chequeo). Reporte: `reports/AUDITORIA_FUNNEL/exp_funnel_5m.md`.
+2. **EXP-MTF** (arcoíris M15 como filtro de tendencia + trigger M5): 9 modos en `audit_multitf.py`
+   + 4 modos M15 puro en `audit_m15_pure.py`. 4 datasets (EURUSD 2023/24, XAUUSD 2023/24).
+   Máximo robusto = **56-57%** (mtf_cross_ema / mtf_cross_ema_s, XAUUSD 2024, n>700, p<0.0002).
+   Con expiración real 15min (xo=3) TODO cae a 48-52% (moneda). **NO se llegó a 60%.**
+   Reporte: `reports/AUDITORIA_FUNNEL/exp_mtf.md`.
+3. **Contexto previo confirmado**: el arcoíris M15 dio 71% en EXP-EDF-04 COMO GATE del Edificio
+   (embudo P1→P2→P3 validado). Aislado o con triggers M5 su edge se diluye a 54-57%. La diferencia
+   es la ESTRUCTURA del Edificio, no los indicadores.
+
+### Decisión tomada
+- El límite honesto de "indicadores en M5/M15 sin el embudo del Edificio" es ~57% WR.
+- Para 60%+ en datos reales, la vía es recuperar la ESTRUCTURA del Edificio (indicadores como
+  filtros DENTRO del embudo P1→P2→P3 ya validado), no como señal independiente.
+
+### Dónde quedamos
+- La rama M5/M15 aislada está Agotada (moneda o techo 57%). No seguir por ahí.
+- Abierta la rama: arcoíris M15 + embudo P1→P2→P3 del Edificio (replicar EXP-EDF-04 pero con
+  freno/arcoíris/estocástico como filtros del Edificio, no señal suelta). Pendiente OK del TH.
+
+### Archivos clave de la sesión (SIN commitear — ver bloqueo abajo)
+- `scripts/audit_funnel_5m.py` (30 combos M5, freno+arcoíris+estocástico)
+- `scripts/audit_multitf.py` (9 modos M15→M5)
+- `scripts/audit_m15_pure.py` (4 modos M15 puro)
+- `scripts/audit_edificio_funnel.py`, `audit_exp_edf.py`, `exp_funnel_b.py`, `exp_funnel_valvula.py` (base)
+- `reports/AUDITORIA_FUNNEL/{exp_funnel_5m.md, exp_mtf.md, exp_valvula_P3.md, exp040_motor_real_m15_m5.md, exp_edf_*.md}`
+- Mis modifs (validadas 21 passed): `src/edificio_contratacion.py` (fix P2→P3 + válvula [NO ADOPTADO]),
+  `src/config.py` (flags EDIFICIO_P3_* [NO ADOPTADO]), `tests/test_edificio_contratacion.py`.
+
+### ⚠ BLOQUEO DE COMMIT (heredado, NO de esta sesión)
+- 3 archivos en conflicto de merge sin resolver BLOQUEAN cualquier commit:
+  `specs/lab_protocolo_cientifico/EXP-EDIFICIO-NN-SCORE/{HANDS_FREE_ORDER,design,validation}.md`
+  (del push pendiente de la sesión 2026-08-07, ya documentado como "PUSH PENDIENTE divergencia remoto").
+- NO se resolvieron (trabajo ajeno, protocolo CLOSE: no tocar trabajo ajeno). Mi trabajo de la
+  sesión quedó SIN commitear (scripts/reports staged pero commit bloqueado por los U files).
+- Al retomar: el usuario debe resolver esos 3 conflictos (o `git merge --abort` / rebase) ANTES de
+  poder commitear el trabajo de hoy. NO push sin OK.
+- `init.ps1` en rojo: 22 tests rotos, TODOS del bot STRAT-F (`test_executor`, `test_consolidation_bot`,
+  `test_session_lifecycle`, etc.), PRE-EXISTENTES (heredados, no causados por esta sesión).
+  `test_edificio_contratacion.py` = 21 passed (lo único que esta sesión tocó).
+
+---
+
 ## ⭐ ESTADO ACTUAL (2026-08-06) — LEER PRIMERO
 
 ### Qué se hizo (sesión 2026-08-06 tarde — paradigma Wyckoff + freno científico)

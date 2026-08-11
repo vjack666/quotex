@@ -764,20 +764,20 @@ Visualización de estocástico en vivo en dashboard del hub.
 
 ---
 
-## 2026-07-31 � Purga de estrategias muertas: solo Edificio operativo
+## 2026-07-31 � Purga de estrategias muertas: solo Edificio operativo
 
-**Qu� se hizo:**
-- STRAT-F apagada por config (STRAT_F_ENABLED=False, STRAT_F_ONLY=False). �nica estrategia viva: Edificio (flags propios brake/extreme/cross/stoch M15 en scanner).
+**Qu� se hizo:**
+- STRAT-F apagada por config (STRAT_F_ENABLED=False, STRAT_F_ONLY=False). �nica estrategia viva: Edificio (flags propios brake/extreme/cross/stoch M15 en scanner).
 - Respaldo completo en C:\Users\v_jac\Desktop\respaldo quotex (snapshot sin .git/runtime + specs/ archivadas).
 - Limpieza del repo: 19 docs muertos fuera, specs/ completa fuera, 86 tests de estrategias fuera (quedan 54).
 - Hub: eliminado el cuadro ? Madurando (index.html + JS + server.py).
 - feature_list.json reconstruido: 10 features (cadena edificio + infra), validado por init.ps1.
 - init.ps1: fix encoding utf-8 al leer feature_list.json.
 
-**Verificaci�n:**
+**Verificaci�n:**
 - 58 tests de la cadena del edificio en verde (test_edificio_*, connection, stochastic_m15).
 - Imports OK de la cadena completa + hub.
-- 41 fallos de tests restantes: PRE-EXISTENTES (verificado con git stash: id�nticos con y sin la purga; deuda de cambios ajenos sin commitear en scanner/executor).
+- 41 fallos de tests restantes: PRE-EXISTENTES (verificado con git stash: id�nticos con y sin la purga; deuda de cambios ajenos sin commitear en scanner/executor).
 
 **Estado final:** solo el Edificio operativo, respaldo a salvo en Desktop, repo limpio.
 
@@ -817,4 +817,33 @@ más historia o datos OTC para validación temporal.
 
 Commits de la sesión: efa212b, 76d467b, d696aba, ca8035f, c4ecb42, d4a8a2b (fix).
 Todo pusheado. Estado final: repo limpio (solo archivos ajenos sin commitear de
-sesiones previas, fuera de alcance).
+
+---
+
+## 2026-08-08 — AUDITORÍA FUNNEL 5m/M15 (freno+arcoíris+estocástico) — CIERRE
+
+**Objetivo:** auditoría funnel de freno+arcoíris+estocástico en M5/M15 (entry/exit 5min, señal 15min),
+pedido por el Trader-Humano. Autonomía 30min sin preguntas para llegar a 60% WR.
+
+**Hecho:**
+1. EXP-FUNNEL-5M: 30 combos M5 (freno/arcoíris/estocástico). 8 datasets (EURUSD 22-25, XAUUSD
+   20/21/23/24). WR 44-52% → REFUTADO (moneda). Exp especial C00 (freno→arcoíris full→salida
+   estocástica→15min) = 45-49%. Bugs corregidos: exit_off 2→3 (15min), scross N=0.
+   Reporte: `reports/AUDITORIA_FUNNEL/exp_funnel_5m.md`.
+2. EXP-MTF: arcoíris M15 como filtro de tendencia + trigger M5. 9 modos (`audit_multitf.py`) +
+   4 modos M15 puro (`audit_m15_pure.py`). 4 datasets. Máximo robusto = 56-57% (mtf_cross_ema/
+   mtf_cross_ema_s, XAUUSD 2024, n>700, p<0.0002). A 15min real cae a 48-52%. NO se llegó a 60%.
+   Reporte: `reports/AUDITORIA_FUNNEL/exp_mtf.md`.
+
+**Decisión:** el límite de "indicadores M5/M15 sin el embudo del Edificio" es ~57% WR. Para 60%+
+hay que recuperar la ESTRUCTURA del Edificio (P1→P2→P3). Rama M5/M15 aislada AGOTADA.
+
+**Archivos (SIN commitear — bloqueo heredado):** scripts/audit_{funnel_5m,multitf,m15_pure,
+edificio_funnel,exp_edf}.py, exp_funnel_{b,valvula}.py; reports/AUDITORIA_FUNNEL/*.md;
+src/edificio_contratacion.py (fix P2→P3 + válvula [NO ADOPTADO]), src/config.py,
+tests/test_edificio_contratacion.py (21 passed).
+
+**Bloqueo de commit:** 3 conflictos sin resolver en `specs/lab_protocolo_cientifico/EXP-EDIFICIO-NN-SCORE/*.md`
+(heredados de la sesión 2026-08-07, push pendiente). Bloquean cualquier commit. NO resueltos
+(trabajo ajeno). init.ps1 rojo por 22 tests rotos PRE-EXISTENTES del bot STRAT-F (no de esta sesión).
+Al retomar: resolver los 3 conflictos antes de commitear el trabajo de hoy. NO push sin OK.

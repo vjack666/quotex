@@ -54,7 +54,7 @@
 | `docs/engram.md` | Memoria persistente Engram (MCP) + notificaciones | Al iniciar sesión / tras decisiones |
 | `.cursor/mcp.json` | Servidor MCP Engram (proyecto) | Tras `.\scripts\install-engram.ps1` |
 | `scripts/notify-attention.ps1` | Ventana modal cuando el agente necesita al humano | Leader al llegar a puerta SDD o cierre |
-| `.claude/agents/` | Definiciones de subagentes (leader, spec_author, implementer, reviewer) | Si orquestas trabajo |
+| `.claude/agents/` | Definiciones de agentes: `CEO.md` (jefe del equipo, dirige a leader), `leader.md` (orquestador técnico), `spec_author`, `implementer`, `reviewer` + `CEO_MANDATE.md` (contrato Cliente→CEO) | Si orquestas trabajo |
 | `src/` | Código fuente del bot | Para implementar |
 | `hub/` | Dashboard de monitoreo | Para modificar |
 | `tests/` | Tests automáticos | Para verificar |
