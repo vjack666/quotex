@@ -61,7 +61,7 @@ from hub.strat_f_panel import StratFPanel
 from maturing_watchlist import MaturingWatchlist
 from maturing_watcher import MaturingWatcher
 from edificio_contratacion import get_edificio, reset_edificio
-from live_backfill import LiveBackfill, MARGEN_PRE_SCAN_SEC
+from live_backfill import LiveBackfill
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 if hasattr(_stdout_handler.stream, "reconfigure"):
@@ -809,10 +809,12 @@ async def main(
             try:
                 # LiveBackfill: aprovechar la ventana de sueño para descargar
                 # velas históricas (mismo socket, nunca pisa el scan).
+                # work_window descuenta MARGEN_PRE_SCAN_SEC internamente; acá
+                # NO se resta de nuevo (el doble descuento dejaba ventanas de
+                # ~10s que cortaban antes de descargar nada).
                 _bf = getattr(bot, "_backfill", None)
                 if _bf is not None and _bf.quedan_pares():
-                    _ventana = max(5.0, sleep_for - MARGEN_PRE_SCAN_SEC)
-                    await _bf.work_window(_ventana)
+                    await _bf.work_window(sleep_for)
                     if ALIGN_SCAN_TO_CANDLE:
                         sleep_for = seconds_until_next_scan(time.time())
                     else:

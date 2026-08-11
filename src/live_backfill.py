@@ -50,7 +50,10 @@ DEFAULT_ASSETS: List[str] = [
 
 # Máximo tiempo por par y margen de seguridad antes del próximo scan.
 TIMEOUT_PAR_SEC = 100.0
-MARGEN_PRE_SCAN_SEC = 10.0
+# Colchón mínimo para no pisar el scan del bot. El main loop NUNCA descuenta
+# este margen (lo hace work_window internamente): así el margen se aplica una
+# sola vez, sin importar quién invoque work_window.
+MARGEN_PRE_SCAN_SEC = 3.0
 # Intentos antes de descartar un par imposible (activo no listado, etc.).
 MAX_REINTENTOS_PAR = 3
 
@@ -91,6 +94,7 @@ class LiveBackfill:
         self._estado_path = self.out_dir / "estado.json"
         self._hechos: set[str] = set()
         self._fallidos: dict[str, int] = {}
+        self._progreso: dict[str, dict] = {}  # clave asset|tf -> {"next_end": ts}
         self._pendientes: List[Tuple[str, int]] = []
         self._cargar_estado()
         self._armar_cola(assets)
@@ -105,17 +109,23 @@ class LiveBackfill:
                     data = json.load(f)
                 self._hechos = set(data.get("hechos", []))
                 self._fallidos = {k: int(v) for k, v in data.get("fallidos", {}).items()}
+                self._progreso = data.get("progreso", {}) or {}
         except Exception as exc:  # noqa: BLE001
             log.warning("[BACKFILL] estado.json corrupto, arrancando limpio: %s", exc)
             self._hechos = set()
             self._fallidos = {}
+            self._progreso = {}
 
     def _guardar_estado(self) -> None:
         try:
             tmp = self._estado_path.with_suffix(".tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(
-                    {"hechos": sorted(self._hechos), "fallidos": self._fallidos},
+                    {
+                        "hechos": sorted(self._hechos),
+                        "fallidos": self._fallidos,
+                        "progreso": self._progreso,
+                    },
                     f, ensure_ascii=False, indent=1,
                 )
             tmp.replace(self._estado_path)
@@ -153,8 +163,16 @@ class LiveBackfill:
         """Descarga pares durante la ventana libre entre scans.
 
         SOLO debe llamarse desde el main loop (nunca como task suelta):
-        mientras corre, el socket está ocupado. Devuelve el control con
-        margen antes de que el loop vuelva a escanear.
+        mientras corre, el socket está ocupado. work_window descuenta
+        MARGEN_PRE_SCAN_SEC internamente (el caller NO debe hacerlo) y
+        devuelve el control antes de que el loop vuelva a escanear.
+
+        Resultados de _descargar_par:
+          - "ok": CSV completo -> pasa a hechos.
+          - "progreso": hubo avance pero la ventana se acabó -> se guarda
+            next_end y el par queda para la próxima ventana SIN contar fallo.
+          - "error": fallo real (activo no listado, sin historia) -> rotar con
+            contador; tras MAX_REINTENTOS_PAR se descarta definitivamente.
         """
         deadline = time.monotonic() + max(max_seconds, 0.0)
         while self._pendientes:
@@ -162,13 +180,15 @@ class LiveBackfill:
             if remaining <= MARGEN_PRE_SCAN_SEC:
                 break
             asset, tf = self._pendientes[0]
-            ok = await self._descargar_par(asset, tf, max_sec=remaining)
-            if ok:
+            clave = f"{asset}|{tf}"
+            resultado = await self._descargar_par(asset, tf, max_sec=remaining)
+            if resultado == "ok":
                 self._pendientes.pop(0)
-                self._hechos.add(f"{asset}|{tf}")
+                self._hechos.add(clave)
+                self._progreso.pop(clave, None)
                 self._guardar_estado()
-            else:
-                clave = f"{asset}|{tf}"
+                continue
+            if resultado == "error":
                 reintentos = self._fallidos.get(clave, 0)
                 if reintentos >= MAX_REINTENTOS_PAR:
                     # Descartar definitivamente: no rotar infinitamente un par
@@ -178,10 +198,14 @@ class LiveBackfill:
                         asset, tf, reintentos,
                     )
                     self._pendientes.pop(0)
+                    self._progreso.pop(clave, None)
+                    self._guardar_estado()
                 else:
                     # Reintentar en una ventana futura sin bloquear el resto.
                     self._pendientes.append(self._pendientes.pop(0))
                     await asyncio.sleep(0.5)
+            else:  # "progreso": no cuenta como fallo, retoma en la próxima ventana
+                self._pendientes.append(self._pendientes.pop(0))
                 if time.monotonic() >= deadline:
                     break
 
@@ -190,10 +214,12 @@ class LiveBackfill:
     def _csv_path(self, asset: str, tf: int) -> Path:
         return self.out_dir / f"{asset}_{tf}s.csv"
 
-    async def _descargar_par(self, asset: str, tf: int, max_sec: float) -> bool:
+    async def _descargar_par(self, asset: str, tf: int, max_sec: float) -> str:
+        """Devuelve "ok" (CSV completo), "progreso" (ventana corta, hay next_end)
+        o "error" (fallo real: activo no listado / sin historia)."""
         path = self._csv_path(asset, tf)
         if path.exists():
-            return True
+            return "ok"
         dias = next((d for (t, d) in TFS if t == tf), 1)
         total_deseadas = max(1, int(86400 * dias / tf))
         # El broker responde ~200 velas por request; paginamos hacia atrás.
@@ -206,11 +232,14 @@ class LiveBackfill:
         timeout = min(TIMEOUT_PAR_SEC, max(5.0, max_sec - MARGEN_PRE_SCAN_SEC))
         deadline = time.monotonic() + timeout
         velas: dict[int, dict] = {}
-        end_time = time.time()
+        # Resumible: si la ventana anterior se cortó a mitad, retomamos desde
+        # el ts más viejo ya bajado (next_end) en vez de volver a pedir todo.
+        clave = f"{asset}|{tf}"
+        prog = self._progreso.get(clave) or {}
+        end_time = prog.get("next_end") or time.time()
         try:
             while len(velas) < total_deseadas and time.monotonic() < deadline:
-                restantes = total_deseadas - len(velas)
-                offset = min(chunk, restantes)
+                offset = chunk
                 remaining = deadline - time.monotonic()
                 if remaining <= MARGEN_PRE_SCAN_SEC:
                     break
@@ -220,6 +249,7 @@ class LiveBackfill:
                         timeout=min(30.0, max(2.0, remaining)),
                     )
                 if not datos:
+                    # El broker no tiene más historia hacia atrás.
                     break
                 n_bajadas = 0
                 for c in datos:
@@ -227,10 +257,12 @@ class LiveBackfill:
                         velas[int(c["time"])] = c
                         n_bajadas += 1
                 # Retroceder al hueco anterior para la siguiente página.
+                # OJO: el broker devuelve ~199 velas por request (no 200):
+                # por eso NO cortamos con n_bajadas < offset — solo con vacío.
                 ts_min = min(int(c["time"]) for c in datos if c.get("time"))
                 end_time = ts_min - tf
-                if n_bajadas < offset:
-                    break  # el broker no tiene más historia
+                if n_bajadas == 0:
+                    break
             # get_candles deja el stream abierto; cerrarlo para no ensuciar el
             # buzón del scan (el HTF/scan piden velas con el MISMO client).
             try:
@@ -238,17 +270,27 @@ class LiveBackfill:
             except Exception:
                 pass
         except asyncio.TimeoutError:
-            log.info("[BACKFILL] %s tf=%s: timeout (ventana corta) — reintento en próximo ciclo", asset, tf)
-            self._marcar_fallido(asset, tf, "timeout")
-            return False
+            log.info(
+                "[BACKFILL] %s tf=%s: request expiró (ventana corta) — retoma próximo ciclo",
+                asset, tf,
+            )
+            return self._guardar_progreso(asset, tf, velas, end_time)
         except Exception as exc:  # noqa: BLE001 — patrón replay: no tumba el bot
             log.warning("[BACKFILL] %s tf=%s: %s", asset, tf, exc)
             self._marcar_fallido(asset, tf, str(exc)[:60])
-            return False
+            return "error"
         if not velas:
             log.info("[BACKFILL] %s tf=%s: vacío — descartado", asset, tf)
             self._marcar_fallido(asset, tf, "empty")
-            return False
+            return "error"
+        if len(velas) < total_deseadas:
+            # No alcanzó la ventana completa (días pedidos): guardar progreso
+            # y retomar en una ventana futura. NO cuenta como fallo.
+            log.info(
+                "[BACKFILL] %s tf=%s: %d/%d velas — continúa en próximo ciclo",
+                asset, tf, len(velas), total_deseadas,
+            )
+            return self._guardar_progreso(asset, tf, velas, end_time)
         unicos: List[dict] = []
         for v_time in sorted(velas):
             c = velas[v_time]
@@ -270,12 +312,24 @@ class LiveBackfill:
         except Exception as exc:  # noqa: BLE001
             log.warning("[BACKFILL] %s tf=%s: no se pudo escribir CSV: %s", asset, tf, exc)
             self._marcar_fallido(asset, tf, "csv_write")
-            return False
+            return "error"
         log.info(
             "[BACKFILL] %s tf=%s -> %d velas (%s)",
             asset, tf, len(unicos), path.name,
         )
-        return True
+        return "ok"
+
+    def _guardar_progreso(self, asset: str, tf: int, velas: dict, end_time: float) -> str:
+        """Persiste el avance de una descarga incompleta y devuelve "progreso"."""
+        clave = f"{asset}|{tf}"
+        if not velas:
+            # No se bajó NADA en esta pasada pero tampoco es un error duro
+            # (ej. request expiró): guardar igual para no entrar en bucle.
+            self._progreso[clave] = {"next_end": end_time}
+        else:
+            self._progreso[clave] = {"next_end": end_time}
+        self._guardar_estado()
+        return "progreso"
 
     def _marcar_fallido(self, asset: str, tf: int, razon: str) -> None:
         clave = f"{asset}|{tf}"
