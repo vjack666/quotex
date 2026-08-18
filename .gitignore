@@ -27,6 +27,7 @@ session.json
 runtime/
 artifacts/
 reports/
+graphify-out/
 
 # OS / IDE
 .DS_Store
