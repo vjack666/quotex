@@ -24,7 +24,7 @@ Status: IN PROGRESS
 - [x] `src/strategies/` established
 - [x] `src/core/` established
 - [ ] `src/indicators/` established where shared analysis belongs
-- [ ] `src/execution/` established
+- [x] `src/execution/` established
 - [ ] `src/analytics/` established if justified
 - [ ] `src/lab/` boundaries documented and cleaned
 
@@ -109,7 +109,7 @@ Status: IN PROGRESS
 - [ ] Separate broker/order execution
 - [ ] Separate trade resolution
 - [ ] Separate martingale/session logic from execution
-- [ ] Establish `src/execution/`
+- [x] Establish `src/execution/`
 - [ ] Migrate consumers
 - [ ] Remove execution shims/legacy modules
 
