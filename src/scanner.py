@@ -1,9 +1,9 @@
 """Compatibility facade for the canonical scanner pipeline.
 
-The implementation lives in ``scan_pipeline.scanner`` while shared scanner
-contracts are exposed from dedicated pipeline modules.
+New code should depend on ``scan_pipeline.ScannerOrchestrator``. The legacy
+``AssetScanner`` symbol remains exported so existing callers keep working
+while the engine is decomposed internally.
 """
-from scan_pipeline.scanner import *  # noqa: F401,F403
-from scan_pipeline.result import ScanResult
+from scan_pipeline import AssetScanner, ScanCycleContext, ScanResult, ScannerOrchestrator
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+__all__ = ["AssetScanner", "ScannerOrchestrator", "ScanCycleContext", "ScanResult"]
