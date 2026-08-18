@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import List, Optional, Sequence
 
-from models import Candle
+from core.models import Candle
 
 # Umbrales por defecto (conservadores para OTC)
 DEFAULT_LOOKBACK = 20
