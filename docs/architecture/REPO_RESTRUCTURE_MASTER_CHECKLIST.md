@@ -16,7 +16,7 @@ Status: IN PROGRESS
 - [x] Harden `.gitignore` for generated runtime/test/tool caches
 - [ ] Audit remaining generated/cache artifacts
 - [ ] Audit large binaries/data accidentally tracked
-- [ ] Confirm `.gitignore` covers all generated runtime artifacts
+- [x] Confirm `.gitignore` covers the currently identified generated runtime artifacts
 
 ## 2. Canonical domains
 - [x] `src/data/` established
@@ -81,9 +81,10 @@ Status: IN PROGRESS
 - [ ] Remove root `models.py` shim after migration
 
 ## 8. Configuration
+- [x] Establish canonical `config/` namespace and runtime boundary without duplicating settings
 - [ ] Inventory all config consumers
 - [ ] Split operational config by responsibility
-- [ ] Preserve all existing values during structural split
+- [x] Preserve all existing values during the namespace/boundary introduction
 - [ ] Migrate consumers to canonical config namespaces
 - [ ] Remove redundant config aliases
 
