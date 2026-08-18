@@ -13,9 +13,10 @@ Status: IN PROGRESS
 - [x] Ignore generated Graphify output
 - [x] Remove generated `graphify-out/` from the current tree
 - [x] Remove obsolete `scanner_spec_only.patch`
+- [x] Harden `.gitignore` for generated runtime/test/tool caches
 - [ ] Audit remaining generated/cache artifacts
 - [ ] Audit large binaries/data accidentally tracked
-- [ ] Confirm `.gitignore` covers generated runtime artifacts
+- [ ] Confirm `.gitignore` covers all generated runtime artifacts
 
 ## 2. Canonical domains
 - [x] `src/data/` established
@@ -23,8 +24,7 @@ Status: IN PROGRESS
 - [x] `src/risk/` established
 - [x] `src/strategies/` established
 - [x] `src/core/` established
-- [ ] `src/indicators/` established where shared analysis belongs
-- [x] `src/execution/` established
+- [x] `src/indicators/` established
 - [ ] `src/analytics/` established if justified
 - [ ] `src/lab/` boundaries documented and cleaned
 
@@ -64,8 +64,9 @@ Status: IN PROGRESS
 - [x] Move Reversal Swing strategy implementation to `strategies/` with root shim
 - [x] Move Order Block strategy implementation to `strategies/` with root shim
 - [ ] Audit all strategy implementations for active/legacy status
-- [ ] Separate shared indicators from strategy-specific logic
-- [ ] Migrate shared stochastic logic to `indicators/`
+- [x] Establish shared stochastic indicator namespace without duplicating implementation
+- [ ] Separate remaining shared indicators from strategy-specific logic
+- [ ] Migrate shared stochastic consumers to `indicators.*`
 - [ ] Physically move STRAT-A implementation after dependency cleanup
 - [ ] Physically move STRAT-F implementation after dependency cleanup
 - [ ] Physically move remaining active strategies
