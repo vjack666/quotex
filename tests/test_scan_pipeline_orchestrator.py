@@ -12,8 +12,8 @@ def test_scanner_orchestrator_import_is_lazy(monkeypatch):
         def __init__(self, bot, executor):
             calls.append((bot, executor))
 
-        async def scan(self, *args, **kwargs):
-            return (args, kwargs)
+        async def scan_all(self):
+            return "scanned"
 
     fake_scanner.AssetScanner = FakeScanner
     monkeypatch.setitem(sys.modules, "scan_pipeline.scanner", fake_scanner)
@@ -22,4 +22,4 @@ def test_scanner_orchestrator_import_is_lazy(monkeypatch):
 
     orchestrator = ScannerOrchestrator("bot", "executor")
     assert calls == [("bot", "executor")]
-    assert asyncio.run(orchestrator.scan("asset", limit=1)) == (("asset",), {"limit": 1})
+    assert asyncio.run(orchestrator.scan_all()) == "scanned"
