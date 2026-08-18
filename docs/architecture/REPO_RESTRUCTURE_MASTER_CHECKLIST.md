@@ -71,8 +71,8 @@ Status: IN PROGRESS
 
 ## 7. Core/domain models
 - [x] Establish `core.models` compatibility namespace
-- [ ] Separate domain models from runtime config
-- [ ] Remove `models -> config` coupling where possible
+- [x] Separate domain defaults from runtime config
+- [x] Remove `models -> config` coupling where possible
 - [ ] Migrate consumers to `core.models`
 - [ ] Remove root `models.py` shim after migration
 
@@ -85,7 +85,7 @@ Status: IN PROGRESS
 
 ## 9. Scanner decomposition
 - [ ] Map every scanner responsibility
-- [ ] Extract data/prefetch responsibilities
+- [x] Extract data/prefetch responsibilities
 - [ ] Extract strategy dispatch
 - [ ] Extract decision/scoring calls
 - [ ] Extract journal/analytics side effects
