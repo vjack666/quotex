@@ -11,7 +11,7 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 
-from models import Candle
+from core.models import Candle
 
 
 def candles_to_dataframe(candles: list[Candle]) -> pd.DataFrame:
