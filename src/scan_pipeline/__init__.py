@@ -1,11 +1,16 @@
 """Canonical scanner pipeline API.
 
-The scanner implementation is owned by this package during the incremental
-refactor. Compatibility modules at ``src/scanner.py`` and ``src/scan_prefetch.py``
-remain only as import bridges for downstream callers.
+The package intentionally keeps scanner implementation imports lazy to avoid
+cycles between the compatibility facade and pipeline submodules.
 """
 from .context import ScanCycleContext
 from .result import ScanResult
-from .scanner import AssetScanner
 
 __all__ = ["AssetScanner", "ScanCycleContext", "ScanResult"]
+
+
+def __getattr__(name: str):
+    if name == "AssetScanner":
+        from .scanner import AssetScanner
+        return AssetScanner
+    raise AttributeError(name)
