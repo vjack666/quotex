@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, List, Optional
 
-from config import DURATION_SEC, MIN_PAYOUT
+from core.domain_defaults import DEFAULT_DURATION_SEC, DEFAULT_MIN_PAYOUT
 
 
 @dataclass
@@ -17,7 +17,7 @@ class Candle:
     high: float
     low: float
     close: float
-    ticks: int = 0  # número de ticks/operaciones que formaron la vela (Quotex lo envía; 0 si no disponible)
+    ticks: int = 0
 
     @property
     def body(self) -> float:
@@ -66,10 +66,10 @@ class CandidateEntry:
     mode: SignalMode = SignalMode.REBOUND
     candles_h1: List[Candle] = field(default_factory=list)
     candles_15m: List[Candle] = field(default_factory=list)
-    zone_confidence: Optional[float] = None  # Feature 28: salida cruda de la IA de Zonas
-    geometry: Optional[Any] = None  # Feature 29: contexto geométrico M15 (dict de market_geometry_ctx)
-    math_quality: Optional[dict] = None  # Feature: calidad geométrica (hurst/r2/angle/squeeze)
-    reject_reason: Optional[str] = None  # motivo de rechazo (p.ej. WEAK_LINE_STRENGTH)
+    zone_confidence: Optional[float] = None
+    geometry: Optional[Any] = None
+    math_quality: Optional[dict] = None
+    reject_reason: Optional[str] = None
 
     def __str__(self) -> str:
         bd = self.score_breakdown
@@ -104,12 +104,11 @@ class TradeState:
     stage: str = "initial"
     journal_id: int = 0
     strategy_origin: str = "STRAT-A"
-    duration_sec: int = DURATION_SEC
-    payout: int = MIN_PAYOUT
+    duration_sec: int = DEFAULT_DURATION_SEC
+    payout: int = DEFAULT_MIN_PAYOUT
     resolved: bool = False
     score_original: float = 0.0
     black_box_cid: int = 0
-    # Open-trades dict key (asset#duration). asset stays pure symbol.
     trade_key: str = ""
 
 
