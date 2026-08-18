@@ -1,19 +1,40 @@
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
 .env
+.env.*
+!.env.example
 data/
 log-*.txt
-sessions/
 *.log
+sessions/
 session.json
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 
-# Harness / agente
+# Browser / local profiles
+.pocket_profile/
+
+# Runtime / caches / generated artifacts
 *.tmp
 *.bak
+*.swp
+*.pma
+runtime/
+artifacts/
+reports/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Harness / agente
 progress/impl_*.md
 progress/review_*.md
 progress/spec_*.md
