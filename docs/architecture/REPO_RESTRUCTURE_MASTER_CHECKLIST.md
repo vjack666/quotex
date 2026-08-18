@@ -60,6 +60,9 @@ Status: IN PROGRESS
 - [x] Expose stochastic exhaustion
 - [x] Expose stochastic early alert
 - [x] Expose stochastic cross state
+- [x] Move Momentum strategy implementation to `strategies/` with root shim
+- [x] Move Reversal Swing strategy implementation to `strategies/` with root shim
+- [x] Move Order Block strategy implementation to `strategies/` with root shim
 - [ ] Audit all strategy implementations for active/legacy status
 - [ ] Separate shared indicators from strategy-specific logic
 - [ ] Migrate shared stochastic logic to `indicators/`
