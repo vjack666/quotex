@@ -4,10 +4,11 @@
 
 Reducir complejidad accidental sin cambiar la lógica de trading de forma silenciosa. Cada movimiento debe preservar imports, tests y comportamiento operativo.
 
-## Clasificación adoptada
+## Arquitectura objetivo
 
-- `src/decision/`: scoring final, vetos y política de aprobación.
-- `src/strategies/`: lógica específica de estrategias; solo se moverá después de verificar referencias.
+- `src/core/`: orquestación mínima y ciclo principal.
+- `src/decision/`: scoring, vetos y política de aprobación.
+- `src/strategies/`: lógica específica de estrategias.
 - `src/execution/`: broker, órdenes y lifecycle de trades.
 - `src/risk/`: Massaniello, sizing y límites de exposición.
 - `src/data/`: candles, conexión y caches de mercado.
@@ -23,32 +24,55 @@ Reducir complejidad accidental sin cambiar la lógica de trading de forma silenc
 4. No mezclar refactor estructural con cambios de estrategia.
 5. No mover datos runtime, logs, sesiones ni caches al repositorio.
 6. Cada lote de cambios debe poder revertirse mediante Git.
+7. Preferir cambios pequeños y verificables sobre una reescritura masiva.
 
-## Fase actual
+## Trabajo aplicado
 
-### Completado
+### Limpieza
 
-- Limpieza de perfiles/caches locales.
-- `graphify-out/` retirado y bloqueado por `.gitignore`.
+- Perfiles y caches locales eliminados.
+- `graphify-out/` bloqueado por `.gitignore`.
+- Caché de skills y configuración local de VS Code eliminadas.
+
+### Dominio decision
+
 - Creado `src/decision/`.
 - `entry_decision_engine.py` trasladado a `src/decision/entry_decision_engine.py`.
-- `src/entry_decision_engine.py` convertido en shim de compatibilidad para no romper consumidores existentes.
+- `src/entry_decision_engine.py` convertido en shim de compatibilidad.
+- `entry_scorer.py` permanece temporalmente en `src/` hasta completar el mapa de consumidores.
 
-### Siguiente lote
+### Dominio risk
 
-1. Mapear dependencias de `entry_scorer.py` y decidir si pertenece al mismo dominio `decision/`.
-2. Auditar `scanner.py` como orquestador de señales y reducir responsabilidades sin cambiar comportamiento.
-3. Separar módulos de ejecución, riesgo y datos solo cuando el grafo de imports lo permita.
-4. Revisar estrategias duplicadas/antiguas y retirar únicamente código sin consumidores.
-5. Revisar documentación duplicada (`Documentos/`, `docs/`, `progress/`, `agent/`) y conservar una única fuente de verdad por tema.
-6. Ejecutar la batería de tests y corregir imports después de cada lote.
+- Creado `src/risk/`.
+- `massaniello_engine.py` trasladado a `src/risk/massaniello_engine.py`.
+- `massaniello_risk.py` trasladado a `src/risk/massaniello_risk.py`.
+- Ambos módulos originales conservan shims para evitar romper consumidores durante la migración.
 
-## Hallazgos importantes
+## Auditoría de responsabilidades
 
-`entry_scorer.py` calcula/modula el score, mientras `entry_decision_engine.py` aplica vetos y clasifica A/B/C/REJECT. Son responsabilidades distintas aunque comparten umbrales. Por eso se agrupan en el dominio `decision`, pero no se fusionan todavía.
+### Scanner
 
-`scanner.py` concentra demasiadas responsabilidades: prefetch, evaluación de estrategias, radar, STRAT-F, journal, Edificio y selección/ejecución. Es el principal candidato a una segunda refactorización, pero requiere análisis de dependencias antes de partirlo.
+`scanner.py` concentra actualmente demasiadas responsabilidades: prefetch, evaluación de estrategias, radar, STRAT-F, journal, Edificio, scoring y selección/ejecución. No se moverá como bloque. Se extraerán responsabilidades por dependencia y con compatibilidad temporal.
+
+### Decision
+
+`entry_scorer.py` calcula/modula el score, mientras `entry_decision_engine.py` aplica vetos y clasifica A/B/C/REJECT. Son responsabilidades distintas aunque comparten umbrales. Se agrupan en el mismo dominio, pero no se fusionan.
+
+### Risk
+
+`massaniello_engine.py` contiene el cálculo puro/simulador; `massaniello_risk.py` contiene el estado de sesión y la integración operativa. Son complementarios, no duplicados, y ahora viven juntos bajo `src/risk/`.
+
+## Próximos lotes automáticos
+
+1. Mover `entry_scorer.py` a `src/decision/` con shim, después de verificar consumidores.
+2. Auditar y extraer de `scanner.py` únicamente prefetch/data y utilidades claramente independientes.
+3. Agrupar módulos de ejecución bajo `src/execution/` sin alterar el API público interno.
+4. Agrupar estrategias reales bajo `src/strategies/`, manteniendo shims mientras se actualizan consumidores.
+5. Detectar scripts duplicados y módulos sin consumidores; eliminar solo los demostrablemente muertos.
+6. Consolidar documentación duplicada entre `Documentos/`, `docs/`, `progress/` y `agent/`, conservando una fuente de verdad por tema.
+7. Actualizar README, comandos de arranque y configuración de agentes cuando termine la nueva estructura.
+8. Ejecutar tests/import checks después de cada lote.
 
 ## Criterio de finalización
 
-El repositorio estará ordenado cuando cada módulo tenga una responsabilidad principal clara, las dependencias fluyan hacia capas inferiores y no existan duplicados funcionales sin una razón explícita.
+El repositorio estará ordenado cuando cada módulo tenga una responsabilidad principal clara, las dependencias fluyan hacia capas inferiores, los imports legacy hayan desaparecido o estén explícitamente justificados y no existan duplicados funcionales sin una razón documentada.
